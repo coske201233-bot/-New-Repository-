@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>シフトマネジャー ご利用ガイド</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #0ea5e9;
+            --primary-dark: #0284c7;
+            --text-main: #1e293b;
+            --text-light: #64748b;
+            --bg-page: #ffffff;
+            --bg-card: #f8fafc;
+            --border-color: #e2e8f0;
+        }
+
+        @media print {
+            body {
+                padding: 0;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            .no-print {
+                display: none;
+            }
+            .page-container {
+                box-shadow: none;
+                border: none;
+            }
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: #f1f5f9;
+            color: var(--text-main);
+            line-height: 1.6;
+            padding: 40px 20px;
+        }
+
+        .page-container {
+            background-color: var(--bg-page);
+            padding: 60px;
+            max-width: 800px;
+            margin: 0 auto;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+
+        .app-icon {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 20px;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 15px -3px rgba(14, 165, 233, 0.3);
+        }
+
+        .app-icon svg {
+            width: 44px;
+            height: 44px;
+            fill: white;
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 12px;
+            letter-spacing: -0.025em;
+        }
+
+        .subtitle {
+            font-size: 18px;
+            color: var(--text-light);
+            font-weight: 500;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 40px;
+            margin-bottom: 50px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 50px;
+        }
+
+        .instructions-section {
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+        }
+
+        .instruction-item {
+            display: flex;
+            gap: 20px;
+        }
+
+        .step-number {
+            width: 36px;
+            height: 36px;
+            background-color: var(--primary);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            flex-shrink: 0;
+            font-size: 16px;
+        }
+
+        .step-content h3 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--text-main);
+        }
+
+        .step-content p {
+            font-size: 15px;
+            color: var(--text-light);
+        }
+
+        .qr-section {
+            background-color: var(--bg-card);
+            border: 2px solid var(--border-color);
+            border-radius: 24px;
+            padding: 30px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .qr-code-wrapper {
+            background-color: white;
+            padding: 12px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+            margin-bottom: 20px;
+        }
+
+        .qr-code-wrapper img {
+            width: 180px;
+            height: 180px;
+            display: block;
+        }
+
+        .url-text {
+            font-family: 'Inter', monospace;
+            font-size: 11px;
+            color: var(--primary-dark);
+            word-break: break-all;
+            background: rgba(14, 165, 233, 0.05);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+
+        .features-section {
+            margin-bottom: 50px;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .section-title::before, .section-title::after {
+            content: "";
+            height: 1px;
+            background-color: var(--border-color);
+            flex-grow: 1;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .feature-card {
+            background-color: var(--bg-card);
+            padding: 24px;
+            border-radius: 20px;
+            text-align: center;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .feature-icon {
+            font-size: 32px;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .feature-title {
+            font-weight: 700;
+            font-size: 16px;
+            margin-bottom: 10px;
+            display: block;
+            color: var(--text-main);
+        }
+
+        .feature-desc {
+            font-size: 13px;
+            color: var(--text-light);
+            line-height: 1.5;
+        }
+
+        .pwa-guide {
+            background: linear-gradient(to bottom right, #f8fafc, #eff6ff);
+            padding: 30px;
+            border-radius: 24px;
+            border: 1px solid #dbeafe;
+        }
+
+        .pwa-guide h3 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--primary-dark);
+        }
+
+        .device-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        .device-card h4 {
+            font-size: 15px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .device-card ul {
+            font-size: 14px;
+            color: var(--text-light);
+            padding-left: 18px;
+        }
+
+        .device-card ul li {
+            margin-bottom: 8px;
+        }
+
+        .footer {
+            margin-top: 60px;
+            text-align: center;
+            border-top: 1px solid var(--border-color);
+            padding-top: 30px;
+            font-size: 13px;
+            color: var(--text-light);
+        }
+
+        .print-btn {
+            position: fixed;
+            bottom: 40px;
+            right: 40px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 50px;
+            font-weight: 700;
+            font-size: 16px;
+            cursor: pointer;
+            box-shadow: 0 10px 15px -3px rgba(14, 165, 233, 0.4);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 100;
+            transition: transform 0.2s, background-color 0.2s;
+        }
+
+        .print-btn:hover {
+            transform: translateY(-2px);
+            background-color: var(--primary-dark);
+        }
+
+        .print-btn:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+
+    <button class="print-btn no-print" onclick="window.print()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+        このガイドを印刷する
+    </button>
+
+    <div class="page-container">
+        <div class="header">
+            <div class="app-icon">
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19,4H18V2H16V4H8V2H6V4H5A2,2,0,0,0,3,6V20a2,2,0,0,0,2,2H19a2,2,0,0,0,2-2V6A2,2,0,0,0,19,4Zm0,16H5V10H19ZM19,8H5V6H19Z"/></svg>
+            </div>
+            <h1>シフトマネジャー</h1>
+            <p class="subtitle">スタッフ専用アプリ ご利用の手引き</p>
+        </div>
+
+        <div class="main-grid">
+            <div class="instructions-section">
+                <div class="instruction-item">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>アプリにアクセスする</h3>
+                        <p>右側のQRコードをスマートフォンのカメラで読み取るか、URLを直接入力してブラウザで開いてください。</p>
+                    </div>
+                </div>
+                <div class="instruction-item">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>ホーム画面に追加する</h3>
+                        <p>「ホーム画面に追加」機能（方法は下部参照）を使うと、通常のアプリと同じ感覚でアイコンからすぐに起動できます。</p>
+                    </div>
+                </div>
+                <div class="instruction-item">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>ログインして利用開始</h3>
+                        <p>通知されたIDとパスワードでログインします。最新のシフト情報確認や休暇申請がここで行えます。</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="qr-section">
+                <div class="qr-code-wrapper">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://mobile-app-project-sigma.vercel.app" alt="App QR Code">
+                </div>
+                <p style="font-weight: 700; font-size: 14px; margin-bottom: 12px; color: var(--text-main);">スキャンして開始</p>
+                <div class="url-text">mobile-app-project-sigma.vercel.app</div>
+            </div>
+        </div>
+
+        <div class="features-section">
+            <div class="section-title">主な機能</div>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <span class="feature-icon">🗓️</span>
+                    <span class="feature-title">シフト確認</span>
+                    <span class="feature-desc">カレンダー形式でどこでも自分の勤務を確認。</span>
+                </div>
+                <div class="feature-card">
+                    <span class="feature-icon">📬</span>
+                    <span class="feature-title">休暇申請</span>
+                    <span class="feature-desc">スマホから簡単に希望休・有休の申請が可能。</span>
+                </div>
+                <div class="feature-card">
+                    <span class="feature-icon">👥</span>
+                    <span class="feature-title">当日の配置</span>
+                    <span class="feature-desc">当日のスタッフ配置や数もリアルタイムで把握。</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="pwa-guide">
+            <h3>
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                ホーム画面への追加方法
+            </h3>
+            <div class="device-grid">
+                <div class="device-card">
+                    <h4>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+                        iPhone (Safariの場合)
+                    </h4>
+                    <ul>
+                        <li>画面下中央の「共有ボタン」をタップ</li>
+                        <li>メニュー内の「ホーム画面に追加」を選択</li>
+                        <li>右上の「追加」をタップすれば完了です</li>
+                    </ul>
+                </div>
+                <div class="device-card">
+                    <h4>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+                        Android (Chromeの場合)
+                    </h4>
+                    <ul>
+                        <li>右上の「メニューボタン(3つの点)」をタップ</li>
+                        <li>「ホーム画面に追加」または「アプリをインストール」を選択</li>
+                        <li>ポップアップの「追加」をタップすれば完了です</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>&copy; 2026 シフトマネジャー システム事務局</p>
+            <p style="margin-top: 5px;">※ ログイン情報に不備がある場合は、システム管理者までご連絡ください。</p>
+        </div>
+    </div>
+
+</body>
+</html>

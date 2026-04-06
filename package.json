@@ -1,0 +1,47 @@
+{
+  "name": "mobile-app-project",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "build": "expo export --platform web"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^3.0.57",
+    "@expo/metro-runtime": "~6.1.2",
+    "@google/generative-ai": "^0.24.1",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@supabase/supabase-js": "^2.99.3",
+    "ai": "^6.0.145",
+    "expo": "~54.0.33",
+    "expo-document-picker": "~14.0.8",
+    "expo-file-system": "~19.0.21",
+    "expo-linking": "~8.0.11",
+    "expo-print": "~15.0.8",
+    "expo-router": "~6.0.23",
+    "expo-sharing": "~14.0.8",
+    "expo-status-bar": "~3.0.9",
+    "lucide-react-native": "^0.473.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-calendars": "^1.1307.0",
+    "react-native-qrcode-svg": "^6.3.21",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.16.0",
+    "react-native-svg": "15.12.1",
+    "react-native-url-polyfill": "^3.0.0",
+    "react-native-web": "^0.21.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@expo/ngrok": "^4.1.3",
+    "@types/react": "~19.0.0",
+    "babel-preset-expo": "~14.0.0",
+    "typescript": "~5.8.2"
+  },
+  "private": true
+}

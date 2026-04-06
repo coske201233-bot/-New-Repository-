@@ -1,0 +1,157 @@
+import { supabase } from './supabase';
+import { Alert } from 'react-native';
+
+// Helpers to map between camelCase (JS) and snake_case (SQL)
+const mapToSql = (obj: any, mapping: Record<string, string>) => {
+  const result: any = {};
+  for (const key in obj) {
+    const sqlKey = mapping[key] || key;
+    result[sqlKey] = obj[key];
+  }
+  return result;
+};
+
+const mapFromSql = (obj: any, mapping: Record<string, string>) => {
+  const result: any = {};
+  // Reverse the mapping
+  const reverseMapping: Record<string, string> = {};
+  for (const key in mapping) reverseMapping[mapping[key]] = key;
+
+  for (const key in obj) {
+    const jsKey = reverseMapping[key] || key;
+    result[jsKey] = obj[key];
+  }
+  return result;
+};
+
+const STAFF_MAP = { noHoliday: 'no_holiday', createdAt: 'created_at', isApproved: 'is_approved', pin: 'pin' };
+const REQ_MAP = { staffName: 'staff_name', createdAt: 'created_at' };
+const MSG_MAP = { fromId: 'from_id', fromName: 'from_name', toId: 'to_id', createdAt: 'created_at' };
+
+export const cloudStorage = {
+  // --- Staff ---
+  async fetchStaff() {
+    try {
+      const { data, error } = await supabase.from('staff').select('*').limit(10000);
+      if (error) throw error;
+      const result = data.map(s => mapFromSql(s, STAFF_MAP));
+      if (typeof window !== 'undefined' && result.length > 0) {
+        // Only alert on PC or non-init fetch if we want to confirm connection
+        console.log('Fetched staff from cloud:', result.length);
+      }
+      return result;
+    } catch (err) {
+      console.error('Fetch staff error:', err);
+      return [];
+    }
+  },
+  async upsertStaff(staff: any[]) {
+    const validKeys = ['id', 'name', 'placement', 'position', 'status', 'profession', 'role', 'noHoliday', 'phone', 'password', 'createdAt', 'isApproved', 'pin'];
+    const filtered = staff.map(s => {
+      const obj: any = {};
+      validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });
+      return mapToSql(obj, STAFF_MAP);
+    });
+    const { error } = await supabase.from('staff').upsert(filtered, { onConflict: 'id' });
+    if (error) {
+      console.error('Staff sync error:', error);
+      Alert.alert('クラウド保存失敗', error.message);
+      throw error;
+    }
+    console.log('Staff synced to cloud successfully');
+  },
+  async upsertSingleStaff(s: any) {
+    const validKeys = ['id', 'name', 'placement', 'position', 'profession', 'status', 'noHoliday', 'isApproved', 'role', 'password'];
+    const obj: any = {};
+    validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });
+    const { error } = await supabase.from('staff').upsert(mapToSql(obj, STAFF_MAP), { onConflict: 'id' });
+    if (error) throw error;
+  },
+  async deleteStaff(id: number | string) {
+    const { error } = await supabase.from('staff').delete().eq('id', id);
+    if (error) {
+      console.error('Staff deletion error:', error);
+      throw error;
+    }
+    console.log('Staff deleted from cloud');
+  },
+
+  // --- Requests ---
+  async fetchRequests() {
+    const { data, error } = await supabase.from('requests').select('*').limit(10000);
+    if (error) throw error;
+    return data.map(r => mapFromSql(r, REQ_MAP));
+  },
+  async upsertRequests(requests: any[]) {
+    const filtered = requests.map(r => {
+      const obj: any = {};
+      const validKeys = ['id', 'staffName', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
+      validKeys.forEach(k => { if (r[k] !== undefined) obj[k] = r[k]; });
+      return mapToSql(obj, REQ_MAP);
+    });
+    const { error } = await supabase.from('requests').upsert(filtered, { onConflict: 'id' });
+    if (error) {
+      console.error('Requests sync error:', error);
+      throw error;
+    }
+    console.log('Requests synced to cloud successfully');
+  },
+  async upsertSingleRequest(r: any) {
+    const validKeys = ['id', 'staffName', 'staffId', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
+    const obj: any = {};
+    validKeys.forEach(k => { if (r[k] !== undefined) obj[k] = r[k]; });
+    const { error } = await supabase.from('requests').upsert(mapToSql(obj, REQ_MAP), { onConflict: 'id' });
+    if (error) throw error;
+  },
+  async deleteRequest(id: string) {
+    const { error } = await supabase.from('requests').delete().eq('id', id);
+    if (error) {
+      console.error('Request deletion error:', error);
+      throw error;
+    }
+  },
+  async deleteRequests(ids: string[]) {
+    if (!ids || ids.length === 0) return;
+    // URL length limit prevention (chunk into 50 ids at a time)
+    const chunkSize = 50;
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize);
+      const { error } = await supabase.from('requests').delete().in('id', chunk);
+      if (error) throw error;
+    }
+  },
+
+  // --- Messages ---
+  async fetchMessages() {
+    const { data, error } = await supabase.from('messages').select('*').order('created_at', { ascending: true }).limit(5000);
+    if (error) throw error;
+    return data.map(m => mapFromSql(m, MSG_MAP));
+  },
+  async pushMessage(msg: any) {
+    const validKeys = ['id', 'fromId', 'fromName', 'toId', 'content', 'type', 'attachments', 'createdAt'];
+    const filtered: any = {};
+    validKeys.forEach(k => { if (msg[k] !== undefined) filtered[k] = msg[k]; });
+    const sqlObj = mapToSql(filtered, MSG_MAP);
+    const { error } = await supabase.from('messages').insert([sqlObj]);
+    if (error) {
+      console.error('Message sync error:', error);
+      throw error;
+    }
+  },
+  async deleteMessagesBetween(user1: string, user2: string) {
+    const { error } = await supabase.from('messages').delete()
+      .or(`and(from_name.eq.${user1},to_id.eq.${user2}),and(from_name.eq.${user2},to_id.eq.${user1})`);
+    if (error) throw error;
+  },
+
+  // --- Config ---
+  async fetchConfig(key: string) {
+    const { data, error } = await supabase.from('app_config').select('value').eq('key', key).single();
+    if (error && error.code !== 'PGRST116') throw error;
+    return data?.value;
+  },
+  async saveConfig(key: string, value: any) {
+    const { error } = await supabase.from('app_config').upsert({ key, value }, { onConflict: 'key' });
+    if (error) throw error;
+  }
+};
