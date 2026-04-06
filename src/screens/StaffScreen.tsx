@@ -1,337 +1,351 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, TextInput, Modal, Alert, Platform } from 'react-native';
+import { StyleSheet, View, ScrollView, TouchableOpacity, TextInput, Modal, Alert, SafeAreaView, ActivityIndicator } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { Search, Filter, Trash2, Settings, Users, User, Shield, MapPin, Briefcase, Coffee, Clock, X, Printer, Save, Check, Plus, Calendar } from 'lucide-react-native';
-import { getDayType, getMonthDayCounts, getDateStr } from '../utils/dateUtils';
-import { sortStaffByName, normalizeName } from '../utils/staffUtils';
-import { getCurrentLimit } from '../utils/limitUtils';
-import { exportShiftToPDF } from '../utils/pdfExport';
+import { Search, Filter, Calendar, Settings, Plus, X, Trash2, Check, Save, Lock, Unlock } from 'lucide-react-native';
+import { normalizeName } from '../utils/staffUtils';
+import { getDayType, getDateStr } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 
 interface StaffScreenProps {
-  initialWard?: string;
   staffList: any[];
-  setStaffList: (list: any[]) => void;
+  setStaffList: (staff: any[] | ((prev: any[]) => any[])) => void;
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
-  onDeleteRequest?: (id: string) => void;
-  profile: any;
-  weekdayLimit: number;
-  holidayLimit: number;
-  saturdayLimit: number;
-  sundayLimit: number;
-  publicHolidayLimit: number;
-  monthlyLimits: Record<string, { weekday: number, sat: number, sun: number, pub: number }>;
-  setProfile: (profile: any) => void;
-  isAdminAuthenticated: boolean;
-  staffViewMode?: boolean;
   currentDate: Date;
-  setCurrentDate: (d: Date | ((prev: Date) => Date)) => void;
+  isPrivileged?: boolean;
+  setIsAdminAuthenticated?: (auth: boolean) => void;
+  adminPassword?: string;
+  initialWard?: string;
 }
 
-export const StaffScreen: React.FC<StaffScreenProps> = ({ 
-  initialWard, staffList, setStaffList, requests, setRequests, onDeleteRequest, profile, 
-  weekdayLimit, holidayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, 
-  monthlyLimits, setProfile, isAdminAuthenticated, staffViewMode = false,
-  currentDate, setCurrentDate 
+export const StaffScreen: React.FC<StaffScreenProps> = ({
+  staffList,
+  setStaffList,
+  requests,
+  setRequests,
+  currentDate,
+  isPrivileged = false,
+  setIsAdminAuthenticated,
+  adminPassword
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterPlacement, setFilterPlacement] = useState('すべて');
+  const [activeFilter, setActiveFilter] = useState('すべて');
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
   const [isCalendarModalVisible, setIsCalendarModalVisible] = useState(false);
-  const [calendarStaff, setCalendarStaff] = useState<any>(null);
-  const [selectedDayForEdit, setSelectedDayForEdit] = useState<string | null>(null);
-  const [isEditDayModalVisible, setIsEditDayModalVisible] = useState(false);
-  const [editDayType, setEditDayType] = useState('出勤');
-  const [editDayDuration, setEditDayDuration] = useState(1.0);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isAddModalVisible, setIsAddModalVisible] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState<any>(null);
-  const [newStaff, setNewStaff] = useState({ name: '', placement: '2F', position: '主任', status: '常勤', profession: 'PT', noHoliday: false, role: '一般職員', isApproved: true });
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const [hourlyValue, setHourlyValue] = useState(1.0);
+  const [pendingType, setPendingType] = useState('出勤');
   
-  const placements = ['すべて', '2F', '3F', '4F', '外来', 'フォロー', '兼務', '包括', '排尿支援', '訪問', '管理', '助手'];
-  const professions = ['PT', 'OT', 'ST', '助手', 'その他'];
-  const positions = ['科長', '係長', '主査', '主任', '主事', '会計年度'];
-  const statuses = ['常勤', '時短勤務', '長期休暇', '入職前'];
+  // Auth and sync
+  const [authInput, setAuthInput] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
 
-  const isPrivileged = ((profile.role?.includes('シフト管理者') || profile.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
+  // Buffer state for staff editing
+  const [editName, setEditName] = useState('');
+  const [editProfession, setEditProfession] = useState('');
+  const [editPlacement, setEditPlacement] = useState('');
+
+  const categories = ['すべて', '2F', '3F', '4F', '外来', 'フォロー', '兼務'];
+
+  const filteredStaff = useMemo(() => {
+    return staffList.filter(s => {
+      const matchSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchFilter = activeFilter === 'すべて' || s.placement === activeFilter;
+      return matchSearch && matchFilter;
+    });
+  }, [staffList, searchQuery, activeFilter]);
 
   const currentYear = currentDate.getFullYear();
   const currentMonth = currentDate.getMonth();
 
-  useEffect(() => {
-    if (initialWard) setFilterPlacement(initialWard);
-  }, [initialWard]);
+  const SHIFT_TYPES = ['出勤', '公休', '年休', '特休', '午前休', '午後休', '午前振替', '午後振替', '夏季休暇', '時間休'];
 
-  // Precompute stats for all staff to avoid O(N*M) during render
-  const allStaffStats = useMemo(() => {
-    const statsMap = new Map<string, any>();
-    const monthCounts = getMonthDayCounts(currentYear, currentMonth);
+  const monthInfo = useMemo(() => {
+    const firstDay = new Date(currentYear, currentMonth, 1).getDay();
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const leadingEmpty = Array.from({ length: firstDay }, (_, i) => ({ day: -i, empty: true }));
+    const days = Array.from({ length: daysInMonth }, (_, i) => {
+      const d = i + 1;
+      const dateObj = new Date(currentYear, currentMonth, d);
+      return { day: d, dateStr: getDateStr(dateObj), type: getDayType(dateObj), isH: ['holiday','sun','sat'].includes(getDayType(dateObj)), empty: false };
+    });
+    return [...leadingEmpty, ...days];
+  }, [currentYear, currentMonth]);
 
-    // Index approved requests by staff name for faster lookup
-    const staffReqMap = new Map<string, any[]>();
+  const requestMap = useMemo(() => {
+    const map = new Map<string, Map<string, any>>();
     requests.forEach(r => {
-      if (r.status !== 'approved' || !r.staffName || !r.date) return;
-      const sName = normalizeName(r.staffName);
-      if (!staffReqMap.has(sName)) staffReqMap.set(sName, []);
-      staffReqMap.get(sName)!.push(r);
+      if (r.status !== 'approved' || !r.date || !r.staffName) return;
+      const sT = normalizeName(r.staffName);
+      if (!map.has(r.date)) map.set(r.date, new Map());
+      map.get(r.date)!.set(sT, r);
     });
-
-    staffList.forEach(staff => {
-      const sName = normalizeName(staff.name);
-      if (staff.status === '長期休暇' || staff.status === '入職前') {
-        statsMap.set(sName, { weekday: 0, sat: 0, sun: 0, holiday: 0, leaveHours: 0, nursingHours: 0, tokkyuHours: 0 });
-        return;
-      }
-
-      const approved = staffReqMap.get(sName) || [];
-      const counts = { weekday: 0, sat: 0, sun: 0, holiday: 0, leaveHours: 0, nursingHours: 0, tokkyuHours: 0 };
-      
-      const isFiscalYear = (staff.position?.trim() === '会計年度');
-      const MORNING_H = 4.0;
-      const AFTERNOON_H = isFiscalYear ? 3.5 : 3.75;
-      const FULL_DAY_H = isFiscalYear ? 7.5 : 7.75;
-
-      approved.forEach(req => {
-        const d = new Date(req.date.replace(/-/g, '/'));
-        if (isNaN(d.getTime())) return;
-        if (d.getMonth() !== currentMonth || d.getFullYear() !== currentYear) return;
-
-        const dayType = getDayType(d);
-        const leaveTypes = ['年休', '有給休暇', '午前休', '午後休', '看護休暇', '振替', '夏季休暇', '特休', '特別休暇', '時間休', '時間給', '休暇', '欠勤', '全休', 'シフト休', '午前振替', '午後振替', '公休'];
-
-        if (req.type === '出勤') {
-          if (dayType !== 'weekday') counts[dayType]++;
-        } else if (leaveTypes.includes(req.type)) {
-          let reduction = 0;
-          if (['午前休', '午後休', '午前振替', '午後振替'].includes(req.type)) {
-            reduction = (req.type.includes('午前')) ? (MORNING_H / FULL_DAY_H) : (AFTERNOON_H / FULL_DAY_H);
-          } else if (['時間休', '時間給', '看護休暇', '特休', '特別休暇'].includes(req.type)) {
-            const h = Number(req.details?.duration || 0);
-            reduction = Math.min(1.0, h / FULL_DAY_H);
-            if (req.type === '看護休暇') counts.nursingHours += h;
-            else if (req.type === '特休' || req.type === '特別休暇') counts.tokkyuHours += h;
-            else counts.leaveHours += h;
-          } else {
-            reduction = 1.0;
-          }
-
-          if (dayType === 'weekday') counts.weekday += reduction;
-          else counts[dayType] += reduction;
+    return map;
+  }, [requests]);
+  
+  const staffStats = useMemo(() => {
+    const stats = new Map();
+    staffList.forEach(s => {
+      const sT = normalizeName(s.name);
+      const sStats = { weekday: 0, sat: 0, sun: 0, holiday: 0 };
+      monthInfo.forEach(d => {
+        if (d.empty) return;
+        const req = requestMap.get(d.dateStr)?.get(sT);
+        const shiftType = req ? (req.type === '時間給' ? '時間休' : req.type) : (d.isH ? '公休' : '出勤');
+        const isWork = !['公休', '特休', '年休', '有給', '休暇', '欠勤', '午前休', '午後休', '午前振替', '午後振替', '夏季休暇', '時間休', '時間給'].includes(shiftType);
+        if (isWork) {
+          const type = (d as any).type;
+          if (type === 'weekday') sStats.weekday++;
+          else if (type === 'sat') sStats.sat++;
+          else if (type === 'sun') sStats.sun++;
+          else if (type === 'holiday') sStats.holiday++;
         }
       });
-
-      statsMap.set(sName, {
-        weekday: Math.max(0, monthCounts.weekday - counts.weekday),
-        sat: Math.max(0, monthCounts.sat - counts.sat),
-        sun: Math.max(0, monthCounts.sun - counts.sun),
-        holiday: Math.max(0, monthCounts.holiday - counts.holiday),
-        leaveHours: counts.leaveHours,
-        nursingHours: counts.nursingHours,
-        tokkyuHours: counts.tokkyuHours
-      });
+      stats.set(sT, sStats);
     });
+    return stats;
+  }, [staffList, monthInfo, requestMap]);
 
-    return statsMap;
-  }, [staffList, requests, currentYear, currentMonth]);
-
-  const filteredStaff = useMemo(() => {
-    let result = staffList;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(s => (s.name?.toLowerCase().includes(q)) || (s.placement?.toLowerCase().includes(q)));
+  useEffect(() => {
+    setSaveStatus(null);
+    if (selectedDay !== null && selectedStaff) {
+      const dateStr = getDateStr(new Date(currentYear, currentMonth, selectedDay));
+      const sT = normalizeName(selectedStaff.name);
+      const currentReq = requestMap.get(dateStr)?.get(sT);
+      if (currentReq) {
+        setPendingType(currentReq.type === '時間給' ? '時間休' : currentReq.type);
+        setHourlyValue(currentReq.details?.duration || 1.0);
+      } else {
+        const isH = monthInfo.find(m => m.day === selectedDay)?.isH;
+        setPendingType(isH ? '公休' : '出勤');
+        setHourlyValue(1.0);
+      }
     }
-    if (filterPlacement !== 'すべて') {
-      result = result.filter(s => s.placement === filterPlacement);
+  }, [selectedDay, selectedStaff]);
+
+  const handleApplyChange = async () => {
+    if (selectedDay === null || !selectedStaff) return;
+    if (!isPrivileged) {
+      Alert.alert('認証エラー', 'パスワードを入力して認証ボタンを押してください。');
+      return;
     }
-    return sortStaffByName(result);
-  }, [staffList, searchQuery, filterPlacement]);
 
-  const handleAddStaff = async () => {
-    if (newStaff.name.trim() === '') return;
-    const staff = { id: Date.now(), ...newStaff, updatedAt: new Date().toISOString() };
-    setStaffList([...staffList, staff]);
-    await cloudStorage.upsertStaff([...staffList, staff]);
-    setIsAddModalVisible(false);
-    setNewStaff({ name: '', placement: '2F', position: '主任', status: '常勤', profession: 'PT', noHoliday: false, role: '一般職員', isApproved: true });
-  };
+    setIsSaving(true);
+    setSaveStatus(null);
+    const dateStr = getDateStr(new Date(currentYear, currentMonth, selectedDay));
+    const sT = normalizeName(selectedStaff.name);
+    const useDuration = pendingType === '時間休' || pendingType === '特休';
 
-  const handleSaveEdit = async () => {
-    const updated = staffList.map(s => s.id === editForm.id ? { ...editForm, updatedAt: new Date().toISOString() } : s);
-    setStaffList(updated);
-    await cloudStorage.upsertStaff(updated);
-    setSelectedStaff(editForm);
-    setIsEditing(false);
-  };
+    const newReq = {
+      id: `man-${Date.now()}`,
+      staffName: selectedStaff.name,
+      date: dateStr,
+      type: pendingType,
+      status: 'approved',
+      details: useDuration ? { duration: hourlyValue } : undefined,
+      createdAt: new Date().toISOString()
+    };
 
-  const handleDeleteStaff = (id: number) => {
-    Alert.alert('削除', 'この職員を削除しますか？', [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: '削除', style: 'destructive', onPress: async () => {
-        const updated = staffList.filter(s => s.id !== id);
-        setStaffList(updated);
-        await cloudStorage.deleteStaff(id);
-        setIsDetailModalVisible(false);
-      }}
-    ]);
-  };
-
-  const executeLockPlan = async () => {
     try {
-      setIsSaving(true);
-      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-      const datePrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-`;
-      const sName = normalizeName(calendarStaff?.name);
-      const toUpsert = [];
-
-      for (let day = 1; day <= daysInMonth; day++) {
-        const dateStr = `${datePrefix}${String(day).padStart(2, '0')}`;
-        let ex = requests.find(r => normalizeName(r.staffName) === sName && r.date === dateStr && r.status === 'approved');
-        if (ex) {
-           toUpsert.push({ ...ex, details: { ...ex.details, planType: ex.type } });
-        } else {
-           const type = getDayType(new Date(currentYear, currentMonth, day)) === 'weekday' ? '出勤' : '公休';
-           toUpsert.push({ id: `q-h-${Date.now()}-${day}`, staffName: calendarStaff.name, date: dateStr, type, status: 'approved', details: { note: '予定確定', planType: type } });
-        }
-      }
-      await cloudStorage.upsertRequests(toUpsert);
-      const data = await cloudStorage.fetchRequests();
-      if (data) setRequests(data);
-      Alert.alert('完了', '予定を確定しました。');
-    } catch (e) {
-      console.error(e);
-      Alert.alert('エラー', '保存に失敗しました');
+      setRequests((prev: any[]) => {
+        const filtered = prev.filter(r => !(r.date === dateStr && normalizeName(r.staffName) === sT));
+        return [...filtered, newReq];
+      });
+      await cloudStorage.upsertRequests([newReq]);
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus(null), 2000);
+    } catch(e) {
+      setSaveStatus('error');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case '常勤': return '#22c55e';
-      case '時短勤務': return '#06b6d4';
-      case '長期休暇': return '#a855f7';
-      case '入職前': return '#6366f1';
-      default: return COLORS.textSecondary;
+  const handleModalAuth = () => {
+    if (authInput === adminPassword) {
+      setIsAdminAuthenticated?.(true);
+      setAuthInput('');
+      Alert.alert('認証完了', '管理者モードが有効になりました。確定ボタンが使用可能です。');
+    } else {
+      Alert.alert('エラー', 'パスワードが正しくありません。');
     }
+  };
+
+  const handleUpdateStaff = () => {
+    if (!selectedStaff) return;
+    const updated = staffList.map(s => s.id === selectedStaff.id ? { ...s, name: editName, profession: editProfession, placement: editPlacement } : s);
+    setStaffList(updated);
+    setIsDetailModalVisible(false);
+    Alert.alert('更新完了', '職員情報を保存しました。');
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <ThemeText variant="h1">職員管理</ThemeText>
+        <ThemeText variant="h1">職員名簿</ThemeText>
+        <ThemeText variant="caption" color={COLORS.textSecondary}>職員の統計と管理</ThemeText>
       </View>
 
       <View style={styles.searchContainer}>
         <View style={styles.searchBar}>
-          <Search color={COLORS.textSecondary} size={20} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="名前やチームで検索..."
-            placeholderTextColor={COLORS.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery ? (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <X color={COLORS.textSecondary} size={20} />
-            </TouchableOpacity>
-          ) : null}
+          <Search size={20} color={COLORS.textSecondary} />
+          <TextInput style={styles.searchInput} placeholder="名前を検索..." value={searchQuery} onChangeText={setSearchQuery} />
         </View>
       </View>
 
       <View style={styles.filterArea}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
-          {placements.map(p => (
-            <TouchableOpacity key={p} style={[styles.filterChip, filterPlacement === p && styles.filterChipActive]} onPress={() => setFilterPlacement(p)}>
-              <ThemeText variant="caption" style={{ color: filterPlacement === p ? 'white' : COLORS.text }}>{p}</ThemeText>
+          {categories.map(cat => (
+            <TouchableOpacity key={cat} style={[styles.filterChip, activeFilter === cat && styles.filterChipActive]} onPress={() => setActiveFilter(cat)}>
+              <ThemeText color={activeFilter === cat ? 'white' : COLORS.text}>{cat}</ThemeText>
             </TouchableOpacity>
           ))}
         </ScrollView>
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         {filteredStaff.map(staff => {
-          const sName = normalizeName(staff.name);
-          const stats = allStaffStats.get(sName) || { weekday: 0, sat: 0, sun: 0, holiday: 0, leaveHours: 0 };
+          const stats = staffStats.get(normalizeName(staff.name)) || { weekday: 0, sat: 0, sun: 0, holiday: 0 };
           return (
-            <TouchableOpacity key={staff.id} onPress={() => { setSelectedStaff(staff); setIsDetailModalVisible(true); }} activeOpacity={0.7}>
-              <ThemeCard style={styles.staffCard}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.avatarPlaceholder}>
-                    <ThemeText bold color={COLORS.primary}>{staff.name[0]}</ThemeText>
-                  </View>
-                  <View style={styles.nameInfo}>
-                    <ThemeText variant="h2" style={styles.name}>{staff.name}</ThemeText>
-                    <View style={styles.statusRow}>
-                      <View style={[styles.statusDot, { backgroundColor: getStatusColor(staff.status) }]} />
-                      <ThemeText variant="caption" color={COLORS.textSecondary}>{staff.placement} / {staff.position}</ThemeText>
-                    </View>
-                  </View>
-                  <View style={styles.statsSummary}>
-                    <View style={styles.mainStat}>
-                      <ThemeText style={styles.statLabel}>月間休日</ThemeText>
-                      <ThemeText style={styles.statValue}>{stats.sat + stats.sun + stats.holiday}</ThemeText>
-                    </View>
-                    <TouchableOpacity onPress={() => { setCalendarStaff(staff); setIsCalendarModalVisible(true); }} style={styles.actionBtn}>
-                      <Calendar size={20} color={COLORS.primary} />
-                    </TouchableOpacity>
-                  </View>
+            <ThemeCard key={staff.id} style={styles.staffCard}>
+              <View style={styles.cardTop}>
+                <View style={styles.avatar}><ThemeText bold color={COLORS.primary}>{staff.name[0]}</ThemeText></View>
+                <TouchableOpacity style={{ flex: 1, marginLeft: 12 }} onPress={() => { setSelectedStaff(staff); setSelectedDay(null); setIsCalendarModalVisible(true); }}>
+                  <ThemeText variant="h2">{staff.name}</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>{staff.profession} | {staff.placement}</ThemeText>
+                </TouchableOpacity>
+                <View style={styles.actionBtns}>
+                  <TouchableOpacity style={[styles.miniBtn, { borderColor: '#38bdf8' }]} onPress={() => { setSelectedStaff(staff); setSelectedDay(null); setIsCalendarModalVisible(true); }}><Calendar size={18} color="#38bdf8" /></TouchableOpacity>
+                  <TouchableOpacity style={[styles.miniBtn, { borderColor: '#eab308' }]} onPress={() => { setSelectedStaff(staff); setEditName(staff.name); setEditProfession(staff.profession); setEditPlacement(staff.placement); setIsDetailModalVisible(true); }}><Settings size={18} color="#eab308" /></TouchableOpacity>
                 </View>
-              </ThemeCard>
-            </TouchableOpacity>
+              </View>
+              <View style={styles.statsGrid}>
+                {[{ label: '平', val: stats.weekday }, { label: '土', val: stats.sat }, { label: '日', val: stats.sun }, { label: '祝', val: stats.holiday }].map(item => (
+                  <View key={item.label} style={styles.statBox}><ThemeText style={styles.statLabel}>{item.label}</ThemeText><ThemeText bold style={styles.statValue}>{item.val}</ThemeText></View>
+                ))}
+              </View>
+            </ThemeCard>
           );
         })}
       </ScrollView>
 
-      {isPrivileged && (
-        <TouchableOpacity style={styles.fab} onPress={() => setIsAddModalVisible(true)}>
-          <Plus color="white" size={30} />
-        </TouchableOpacity>
-      )}
-
-      {/* Detail Modal */}
+      {/* 職員設定モーダル */}
       <Modal visible={isDetailModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
-              <ThemeText variant="h2">{isEditing ? '編集' : '詳細'}</ThemeText>
-              <TouchableOpacity onPress={() => { setIsDetailModalVisible(false); setIsEditing(false); }}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity>
+          <View style={[styles.modalContent, { height: '60%' }]}>
+            <View style={styles.modalHeader}>
+              <ThemeText variant="h2">職員情報の編集</ThemeText>
+              <TouchableOpacity onPress={() => setIsDetailModalVisible(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity>
             </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {isEditing ? (
-                <View>
-                  <ThemeText variant="label">名前</ThemeText>
-                  <TextInput style={styles.modalInput} value={editForm.name} onChangeText={t => setEditForm({...editForm, name: t})} />
-                  {/* Simplifed editing for brevity in rewrite, ensuring structural safety */}
-                  <TouchableOpacity style={styles.confirmBtn} onPress={handleSaveEdit}><ThemeText color="white" bold>保存</ThemeText></TouchableOpacity>
-                </View>
-              ) : (
-                <View>
-                  <ThemeText variant="h1" style={{ textAlign: 'center' }}>{selectedStaff?.name}</ThemeText>
-                  <ThemeText variant="caption" style={{ textAlign: 'center', marginBottom: 20 }}>{selectedStaff?.placement} / {selectedStaff?.position}</ThemeText>
-                  
-                  <View style={styles.monthlyStatsOverview}>
-                    <ThemeText variant="label">今月の実績</ThemeText>
-                    {(() => {
-                      const stats = allStaffStats.get(normalizeName(selectedStaff?.name || '')) || { weekday: 0, leaveHours: 0 };
-                      return (
-                        <View style={styles.statsBreakdown}>
-                          <View style={styles.breakdownItem}><ThemeText variant="caption">有給・休暇</ThemeText><ThemeText variant="h2">{stats.leaveHours.toFixed(1)}h</ThemeText></View>
-                          <View style={styles.breakdownItem}><ThemeText variant="caption">稼働予定</ThemeText><ThemeText variant="h2">{stats.weekday}日</ThemeText></View>
-                        </View>
-                      );
-                    })()}
-                  </View>
+            <ScrollView>
+              <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="名前" />
+              <TextInput style={styles.input} value={editProfession} onChangeText={setEditProfession} placeholder="職種" />
+              <TextInput style={styles.input} value={editPlacement} onChangeText={setEditPlacement} placeholder="配置" />
+              <TouchableOpacity style={styles.confirmBtn} onPress={handleUpdateStaff}><ThemeText bold color="white">更新を保存</ThemeText></TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
-                  {isPrivileged && (
-                    <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
-                       <TouchableOpacity style={[styles.confirmBtn, { flex: 1 }]} onPress={() => { setEditForm({...selectedStaff}); setIsEditing(true); }}><ThemeText color="white">編集</ThemeText></TouchableOpacity>
-                       <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: COLORS.danger }]} onPress={() => handleDeleteStaff(selectedStaff.id)}><Trash2 color="white" size={20} /></TouchableOpacity>
+      {/* 個人カレンダーモーダル */}
+      <Modal visible={isCalendarModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { height: '90%', maxHeight: 950 }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <ThemeText variant="h2" numberOfLines={1}>{selectedStaff?.name} のシフト管理</ThemeText>
+                <ThemeText variant="caption" color={COLORS.textSecondary}>{currentMonth + 1}月の勤務割当 (カレンダー)</ThemeText>
+              </View>
+              <TouchableOpacity onPress={() => setIsCalendarModalVisible(false)} style={styles.closeBtn}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity>
+            </View>
+
+            <ScrollView bounces={false} style={{ flex: 1 }}>
+              <View style={styles.calendarGrid}>
+                <View style={styles.dowHeader}>
+                  {['日', '月', '火', '水', '木', '金', '土'].map((dow, idx) => (
+                    <ThemeText key={dow} style={[styles.dowText, idx === 0 && {color:'#ef4444'}, idx === 6 && {color:'#38bdf8'}]}>{dow}</ThemeText>
+                  ))}
+                </View>
+                <View style={styles.daysContainer}>
+                  {monthInfo.map((d, i) => {
+                    if (d.empty) return <View key={i} style={styles.gridDayEmpty} />;
+                    const sT = normalizeName(selectedStaff?.name || '');
+                    const req = requestMap.get((d as any).dateStr)?.get(sT);
+                    const currentType = req ? (req.type === '時間給' ? '時間休' : req.type) : ((d as any).isH ? '公休' : '出勤');
+                    const duration = req?.details?.duration;
+                    const isSelected = selectedDay === (d as any).day;
+                    return (
+                      <TouchableOpacity key={i} style={[styles.gridDay, isSelected && styles.gridDaySelected]} onPress={() => setSelectedDay((d as any).day)}>
+                        <ThemeText style={[{ fontSize: 13, fontWeight: 'bold' }, i%7===0 || (d as any).type === 'holiday' ? {color:'#ef4444'} : i%7===6 ? {color:'#38bdf8'} : {color:'white'}]}>{(d as any).day}</ThemeText>
+                        <View style={[styles.dayBadge, { backgroundColor: currentType === '出勤' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,180,0,0.1)' }]}>
+                          <ThemeText numberOfLines={1} style={{ fontSize: 7, color: currentType === '出勤' ? '#10b981' : '#eab308' }}>{currentType}{duration ? ` ${duration}h` : ''}</ThemeText>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {selectedDay !== null && (
+                <View style={styles.selectionFooter}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <ThemeText bold variant="h2">{currentMonth + 1}/{selectedDay} の設定</ThemeText>
+                    <TouchableOpacity onPress={() => setSelectedDay(null)}><X size={20} color={COLORS.textSecondary} /></TouchableOpacity>
+                  </View>
+                  
+                  {!isPrivileged ? (
+                    <View style={styles.authPromptBanner}>
+                      <ThemeText bold color="#f87171" style={{ marginBottom: 12 }}>管理者認証をしてください</ThemeText>
+                      <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <TextInput 
+                          style={[styles.input, { flex: 1, marginBottom: 0 }]} 
+                          placeholder="パスワード" 
+                          secureTextEntry 
+                          value={authInput}
+                          onChangeText={setAuthInput}
+                        />
+                        <TouchableOpacity style={styles.inlineAuthBtn} onPress={handleModalAuth}>
+                          <ThemeText bold color="white">認証</ThemeText>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <View>
+                      <ThemeText variant="label" style={{ marginBottom: 8 }}>種類を選択</ThemeText>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          {SHIFT_TYPES.map(type => (
+                            <TouchableOpacity key={type} style={[styles.typeSelectBtn, pendingType === type && styles.typeSelectBtnActive]} onPress={() => setPendingType(type)}>
+                              <ThemeText bold color={pendingType === type ? 'white' : COLORS.text}>{type}</ThemeText>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </ScrollView>
+
+                      {(pendingType === '時間休' || pendingType === '特休') && (
+                        <View style={styles.hourlyContainer}>
+                          <View style={{ flex: 1 }}>
+                            <ThemeText bold>{pendingType}の時間設定</ThemeText>
+                            <ThemeText variant="caption" color={COLORS.textSecondary}>0.25h刻み</ThemeText>
+                          </View>
+                          <View style={styles.stepper}>
+                            <TouchableOpacity style={styles.stepBtn} onPress={() => setHourlyValue(Math.max(0.25, hourlyValue - 0.25))}><ThemeText bold color="white">−</ThemeText></TouchableOpacity>
+                            <ThemeText bold style={{ width: 60, textAlign: 'center' }}>{hourlyValue.toFixed(2)}h</ThemeText>
+                            <TouchableOpacity style={styles.stepBtn} onPress={() => setHourlyValue(Math.min(7.75, hourlyValue + 0.25))}><ThemeText bold color="white">+</ThemeText></TouchableOpacity>
+                          </View>
+                        </View>
+                      )}
+
+                      {saveStatus === 'success' && <ThemeText bold color="#10b981" style={{ textAlign: 'center', marginBottom: 8 }}>✅ 保存しました</ThemeText>}
+                      {saveStatus === 'error' && <ThemeText bold color="#ef4444" style={{ textAlign: 'center', marginBottom: 8 }}>❌ 保存に失敗しました</ThemeText>}
+
+                      <TouchableOpacity style={[styles.finalApplyBtn, isSaving && { opacity: 0.7 }]} onPress={handleApplyChange} disabled={isSaving}>
+                        {isSaving ? <ActivityIndicator color="white" size="small" /> : <><Save size={20} color="white" /><ThemeText bold color="white" style={{ marginLeft: 8 }}>確定する</ThemeText></>}
+                      </TouchableOpacity>
                     </View>
                   )}
                 </View>
@@ -341,62 +355,53 @@ export const StaffScreen: React.FC<StaffScreenProps> = ({
         </View>
       </Modal>
 
-      {/* Staff Calendar Modal */}
-      <Modal visible={isCalendarModalVisible} animationType="fade" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { padding: 16 }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
-               <ThemeText variant="h2">{calendarStaff?.name} のシフト</ThemeText>
-               <TouchableOpacity onPress={() => setIsCalendarModalVisible(false)}><X size={24} color={COLORS.textSecondary}/></TouchableOpacity>
-            </View>
-            <View style={styles.calendarGrid}>
-              {Array.from({ length: new Date(currentYear, currentMonth + 1, 0).getDate() }).map((_, i) => (
-                <View key={i} style={[styles.calendarDay, { width: '14.2%' }]}>
-                  <ThemeText variant="caption">{i+1}</ThemeText>
-                </View>
-              ))}
-            </View>
-            <TouchableOpacity style={styles.confirmBtn} onPress={executeLockPlan} disabled={isSaving}>
-              <ThemeText color="white" bold>{isSaving ? '保存中...' : '予定を確定する'}</ThemeText>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      {isPrivileged && <TouchableOpacity style={styles.fab}><Plus size={30} color="white" /></TouchableOpacity>}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: { padding: SPACING.md, marginTop: SPACING.md },
-  searchContainer: { paddingHorizontal: SPACING.md, marginBottom: SPACING.sm },
-  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, paddingHorizontal: 16, height: 50, borderWidth: 1, borderColor: COLORS.border },
-  searchInput: { flex: 1, marginLeft: 12, color: COLORS.text, fontSize: 16 },
-  filterArea: { paddingVertical: SPACING.sm },
-  filterScroll: { paddingHorizontal: SPACING.md },
-  filterChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: BORDER_RADIUS.full, backgroundColor: 'rgba(255,255,255,0.05)', marginRight: 8, borderWidth: 1, borderColor: COLORS.border },
-  filterChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  header: { padding: SPACING.md, paddingTop: 20 },
+  searchContainer: { paddingHorizontal: SPACING.md, marginBottom: 12 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, paddingHorizontal: 16, height: 52 },
+  searchInput: { flex: 1, marginLeft: 12, color: 'white', fontSize: 16 },
+  filterArea: { marginBottom: 16 },
+  filterScroll: { paddingHorizontal: SPACING.md, paddingBottom: 4 },
+  filterChip: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25, backgroundColor: 'rgba(255,255,255,0.08)', marginRight: 10 },
+  filterChipActive: { backgroundColor: '#38bdf8' },
   scrollContent: { padding: SPACING.md, paddingBottom: 100 },
-  staffCard: { marginBottom: SPACING.md, padding: SPACING.md },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  avatarPlaceholder: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.2)' },
-  nameInfo: { flex: 1, flexShrink: 1 },
-  name: { fontSize: 18, marginBottom: 2 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 },
-  statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-  statsSummary: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  mainStat: { alignItems: 'center', minWidth: 40 },
-  statLabel: { fontSize: 8, color: COLORS.textSecondary, marginBottom: 1 },
-  statValue: { fontSize: 14, fontWeight: 'bold', color: COLORS.text },
-  actionBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.03)', justifyContent: 'center', alignItems: 'center' },
-  fab: { position: 'absolute', bottom: 30, right: 30, width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center', elevation: 5 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { backgroundColor: COLORS.card, borderRadius: 24, padding: 24, width: '100%', borderWidth: 1, borderColor: COLORS.border },
-  modalInput: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, paddingHorizontal: 16, height: 50, color: COLORS.text, fontSize: 16, borderWidth: 1, borderColor: COLORS.border, marginBottom: 16 },
-  confirmBtn: { backgroundColor: COLORS.primary, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 20, alignItems: 'center' },
-  monthlyStatsOverview: { width: '100%', marginTop: 24, padding: 16, backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
-  statsBreakdown: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
-  breakdownItem: { alignItems: 'center', flex: 1 },
-  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', width: '100%', marginBottom: 20 },
-  calendarDay: { padding: 8, alignItems: 'center', borderBottomWidth: 1, borderRightWidth: 1, borderColor: 'rgba(255,255,255,0.05)' }
+  staffCard: { padding: 16, marginBottom: 16, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  cardTop: { flexDirection: 'row', alignItems: 'center' },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center' },
+  actionBtns: { flexDirection: 'row', gap: 8 },
+  miniBtn: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
+  statsGrid: { flexDirection: 'row', gap: 6, marginTop: 12 },
+  statBox: { flex: 1, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 8, alignItems: 'center' },
+  statLabel: { fontSize: 9, color: COLORS.textSecondary },
+  statValue: { fontSize: 15, color: 'white' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#0f172a', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', paddingBottom: 12 },
+  closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
+  calendarGrid: { marginBottom: 16 },
+  dowHeader: { flexDirection: 'row', marginBottom: 8 },
+  dowText: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 'bold', color: COLORS.textSecondary },
+  daysContainer: { flexDirection: 'row', flexWrap: 'wrap' },
+  gridDay: { width: '14.28%', height: 65, justifyContent: 'center', alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.03)' },
+  gridDayEmpty: { width: '14.28%', height: 65 },
+  gridDaySelected: { backgroundColor: 'rgba(56, 189, 248, 0.12)', borderColor: '#38bdf8', borderRadius: 8 },
+  dayBadge: { marginTop: 4, paddingHorizontal: 2, paddingVertical: 1, borderRadius: 4 },
+  selectionFooter: { padding: 16, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 20, marginBottom: 40, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  authPromptBanner: { backgroundColor: 'rgba(248, 113, 113, 0.1)', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(248, 113, 113, 0.3)' },
+  inlineAuthBtn: { backgroundColor: '#38bdf8', borderRadius: 10, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
+  typeSelectBtn: { backgroundColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  typeSelectBtnActive: { backgroundColor: '#38bdf8', borderColor: '#38bdf8' },
+  hourlyContainer: { marginBottom: 16, flexDirection: 'row', alignItems: 'center' },
+  stepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 10, padding: 4 },
+  stepBtn: { width: 36, height: 36, borderRadius: 8, backgroundColor: 'rgba(56, 189, 248, 0.3)', justifyContent: 'center', alignItems: 'center' },
+  finalApplyBtn: { backgroundColor: '#38bdf8', height: 56, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 10, elevation: 4 },
+  input: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 10, height: 48, paddingHorizontal: 16, color: 'white', marginBottom: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  confirmBtn: { backgroundColor: '#38bdf8', height: 52, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  fab: { position: 'absolute', bottom: 30, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: '#38bdf8', justifyContent: 'center', alignItems: 'center', elevation: 8 }
 });

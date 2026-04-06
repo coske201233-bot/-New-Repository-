@@ -425,7 +425,7 @@ export default function App() {
       case 'home': return <HomeScreen onNavigateToStaff={(ward) => { setSelectedWard(ward); setCurrentTab('staff'); }} {...commonProps} />;
       case 'calendar': return <CalendarScreen {...commonProps} />;
       case 'requests': return <RequestScreen {...commonProps} />;
-      case 'staff': return <StaffScreen initialWard={selectedWard} {...commonProps} saturdayLimit={saturdayLimit} sundayLimit={sundayLimit} publicHolidayLimit={publicHolidayLimit} monthlyLimits={monthlyLimits} />;
+      case 'staff': return <StaffScreen initialWard={selectedWard} {...commonProps} isPrivileged={isAdminAuthenticated} />;
       case 'admin': return <AdminScreen {...commonProps} />;
       case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={handleApproveRequest} deleteRequest={handleDeleteRequest} />;
       case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab('admin')} />;
