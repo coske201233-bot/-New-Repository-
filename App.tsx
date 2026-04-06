@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, TouchableOpacity, SafeAreaView, Alert, Platform, AppState } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, SafeAreaView, Alert, Platform, AppState, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -398,6 +398,39 @@ export default function App() {
     cloudStorage.saveConfig(STORAGE_KEYS.ADMIN_PASSWORD, pass).catch(console.error);
   };
 
+  const handleAutoAssign = async (year: number, month: number, limits: any) => {
+    try {
+      const response = await fetch('/api/ai-shift', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          staffList,
+          requests,
+          limits: {
+            weekday: limits.weekday,
+            saturday: limits.sat,
+            sunday: limits.sun,
+            publicHoliday: limits.pub
+          },
+          month,
+          year
+        })
+      });
+
+      const data = await response.json();
+      if (!data.newRequests) throw new Error('Generation failed');
+
+      // Update state and persistence
+      const updated = [...requests.filter(r => !String(r.id).startsWith('af-') && !String(r.id).startsWith('ah-') && !String(r.id).startsWith('aw-')), ...data.newRequests];
+      setRequests(updated);
+      await saveData(STORAGE_KEYS.REQUESTS, updated);
+      await cloudStorage.upsertRequests(data.newRequests);
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+  };
+
   const renderContent = () => {
     const commonProps = {
       staffList, setStaffList: handleUpdateStaffList,
@@ -419,6 +452,7 @@ export default function App() {
       setSessionDuration: async (val: number) => { setSessionDuration(val); await saveData(STORAGE_KEYS.SESSION_DURATION, val); },
       onForceCloudSync: handleForceCloudSync,
       currentDate: activeDate, setCurrentDate: setActiveDate,
+      onAutoAssign: handleAutoAssign,
     };
 
     switch (currentTab) {
@@ -426,7 +460,8 @@ export default function App() {
       case 'calendar': return <CalendarScreen {...commonProps} />;
       case 'requests': return <RequestScreen {...commonProps} />;
       case 'staff': return <StaffScreen initialWard={selectedWard} {...commonProps} isPrivileged={isAdminAuthenticated} />;
-      case 'admin': return <AdminScreen {...commonProps} />;
+      case 'admin': 
+        return <AdminScreen {...commonProps} />;
       case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={handleApproveRequest} deleteRequest={handleDeleteRequest} />;
       case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab('admin')} />;
       default: return <HomeScreen onNavigateToStaff={(ward) => { setSelectedWard(ward); setCurrentTab('staff'); }} {...commonProps} />;

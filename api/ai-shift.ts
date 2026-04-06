@@ -49,7 +49,7 @@ export default async function handler(req: any, res: any) {
       weekday: limits?.weekday ?? 10,
       sat: limits?.saturday ?? limits?.sat ?? 2,
       sun: limits?.sunday ?? limits?.sun ?? 2,
-      pub: limits?.publicHoliday ?? limits?.pub ?? 2,
+      pub: limits?.publicHoliday ?? limits?.public ?? limits?.pub ?? 2,
     };
 
     const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
@@ -169,7 +169,10 @@ export default async function handler(req: any, res: any) {
             const isNoHoliday = s.noHoliday === true;
             const alreadyAssigned = staffWorkDays[sId].has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
             const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type));
-            return !isUnavailable && !alreadyAssigned && !isOff && !isNoHoliday && !wouldExceedConsecutive(dStr, staffWorkDays[sId]);
+            const isExceeding = wouldExceedConsecutive(dStr, staffWorkDays[sId], 5);
+            
+            // 重要: 休日は必ず埋めるが、5連勤制限（厳守）と休み希望は守る
+            return !isUnavailable && !alreadyAssigned && !isOff && !isNoHoliday && !isExceeding;
           })
           .sort((a: any, b: any) => {
             const aId = String(a.id || a.name);
@@ -181,13 +184,15 @@ export default async function handler(req: any, res: any) {
             const bStat = getHolidayPenaltyInfo(bId, bName, dStr);
             
             // 優先順位: 
-            // 1. 今月の休日出勤がまだない人を最優先 (1000ptの強力なペナルティ)
-            // 2. 土日連続勤務にならない人を優先 (100pt)
-            // 3. 全体の休日出勤数が少ない人を優先
-            const aPenalty = (aStat.alreadyWorkedHoliday ? 1000 : 0) + (aStat.hasAdjacent ? 100 : 0);
-            const bPenalty = (bStat.alreadyWorkedHoliday ? 1000 : 0) + (bStat.hasAdjacent ? 100 : 0);
+            // 1. 今月の休日出勤回数が少ない人を最優先 (1回目が全員に回るまで2回目は選ばれない)
+            // 2. 土日連続勤務（隣接）にならない人を優先
+            const aPenalty = aStat.hasAdjacent ? 100 : 0;
+            const bPenalty = bStat.hasAdjacent ? 100 : 0;
             
-            return (staffHolidayWorkCount[aId] + aPenalty) - (staffHolidayWorkCount[bId] + bPenalty);
+            if (staffHolidayWorkCount[aId] !== staffHolidayWorkCount[bId]) {
+              return staffHolidayWorkCount[aId] - staffHolidayWorkCount[bId];
+            }
+            return aPenalty - bPenalty;
           });
 
         if (candidates.length > 0) {
@@ -218,11 +223,14 @@ export default async function handler(req: any, res: any) {
 
     for (const dStr of weekdays) {
       const config = schedule[dStr];
-      if (config.limit <= 0) continue;
+      const targetLim = config.limit;
 
+      // 平日は「目安」なので、リミットが多少前後しても全体の出勤数を平均化することを優先
       let occupants = currentRequests.filter((r: any) => r.date === dStr && isWorkingType(r.type)).length + 
                       autoAssigned.filter(a => a.date === dStr && isWorkingType(a.type)).length;
-      let remaining = config.limit - occupants;
+      
+      // 平均化を優先するため、リミットの ±1 程度は許容して割り当てる
+      let remaining = targetLim - occupants;
 
       for (let i = 0; i < remaining; i++) {
         const candidates = (staffList || [])
@@ -233,11 +241,14 @@ export default async function handler(req: any, res: any) {
             const alreadyAssigned = staffWorkDays[sId].has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
             const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type)) ||
                           autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr && a.type === 'シフト休');
+            
+            // 平日は無理に連続勤務をさせず、他者に割り振る余地を残す
             return !isUnavailable && !alreadyAssigned && !isOff && !wouldExceedConsecutive(dStr, staffWorkDays[sId]);
           })
           .sort((a: any, b: any) => {
              const aId = String(a.id || a.name);
              const bId = String(b.id || b.name);
+             // 全体の出勤日数が少ない人を優先して「平均化」する
              return staffWorkDays[aId].size - staffWorkDays[bId].size;
           });
 

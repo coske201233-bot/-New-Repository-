@@ -1,171 +1,314 @@
-import React, { useState, useMemo } from 'react';
-import { StyleSheet, View, ScrollView, TouchableOpacity, TextInput, Alert, Modal, ActivityIndicator, Switch, SafeAreaView } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, View, ScrollView, TouchableOpacity, TextInput, Alert, Modal, ActivityIndicator, SafeAreaView, Platform } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
-import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
+import { COLORS, SPACING } from '../theme/theme';
 import { 
-  ChevronLeft, ChevronRight, BarChart3, Calendar, 
-  Settings, Database, FileOutput, HelpCircle, 
-  RefreshCw, QrCode, Lock, Users, LogOut 
+  ChevronRight, Database, FileOutput, 
+  QrCode, X, Check, Shield, User, Key, Save, LogOut, Edit3, Trash2, Printer, FileText, UserPlus, Clock
 } from 'lucide-react-native';
+import { getMonthInfo, normalizeName, formatDate } from '../utils/dateUtils';
+import { cloudStorage } from '../utils/cloudStorage';
 
 interface AdminScreenProps {
+  profile: any;
+  setProfile: (p: any) => void;
   staffList: any[];
   setStaffList: (staff: any[] | ((prev: any[]) => any[])) => void;
-  requests: any[];
-  setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
   updateLimits: (type: string, val: number, monthStr?: string) => void;
   updatePassword: (pass: string) => void;
+  adminPassword?: string;
+  isAdminAuthenticated: boolean;
+  setIsAdminAuthenticated: (auth: boolean) => void;
   monthlyLimits: any;
   onShareApp: () => void;
   onLogout: () => void;
   currentDate: Date;
-  setCurrentDate: (d: Date) => void;
+  onAutoAssign: (year: number, month: number, limits: any) => Promise<void>;
+  requests: any[];
+  setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
-  staffList, setStaffList, requests, setRequests,
-  updateLimits, updatePassword, monthlyLimits, onShareApp, onLogout,
-  currentDate, setCurrentDate
+  profile, setProfile, staffList = [], setStaffList,
+  updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
+  currentDate = new Date(), onAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests
 }) => {
-  const [activeTab, setActiveTab] = useState<'analysis' | 'holidays'>('analysis');
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
+  const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
+  const [adminAuthInput, setAdminAuthInput] = useState('');
+  
+  const [showPersonalPassModal, setShowPersonalPassModal] = useState(false);
+  const [personalPassInput, setPersonalPassInput] = useState('');
+  
+  const [showAdminPassChangeModal, setShowAdminPassChangeModal] = useState(false);
+  const [newAdminPassInput, setNewAdminPassInput] = useState('');
 
-  const currentYear = currentDate.getFullYear();
-  const currentMonth = currentDate.getMonth();
+  const [editStaff, setEditStaff] = useState<any>(null);
+  const [showStaffEditModal, setShowStaffEditModal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editProfession, setEditProfession] = useState('');
+  const [editPlacement, setEditPlacement] = useState('');
+  const [editPosition, setEditPosition] = useState('');
+  const [editStatus, setEditStatus] = useState('常勤');
+  const [editNoHoliday, setEditNoHoliday] = useState(false);
+  const [editRole, setEditRole] = useState(['スタッフ']);
+  
+  const [isAssigning, setIsAssigning] = useState(false);
+
+  // Safeguard: Ensure currentDate exists
+  const safeDate = currentDate || new Date();
+  const currentYear = safeDate.getFullYear();
+  const currentMonth = safeDate.getMonth();
   const currentMonthStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+  const limits = (monthlyLimits && monthlyLimits[currentMonthStr]) || { weekday: 12, sat: 1, sun: 0, pub: 1 };
 
-  const limits = monthlyLimits[currentMonthStr] || { weekday: 12, sat: 1, sun: 0, pub: 1 };
+  // --- Approvals Filtering with safeguards and logical fixes ---
+  const pendingStaff = Array.isArray(staffList) ? staffList.filter(s => s && s.isApproved === false) : [];
+  const pendingRequests = Array.isArray(requests) ? requests.filter(r => r && (r.status === 'pending' || !r.status)) : [];
 
-  const renderAnalysis = () => (
-    <View style={{ flex: 1, padding: SPACING.md }}>
-      <View style={styles.actionRow}>
-        <TouchableOpacity style={[styles.mainBtn, { backgroundColor: '#38bdf8' }]}>
-          <Database size={24} color="white" />
-          <ThemeText bold color="white" style={{ marginLeft: 8 }}>自動割当（上書き）</ThemeText>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.mainBtn, { backgroundColor: '#10b981' }]}>
-          <FileOutput size={24} color="white" />
-          <ThemeText bold color="white" style={{ marginLeft: 8 }}>CSV出力</ThemeText>
-        </TouchableOpacity>
+  // --- Constant Options ---
+  const PROFESSION_OPTS = ['PT', 'OT', 'ST', '助手'];
+  const PLACEMENT_OPTS = ['外来', '２F', '包括', '４F', '排尿', '兼務', 'フォロー', '管理', '事務', '訪問リハ'];
+  const POSITION_OPTS = ['科長', '係長', '主査', '主任', '主事', '会計年度'];
+  const STATUS_OPTS = ['常勤', '時短勤務', '長期休暇'];
+  const HOLIDAY_SETTING_OPTS = [{ label: '設定なし', value: false }, { label: '土日祝休み', value: true }];
+  const ROLE_OPTS = [{ label: '一般スタッフ', value: ['スタッフ'] }, { label: 'シフト管理者', value: ['管理者', 'スタッフ'] }];
+
+  // --- Handlers ---
+  const handleApproveStaff = (id: string) => {
+    setStaffList(prev => prev.map(s => s.id === id ? { ...s, isApproved: true } : s));
+    Alert.alert('完了', '登録を承認しました。');
+  };
+
+  const handleApproveRequest = async (req: any) => {
+    const updatedReq = { ...req, status: 'approved' };
+    setRequests(prev => prev.map(r => r.id === req.id ? updatedReq : r));
+    await cloudStorage.upsertRequests([updatedReq]);
+    Alert.alert('完了', '申請を承認しました。');
+  };
+
+  const handleRejectRequest = async (id: string) => {
+    setRequests(prev => prev.filter(r => r.id !== id));
+    Alert.alert('却下', '申請を却下し、削除しました。');
+  };
+
+  const handlePrintAttendanceReport = () => {
+    if (Platform.OS !== 'web') return;
+    const year = currentYear;
+    const month = currentMonth + 1;
+    const monthInfo = getMonthInfo(year, currentMonth) || [];
+    const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+    
+    let headerHtml = '<th>氏名</th><th>職種</th>';
+    monthInfo.forEach((d: any) => {
+      if (!d.empty) {
+        const dDate = new Date(d.dateStr);
+        const dayIdx = isNaN(dDate.getTime()) ? 0 : dDate.getDay();
+        const style = (d.isH || dayIdx === 0) ? 'color: #ef4444;' : '';
+        headerHtml += `<th style="${style} min-width: 25px;">${d.day}<br/><small>${dayNames[dayIdx]}</small></th>`;
+      }
+    });
+
+    let rowsHtml = '';
+    staffList.forEach(s => {
+      if (!s || !s.isApproved) return;
+      let row = `<tr><td><small>${s.name}</small></td><td><small>${s.profession}</small></td>`;
+      monthInfo.forEach((d: any) => {
+        if (!d.empty) {
+          const sT = normalizeName(s.name);
+          const req = requests.find(r => r && r.date === d.dateStr && (String(r.staffId) === s.id || normalizeName(r.staffName) === sT));
+          const type = req ? req.type : '';
+          const style = type === '公休' ? 'background-color: #fef2f2; color: #ef4444;' : '';
+          row += `<td style="${style} text-align: center; font-size: 10px;">${type === '公休' ? '公' : (type === '日勤' ? '日' : (type === '夜勤' ? '夜' : (type === '早番' ? '早' : (type === '遅番' ? '遅' : (type ? type.charAt(0) : '')))))}</td>`;
+        }
+      });
+      row += '</tr>';
+      rowsHtml += row;
+    });
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    printWindow.document.write(`<html><head><title>${year}年${month}月 勤務実績表</title><style>@page { size: A4 landscape; margin: 10mm; } body { font-family: sans-serif; padding: 20px; font-size: 12px; } h1 { font-size: 18px; margin-bottom: 20px; border-bottom: 2px solid #38bdf8; } table { width: 100%; border-collapse: collapse; table-layout: fixed; } th, td { border: 1px solid #cbd5e1; padding: 4px 2px; text-align: left; } th { background-color: #f1f5f9; font-size: 10px; } td { font-size: 11px; } .sun { color: #ef4444; }</style></head><body><h1>勤務実績一覧（${year}年${month}月）</h1><table><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table><script>window.onload=function(){window.print();setTimeout(()=>window.close(),500);};</script></body></html>`);
+    printWindow.document.close();
+  };
+
+  const DropdownSelector = ({ label, value, options, onSelect, style }: any) => {
+    const [isVisible, setIsVisible] = useState(false);
+    const displayValue = typeof value === 'boolean' 
+      ? (options.find((o:any) => o.value === value)?.label || 'なし')
+      : (Array.isArray(value) ? (options.find((o:any) => JSON.stringify(o.value) === JSON.stringify(value))?.label || value[0]) : value);
+    const isSimpleArray = options.length > 0 && typeof options[0] !== 'object';
+    return (
+      <View style={[{ marginBottom: 16 }, style]}>
+        <ThemeText bold style={{ marginBottom: 8, fontSize: 13, color: COLORS.textSecondary }}>{label}</ThemeText>
+        <TouchableOpacity style={styles.dropdownBtn} onPress={() => setIsVisible(true)}><ThemeText bold color="white">{typeof value === 'number' ? value : (displayValue || '未選択')}</ThemeText><ChevronRight size={18} color={COLORS.textSecondary} /></TouchableOpacity>
+        <Modal visible={isVisible} transparent animationType="fade">
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setIsVisible(false)}>
+            <View style={styles.pickerContainer}>
+              <View style={styles.pickerHeader}><ThemeText bold variant="h2">{label}</ThemeText><TouchableOpacity onPress={() => setIsVisible(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity></View>
+              <ScrollView>{options.map((opt: any) => {
+                const optVal = isSimpleArray ? opt : (typeof opt === 'number' ? opt : opt.value);
+                const optLabel = isSimpleArray ? (typeof opt === 'number' ? `${opt}人` : opt) : opt.label;
+                const isActive = typeof optVal === 'object' ? JSON.stringify(optVal) === JSON.stringify(value) : (typeof value === 'number' ? optVal === value : optVal === value);
+                return (
+                  <TouchableOpacity key={String(optLabel)} style={[styles.pickerItem, isActive && styles.pickerItemActive]} onPress={() => { onSelect(optVal); setIsVisible(false); }}>
+                    <ThemeText bold={isActive} color={isActive ? '#38bdf8' : 'white'} style={{ fontSize: 18 }}>{optLabel}</ThemeText>
+                    {isActive && <Check size={20} color="#38bdf8" />}
+                  </TouchableOpacity>
+                );
+              })}</ScrollView>
+            </View>
+          </TouchableOpacity>
+        </Modal>
       </View>
+    );
+  };
 
-      <ThemeCard style={styles.promoCard}>
-        <View style={{ flex: 1 }}>
-          <ThemeText bold color="#eab308">休日のみ自動補填</ThemeText>
-          <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 4 }}>
-            現在のシフトを維持しつつ休日不足分を埋めます
-          </ThemeText>
-        </View>
-        <ChevronRight color={COLORS.textSecondary} />
-      </ThemeCard>
+  const handleAdminAuth = () => {
+    if (adminAuthInput === adminPassword) { setIsAdminAuthenticated(true); setShowAdminAuthModal(false); setAdminAuthInput(''); }
+    else { Alert.alert('エラー', '管理用パスワードが違います。'); }
+  };
 
-      <ThemeCard style={styles.itemRow}>
-        <View style={{ flex: 1 }}>
-          <ThemeText bold>アプリ配布用QRコード</ThemeText>
-          <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 4 }}>
-            スタッフにアプリを共有します
-          </ThemeText>
-        </View>
-        <TouchableOpacity style={styles.inlineBtn} onPress={onShareApp}>
-          <QrCode size={18} color="#38bdf8" />
-          <ThemeText bold color="#38bdf8" style={{ marginLeft: 6 }}>表示</ThemeText>
-        </TouchableOpacity>
-      </ThemeCard>
+  const handleStaffUpdate = () => {
+    if (!editStaff) return;
+    setStaffList(prev => prev.map(s => s && s.id === editStaff.id ? { ...s, name: editName, profession: editProfession, placement: editPlacement, position: editPosition, status: editStatus, noHoliday: editNoHoliday, role: editRole } : s));
+    setShowStaffEditModal(false);
+    Alert.alert('完了', `${editName}さんの情報を更新しました。`);
+  };
 
-      <ThemeCard style={styles.itemRow}>
-        <View style={{ flex: 1 }}>
-          <ThemeText bold>管理用パスワード</ThemeText>
-          <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 4 }}>
-            認証状態: {monthlyLimits.adminPassword ? '設定済み' : '未設定'}
-          </ThemeText>
-        </View>
-        <TouchableOpacity style={styles.inlineBtn} onPress={() => setShowPasswordModal(true)}>
-          <ThemeText bold color="#38bdf8">設定</ThemeText>
-        </TouchableOpacity>
-      </ThemeCard>
-
-      <View style={styles.limitSection}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-          <ThemeText bold variant="h2">📈 {currentMonth + 1}月の出勤枠リミット設定</ThemeText>
-        </View>
-        <View style={styles.limitGrid}>
-          <View style={styles.limitBox}>
-            <ThemeText variant="caption" color={COLORS.textSecondary}>平日</ThemeText>
-            <TextInput style={styles.limitInput} keyboardType="numeric" defaultValue={String(limits.weekday)} onChangeText={(v) => updateLimits('weekday', parseInt(v), currentMonthStr)} />
-          </View>
-          <View style={styles.limitBox}>
-            <ThemeText variant="caption" color={COLORS.textSecondary}>土曜</ThemeText>
-            <TextInput style={styles.limitInput} keyboardType="numeric" defaultValue={String(limits.sat)} onChangeText={(v) => updateLimits('saturday', parseInt(v), currentMonthStr)} />
-          </View>
-        </View>
-      </View>
-    </View>
-  );
+  const handleDeleteStaff = (id: string, name: string) => {
+    Alert.alert('職員削除', `${name}さんを削除しますか？`, [{ text: 'キャンセル', style: 'cancel' }, { text: '削除', style: 'destructive', onPress: () => { setStaffList(prev => prev.filter(s => s.id !== id)); setShowStaffEditModal(false); }}]);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View>
-            <ThemeText variant="h1">管理パネル</ThemeText>
-            <ThemeText variant="caption" color={COLORS.textSecondary}>{currentMonth + 1}月の分析と設定</ThemeText>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.tabBar}>
-        <TouchableOpacity style={[styles.tabItem, activeTab === 'analysis' && styles.tabItemActive]} onPress={() => setActiveTab('analysis')}>
-          <BarChart3 size={20} color={activeTab === 'analysis' ? '#38bdf8' : COLORS.textSecondary} />
-          <ThemeText bold={activeTab === 'analysis'} color={activeTab === 'analysis' ? '#38bdf8' : COLORS.textSecondary} style={{ marginLeft: 8 }}>分析</ThemeText>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.tabItem, activeTab === 'holidays' && styles.tabItemActive]} onPress={() => setActiveTab('holidays')}>
-          <Users size={20} color={activeTab === 'holidays' ? '#38bdf8' : COLORS.textSecondary} />
-          <ThemeText bold={activeTab === 'holidays'} color={activeTab === 'holidays' ? '#38bdf8' : COLORS.textSecondary} style={{ marginLeft: 8 }}>スタッフ</ThemeText>
-        </TouchableOpacity>
-      </View>
-
+      <View style={styles.header}><ThemeText variant="h1">設定</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>個人設定と管理機能</ThemeText></View>
       <ScrollView style={{ flex: 1 }}>
-        {activeTab === 'analysis' ? renderAnalysis() : <View style={{ padding: 20 }}><ThemeText>スタッフ一覧（開発中）</ThemeText></View>}
+        <View style={{ padding: SPACING.md }}>
+          <ThemeText bold variant="h2" style={{ marginBottom: 12 }}>本人設定</ThemeText>
+          <ThemeCard style={styles.itemRow}>
+            <View style={styles.iconCircle}><User size={20} color="#38bdf8" /></View>
+            <View style={{ flex: 1, marginLeft: 12 }}><ThemeText bold>{profile?.name}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{profile?.profession} | {profile?.placement} {profile?.position ? `[${profile.position}]` : ''}</ThemeText></View>
+          </ThemeCard>
+          {!isAdminAuthenticated && (
+            <TouchableOpacity style={styles.adminLoginEntry} onPress={() => setShowAdminAuthModal(true)}>
+              <Shield size={20} color="white" /><ThemeText bold color="white" style={{ marginLeft: 10 }}>管理者モードへログイン</ThemeText>
+            </TouchableOpacity>
+          )}
+
+          {isAdminAuthenticated ? (
+            <View style={{ marginTop: 24 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <ThemeText bold variant="h2">🛡️ 管理者モード</ThemeText>
+                <TouchableOpacity onPress={() => setIsAdminAuthenticated(false)}><ThemeText color="#ef4444" style={{ fontSize: 12 }}>解除</ThemeText></TouchableOpacity>
+              </View>
+
+              <ThemeText bold style={{ color: '#ef4444', marginBottom: 12, marginTop: 12 }}>🔔 承認が必要な申請</ThemeText>
+              
+              {pendingStaff.length > 0 ? (
+                <View style={{ marginBottom: 16 }}>
+                  <ThemeText variant="caption" bold color={COLORS.textSecondary} style={{marginBottom:8}}>👤 新規登録の承認待ち ({pendingStaff.length}名)</ThemeText>
+                  {pendingStaff.map(s => (
+                    <ThemeCard key={s.id} style={styles.approvalItem}>
+                      <View style={{ flex: 1 }}><ThemeText bold>{s.name}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{s.profession} | {s.placement}</ThemeText></View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TouchableOpacity style={[styles.miniApproveBtn, {backgroundColor: '#10b981'}]} onPress={() => handleApproveStaff(s.id)}><Check size={16} color="white" /></TouchableOpacity>
+                        <TouchableOpacity style={[styles.miniApproveBtn, {backgroundColor: '#ef4444'}]} onPress={() => handleDeleteStaff(s.id, s.name)}><X size={16} color="white" /></TouchableOpacity>
+                      </View>
+                    </ThemeCard>
+                  ))}
+                </View>
+              ) : null}
+
+              {pendingRequests.length > 0 ? (
+                <View style={{ marginBottom: 16 }}>
+                  <ThemeText variant="caption" bold color={COLORS.textSecondary} style={{marginBottom:8}}>📅 休暇・休日申請の承認待ち ({pendingRequests.length}件)</ThemeText>
+                  {pendingRequests.map(r => (
+                    <ThemeCard key={r.id} style={styles.approvalItem}>
+                      <View style={{ flex: 1 }}><ThemeText bold>{r.staffName}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{formatDate(r.date)} | {r.type} {r.hours ? `(${r.hours}h)` : ''}</ThemeText></View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TouchableOpacity style={[styles.miniApproveBtn, {backgroundColor: '#38bdf8'}]} onPress={() => handleApproveRequest(r)}><Check size={16} color="white" /></TouchableOpacity>
+                        <TouchableOpacity style={[styles.miniApproveBtn, {backgroundColor: 'rgba(255,255,255,0.05)'}]} onPress={() => handleRejectRequest(r.id)}><X size={16} color={COLORS.textSecondary} /></TouchableOpacity>
+                      </View>
+                    </ThemeCard>
+                  ))}
+                </View>
+              ) : null}
+
+              {pendingStaff.length === 0 && pendingRequests.length === 0 ? (
+                <ThemeCard style={{ padding: 20, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.02)', marginBottom: 20 }}>
+                  <ThemeText color={COLORS.textSecondary}>現在、承認待ちの申請はありません</ThemeText>
+                </ThemeCard>
+              ) : null}
+
+              <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>📋 レポーティング</ThemeText>
+              <ThemeCard style={styles.itemRow}>
+                <View style={styles.iconCircle}><FileText size={20} color="#10b981" /></View>
+                <View style={{ flex: 1, marginLeft: 12 }}><ThemeText bold>全職員の勤務実績表</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{currentMonth + 1}月分の全スタッフ一覧表（A4横印刷用）</ThemeText></View>
+                <TouchableOpacity style={styles.inlineBtn} onPress={handlePrintAttendanceReport}>
+                  <Printer size={18} color="#38bdf8" /><ThemeText bold color="#38bdf8" style={{marginLeft:6}}>生成</ThemeText>
+                </TouchableOpacity>
+              </ThemeCard>
+
+              <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>👥 職員の属性・役割管理</ThemeText>
+              <View style={styles.staffAdminList}>
+                {staffList.filter(s => s && s.isApproved).map(s => (
+                  <ThemeCard key={s.id} style={styles.staffAdminItem}>
+                    <View style={{ flex: 1 }}><ThemeText bold>{s.name}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{s.placement} | {s.profession} ({s.status}) {s.position ? `[${s.position}]` : ''}</ThemeText></View>
+                    <TouchableOpacity style={styles.staffMiniEdit} onPress={() => { setEditStaff(s); setEditName(s.name); setEditProfession(s.profession); setEditPlacement(s.placement); setEditPosition(s.position || ''); setEditStatus(s.status || '常勤'); setEditNoHoliday(!!s.noHoliday); setEditRole(s.role || ['スタッフ']); setShowStaffEditModal(true); }}><Edit3 size={16} color="#38bdf8" /><ThemeText bold color="#38bdf8" style={{marginLeft:4}}>編集</ThemeText></TouchableOpacity>
+                  </ThemeCard>
+                ))}
+              </View>
+
+              <View style={{ marginTop: 24, paddingBottom: 40 }}>
+                <ThemeText bold variant="h2" style={{ marginBottom: 16 }}>📈 {currentMonth + 1}月の必要人数設定</ThemeText>
+                <View style={styles.limitGrid}>
+                  <DropdownSelector label="平日" value={limits.weekday} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('weekday', v, currentMonthStr)} style={{flex:1}} />
+                  <DropdownSelector label="土曜" value={limits.sat} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('saturday', v, currentMonthStr)} style={{flex:1}} />
+                </View>
+                <View style={styles.limitGrid}>
+                  <DropdownSelector label="日曜" value={limits.sun} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('sunday', v, currentMonthStr)} style={{flex:1}} />
+                  <DropdownSelector label="祝日" value={limits.pub} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('public', v, currentMonthStr)} style={{flex:1}} />
+                </View>
+              </View>
+            </View>
+          ) : null}
+          <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}><LogOut size={20} color="#ef4444" /><ThemeText bold color="#ef4444" style={{ marginLeft: 10 }}>アプリからログアウト</ThemeText></TouchableOpacity>
+        </View>
       </ScrollView>
 
-      <Modal visible={showPasswordModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.passwordModal}>
-            <ThemeText variant="h2" style={{ marginBottom: 16 }}>管理用パスワード設定</ThemeText>
-            <TextInput style={styles.modalInput} placeholder="新しいパスワード" secureTextEntry value={newPassword} onChangeText={setNewPassword} placeholderTextColor={COLORS.textSecondary} />
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowPasswordModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity>
-              <TouchableOpacity style={styles.confirmBtn} onPress={() => { if(newPassword) { updatePassword(newPassword); setShowPasswordModal(false); Alert.alert('保存完了'); } }}>
-                <ThemeText bold color="white">保存</ThemeText>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* --- モーダル群 --- */}
+      <Modal visible={showStaffEditModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}><View style={[styles.detailModal, {maxHeight: '90%'}]}><View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:20}}><ThemeText variant="h2">職員情報の編集</ThemeText><TouchableOpacity onPress={() => setShowStaffEditModal(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity></View><ScrollView showsVerticalScrollIndicator={false}><ThemeText bold style={{marginBottom:8, fontSize:13, color:COLORS.textSecondary}}>氏名</ThemeText><TextInput style={styles.modalInput} value={editName} onChangeText={setEditName} placeholder="氏名を入力" placeholderTextColor={COLORS.textSecondary} /><DropdownSelector label="職種" value={editProfession} options={PROFESSION_OPTS} onSelect={setEditProfession} /><DropdownSelector label="役割(ポジション)" value={editPosition} options={POSITION_OPTS} onSelect={setEditPosition} /><DropdownSelector label="配置" value={editPlacement} options={PLACEMENT_OPTS} onSelect={setEditPlacement} /><DropdownSelector label="ステータス" value={editStatus} options={STATUS_OPTS} onSelect={setEditStatus} /><DropdownSelector label="休日設定 (AI割当条件)" value={editNoHoliday} options={HOLIDAY_SETTING_OPTS} onSelect={setEditNoHoliday} /><DropdownSelector label="アプリ権限" value={editRole} options={ROLE_OPTS} onSelect={setEditRole} /><View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}><TouchableOpacity style={styles.cancelBtn} onPress={() => setShowStaffEditModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={styles.confirmBtn} onPress={handleStaffUpdate}><ThemeText bold color="white">保存する</ThemeText></TouchableOpacity></View><TouchableOpacity style={{ marginTop: 24, padding: 12, alignItems: 'center' }} onPress={() => editStaff && handleDeleteStaff(editStaff.id, editStaff.name)}><ThemeText color="#ef4444">職員を削除する</ThemeText></TouchableOpacity></ScrollView></View></View></Modal>
+      <Modal visible={showAdminAuthModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>管理者認証</ThemeText><TextInput style={styles.modalInput} placeholder="管理パスワード" secureTextEntry value={adminAuthInput} onChangeText={setAdminAuthInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowAdminAuthModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#38bdf8'}]} onPress={handleAdminAuth}><ThemeText bold color="white">ログイン</ThemeText></TouchableOpacity></View></View></View></Modal>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: { padding: SPACING.md, paddingTop: 20 },
-  tabBar: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(30, 41, 59, 0.5)' },
-  tabItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16 },
-  tabItemActive: { borderBottomWidth: 3, borderBottomColor: '#38bdf8' },
-  actionRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
-  mainBtn: { flex: 1, height: 60, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  promoCard: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: 'rgba(234, 179, 8, 0.05)', borderColor: 'rgba(234, 179, 8, 0.2)', marginBottom: 16 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', padding: 16, marginBottom: 12, backgroundColor: 'rgba(255,255,255,0.02)' },
+  header: { padding: SPACING.md, paddingTop: 10 },
+  itemRow: { flexDirection: 'row', alignItems: 'center', padding: 16, marginBottom: 12, backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 16 },
+  approvalItem: { flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12, borderLeftWidth: 3, borderLeftColor: '#ef4444' },
+  miniApproveBtn: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  iconCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
   inlineBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
-  limitSection: { marginTop: 20 },
+  adminLoginEntry: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(56, 189, 248, 0.15)', height: 60, borderRadius: 16, marginTop: 20, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.3)' },
+  staffAdminList: { marginBottom: 20 },
+  staffAdminItem: { flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.015)', borderRadius: 12 },
+  staffMiniEdit: { flexDirection: 'row', alignItems: 'center', padding: 8, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 8 },
+  actionRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 60, borderRadius: 16, marginTop: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)' },
+  dropdownBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, height: 52, paddingHorizontal: 16 },
   limitGrid: { flexDirection: 'row', gap: 12 },
-  limitBox: { flex: 1, backgroundColor: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
-  limitInput: { backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: 8, height: 48, marginTop: 8, textAlign: 'center', color: 'white', fontWeight: 'bold', fontSize: 18 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
-  passwordModal: { width: '80%', backgroundColor: '#1e293b', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  modalInput: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, height: 52, paddingHorizontal: 16, color: 'white', fontSize: 16 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
+  detailModal: { width: '85%', backgroundColor: '#0f172a', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  modalInput: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, height: 52, paddingHorizontal: 16, color: 'white', fontSize: 16, marginBottom: 8 },
   cancelBtn: { flex: 1, height: 52, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
-  confirmBtn: { flex: 1, height: 52, borderRadius: 12, backgroundColor: '#38bdf8', justifyContent: 'center', alignItems: 'center' }
+  confirmBtn: { flex: 1, height: 52, borderRadius: 12, backgroundColor: '#38bdf8', justifyContent: 'center', alignItems: 'center' },
+  pickerContainer: { width: '85%', maxHeight: '70%', backgroundColor: '#0f172a', borderRadius: 24, padding: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  pickerItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.02)' },
+  pickerItemActive: { backgroundColor: 'rgba(56, 189, 248, 0.05)' }
 });

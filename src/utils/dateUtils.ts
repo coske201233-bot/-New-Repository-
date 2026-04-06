@@ -79,3 +79,39 @@ export const formatDate = (dateInput: string | Date): string => {
   
   return `${year}年${month}月${day}日(${dayName})`;
 };
+
+/**
+ * カレンダー表示用の月間情報を取得します
+ */
+export const getMonthInfo = (year: number, month: number) => {
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const info = [];
+
+  // 前月の空白部分
+  for (let i = 0; i < firstDay; i++) {
+    info.push({ day: 0, dateStr: '', empty: true });
+  }
+
+  // 今月の日付
+  for (let i = 1; i <= daysInMonth; i++) {
+    const date = new Date(year, month, i);
+    const dateStr = getDateStr(date);
+    info.push({
+      day: i,
+      dateStr,
+      isH: isHoliday(date) || date.getDay() === 0,
+      empty: false
+    });
+  }
+
+  return info;
+};
+
+/**
+ * 氏名の表記を正規化します（前後の空白削除など）
+ */
+export const normalizeName = (name: string): string => {
+  if (!name) return '';
+  return name.trim();
+};
