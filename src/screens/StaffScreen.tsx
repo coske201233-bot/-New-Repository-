@@ -7,8 +7,9 @@ import {
   ChevronLeft, ChevronRight, Calendar, User, 
   Check, X, Clock, MapPin, Briefcase, Trash2, Settings, Shield, Printer
 } from 'lucide-react-native';
-import { getMonthInfo, normalizeName } from '../utils/dateUtils';
+import { getMonthInfo, normalizeName, getDayType } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
+import * as Print from 'expo-print';
 
 interface StaffScreenProps {
   staffList: any[];
@@ -29,9 +30,10 @@ interface MonthDay {
   empty: boolean;
 }
 
-export const StaffScreen: React.FC<StaffScreenProps> = ({
-  staffList = [], setStaffList, requests = [], setRequests, profile, isAdminAuthenticated, isPrivileged, onDeleteRequest
-}) => {
+export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
+  const { staffList, requests, setRequests, onDeleteRequest, isPrivileged } = props;
+  const isAdminAuthenticated = props.isAdminAuthenticated || isPrivileged;
+  
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
   const [isCalendarModalVisible, setIsCalendarModalVisible] = useState(false);
   const [activeDate, setActiveDate] = useState(new Date());
@@ -116,6 +118,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = ({
     setIsSaving(true);
     try {
       const type = selectedType;
+      const now = new Date().toISOString();
       const newReq = {
         id: `m-${selectedStaff.id}-${selectedDay}`,
         staffId: selectedStaff.id,
@@ -124,17 +127,22 @@ export const StaffScreen: React.FC<StaffScreenProps> = ({
         type: type,
         hours: HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : undefined,
         status: 'approved',
-        createdAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
         isShift: true
       };
+      
       const sT = normalize(selectedStaff.name);
-      const updated = requests.filter((r: any) => r && !( (String(r.staffId) === selectedStaff.id || normalize(r.staffName) === sT) && r.date === selectedDay ));
-      const final = [...updated, newReq];
-      setRequests(final);
+      setRequests((prev: any[]) => {
+        const without = prev.filter((r: any) => r && !( (String(r.staffId) === selectedStaff.id || normalize(r.staffName) === sT) && r.date === selectedDay ));
+        return [newReq, ...without];
+      });
+      
       await cloudStorage.upsertRequests([newReq]);
-      Alert.alert('完了', '確定しました。');
+      Alert.alert('完了', '保存しました');
     } catch (e) {
-      Alert.alert('エラー', '失敗しました。');
+      console.error('Confirm Shift Error:', e);
+      Alert.alert('エラー', '保存に失敗しました。');
     } finally {
       setIsSaving(false);
     }
@@ -178,33 +186,59 @@ export const StaffScreen: React.FC<StaffScreenProps> = ({
 
   const handlePrint = () => {
     if (Platform.OS !== 'web' || !selectedStaff) return;
-    const year = activeDate.getFullYear();
-    const month = activeDate.getMonth() + 1;
-    const sT = normalize(selectedStaff.name);
-    const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
     
-    let rowsHtml = '';
-    monthInfo.forEach((d: MonthDay) => {
-      if (d.empty) return;
-      const r = requestMap.get(d.dateStr)?.get(sT);
-      const h = getReqHours(r);
-      const shiftDisplay = r ? (HOUR_SELECTOR_TYPES.includes(r.type) ? `${r.type}(${h}h)` : ((r.type === '日勤' || r.type === '出勤') ? '出勤' : r.type)) : '-';
-      const dayIdx = new Date(d.dateStr).getDay();
-      const style = (d.isH || dayIdx === 0) ? 'color: #ef4444;' : '';
-      rowsHtml += `
-        <tr>
-          <td style="${style} text-align: center;">${d.day}</td>
-          <td style="${style} text-align: center;">${dayNames[dayIdx]}</td>
-          <td style="font-weight: bold; text-align: center; color: ${['公休','年休','特休','時間休','夏季休暇'].includes(r?.type) ? '#ef4444' : '#1e293b'}">${shiftDisplay}</td>
-          <td></td>
-        </tr>
-      `;
-    });
+    try {
+      const year = activeDate.getFullYear();
+      const month = activeDate.getMonth() + 1;
+      const sT = normalize(selectedStaff.name);
+      const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+      const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
+      
+      let rowsHtml = '';
+      monthInfo.forEach((d: MonthDay) => {
+        if (d.empty) return;
+        const r = requestMap.get(d.dateStr)?.get(sT);
+        
+        let type = '';
+        if (r) {
+          type = r.type;
+        } else {
+          const dDate = new Date(d.dateStr);
+          const dtype = getDayType(dDate);
+          const isNoHoliday = (dtype !== 'weekday') && (selectedStaff.monthlyNoHoliday?.[currentMonthKey] ?? selectedStaff.noHoliday);
+          type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '日勤' : '公休');
+        }
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-    printWindow.document.write(`<html><head><title>${selectedStaff.name} - ${year}年${month}月カレンダー</title><style>body { font-family: sans-serif; padding: 40px; color: #1e293b; } .header { border-bottom: 2px solid #38bdf8; padding-bottom: 10px; margin-bottom: 30px; } h1 { margin: 0; font-size: 24px; } table { width: 100%; border-collapse: collapse; margin-top: 20px; } th, td { border: 1px solid #e2e8f0; padding: 12px; text-align: left; } th { background-color: #f8fafc; font-size: 14px; }</style></head><body><div class="header"><h1>出勤予定表（${year}年${month}月）</h1><div>氏名: <strong>${selectedStaff.name}</strong> (${selectedStaff.profession} | ${selectedStaff.placement})</div></div><table><thead><tr><th style="width: 60px;">日</th><th style="width: 60px;">曜</th><th>シフト</th><th>備考</th></tr></thead><tbody>${rowsHtml}</tbody></table><script>window.onload=function(){window.print();setTimeout(()=>{window.close();},500);};</script></body></html>`);
-    printWindow.document.close();
+        const h = r ? getReqHours(r) : 0;
+        const shiftDisplay = (HOUR_SELECTOR_TYPES.includes(type)) ? `${type}(${h}h)` : ((type === '日勤' || type === '出勤') ? '出勤' : type);
+        
+        const dDate = new Date(d.dateStr);
+        const dayIdx = dDate.getDay();
+        const style = (d.isH || dayIdx === 0) ? 'color: #ef4444; background-color: #fef2f2;' : (dayIdx === 6 ? 'color: #3b82f6; background-color: #eff6ff;' : '');
+        
+        rowsHtml += `
+          <tr style="${style}">
+            <td style="text-align: center;">${d.day}</td>
+            <td style="text-align: center;">${dayNames[dayIdx]}</td>
+            <td style="font-weight: bold; text-align: center;">${shiftDisplay}</td>
+            <td>${r?.details?.note || ''}</td>
+          </tr>
+        `;
+      });
+
+      const html = `<html><head><title>個人別勤務実績表</title><style>@page { size: A4 portrait; margin: 10mm; } body { font-family: sans-serif; padding: 20px; color: #1e293b; } .header { border-bottom: 2px solid #38bdf8; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; } h1 { margin: 0; font-size: 20px; } .meta { font-size: 14px; text-align: right; } table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: center; } th { background-color: #f8fafc; font-size: 13px; font-weight: bold; }</style></head><body><div class="header"><div><h1>個人別勤務実績表 (${month}月)</h1><div style="margin-top: 5px;">氏名: <strong style="font-size: 18px;">${selectedStaff.name}</strong></div></div><div class="meta">${year}年${month}月分<br/>職種: ${selectedStaff.profession}</div></div><table><thead><tr><th style="width: 50px;">日</th><th style="width: 50px;">曜</th><th>勤務実績 / 申請</th><th>特記事項</th></tr></thead><tbody>${rowsHtml}</tbody></table><script>window.onload=function(){window.print();};<\\/script></body></html>`;
+
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
+      } else {
+        Alert.alert('ポップアップ制限', '実績表のプレビューが開けませんでした。ブラウザ設定でポップアップを許可してください。');
+      }
+    } catch (e) {
+      console.error('Print Error:', e);
+      Alert.alert('エラー', 'データの生成中に問題が発生しました。');
+    }
   };
 
   const renderCalendar = () => {

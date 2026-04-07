@@ -152,7 +152,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
 
             {requests
               .filter(r => {
-                const isWorkType = r.type === '出勤' || r.type === 'シフト休';
+                const isWorkType = r.type === '出勤' || r.type === '公休';
                 if (isWorkType || r.status === 'deleted') return false;
                 
                 const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated;

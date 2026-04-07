@@ -7,8 +7,9 @@ import {
   ChevronRight, Database, FileOutput, 
   QrCode, X, Check, Shield, User, Key, Save, LogOut, Edit3, Trash2, Printer, FileText, UserPlus, Clock
 } from 'lucide-react-native';
-import { getMonthInfo, normalizeName, formatDate } from '../utils/dateUtils';
+import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
+import * as Print from 'expo-print';
 
 interface AdminScreenProps {
   profile: any;
@@ -94,43 +95,92 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   const handlePrintAttendanceReport = () => {
     if (Platform.OS !== 'web') return;
-    const year = currentYear;
-    const month = currentMonth + 1;
-    const monthInfo = getMonthInfo(year, currentMonth) || [];
-    const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
     
-    let headerHtml = '<th>氏名</th><th>職種</th>';
-    monthInfo.forEach((d: any) => {
-      if (!d.empty) {
-        const dDate = new Date(d.dateStr);
-        const dayIdx = isNaN(dDate.getTime()) ? 0 : dDate.getDay();
-        const style = (d.isH || dayIdx === 0) ? 'color: #ef4444;' : '';
-        headerHtml += `<th style="${style} min-width: 25px;">${d.day}<br/><small>${dayNames[dayIdx]}</small></th>`;
-      }
-    });
-
-    let rowsHtml = '';
-    staffList.forEach(s => {
-      if (!s || !s.isApproved) return;
-      let row = `<tr><td><small>${s.name}</small></td><td><small>${s.profession}</small></td>`;
-      monthInfo.forEach((d: any) => {
+    try {
+      // データの準備
+      const year = currentYear;
+      const month = currentMonth + 1;
+      const monthInfoArr = getMonthInfo(year, currentMonth) || [];
+      const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+      const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
+      
+      // ヘッダー
+      let headerHtml = '<th style="width: 80px;">氏名</th><th style="width: 40px;">職種</th>';
+      monthInfoArr.forEach((d: any) => {
         if (!d.empty) {
-          const sT = normalizeName(s.name);
-          const req = requests.find(r => r && r.date === d.dateStr && (String(r.staffId) === s.id || normalizeName(r.staffName) === sT));
-          const type = req ? req.type : '';
-          const style = type === '公休' ? 'background-color: #fef2f2; color: #ef4444;' : '';
-          row += `<td style="${style} text-align: center; font-size: 10px;">${type === '公休' ? '公' : (type === '日勤' ? '日' : (type === '夜勤' ? '夜' : (type === '早番' ? '早' : (type === '遅番' ? '遅' : (type ? type.charAt(0) : '')))))}</td>`;
+          const dDate = new Date(d.dateStr);
+          const dayIdx = isNaN(dDate.getTime()) ? 0 : dDate.getDay();
+          const style = (d.isH || dayIdx === 0) ? 'color: #ef4444; background-color: #fef2f2;' : (dayIdx === 6 ? 'color: #3b82f6; background-color: #eff6ff;' : '');
+          headerHtml += `<th style="${style}">${d.day}<br/><small>${dayNames[dayIdx]}</small></th>`;
         }
       });
-      row += '</tr>';
-      rowsHtml += row;
-    });
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
+      // 行データ
+      let rowsHtml = '';
+      const listToPrint = staffList.filter(s => s && s.isApproved);
+      listToPrint.forEach(s => {
+        let row = `<tr><td style="text-align: left; padding-left: 5px; font-weight: bold;">${s.name}</td><td>${s.profession || ''}</td>`;
+        monthInfoArr.forEach((d: any) => {
+          if (!d.empty) {
+            const sT = normalizeName(s.name);
+            const req = requests.find(r => r && r.date === d.dateStr && (String(r.staffId) === s.id || normalizeName(r.staffName) === sT));
+            
+            let type = '';
+            if (req) {
+              type = req.type;
+            } else {
+              const dDate = new Date(d.dateStr);
+              const dtype = getDayType(dDate);
+              const isNoHoliday = (dtype !== 'weekday') && (s.monthlyNoHoliday?.[currentMonthKey] ?? s.noHoliday);
+              type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '日勤' : '公休');
+            }
 
-    printWindow.document.write(`<html><head><title>${year}年${month}月 出勤実績表</title><style>@page { size: A4 landscape; margin: 10mm; } body { font-family: sans-serif; padding: 20px; font-size: 12px; } h1 { font-size: 18px; margin-bottom: 20px; border-bottom: 2px solid #38bdf8; } table { width: 100%; border-collapse: collapse; table-layout: fixed; } th, td { border: 1px solid #cbd5e1; padding: 4px 2px; text-align: left; } th { background-color: #f1f5f9; font-size: 10px; } td { font-size: 11px; } .sun { color: #ef4444; }</style></head><body><h1>出勤実績一覧（${year}年${month}月）</h1><table><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table><script>window.onload=function(){window.print();setTimeout(()=>window.close(),500);};</script></body></html>`);
-    printWindow.document.close();
+            const isOff = ['公休', '年休', '特休', '休暇', '欠勤'].includes(type);
+            const style = isOff ? 'background-color: #fef2f2; color: #ef4444;' : '';
+            const label = type === '公休' ? '公' : (type === '日勤' || type === '出勤' ? '日' : (type === '夜勤' ? '夜' : (type === '早番' ? '早' : (type === '遅番' ? '遅' : (type ? type.charAt(0) : '')))));
+            row += `<td style="${style}">${label}</td>`;
+          }
+        });
+        row += '</tr>';
+        rowsHtml += row;
+      });
+
+      const html = `
+        <html>
+          <head>
+            <title>勤務実績表</title>
+            <style>
+              @page { size: A4 landscape; margin: 5mm; }
+              body { font-family: sans-serif; padding: 10px; color: #1e293b; }
+              .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; border-bottom: 2px solid #38bdf8; padding-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 2px solid #334155; }
+              th, td { border: 1px solid #94a3b8; padding: 2px 1px; text-align: center; font-size: 9px; }
+              th { background-color: #f1f5f9; font-weight: bold; }
+              td { height: 22px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h1 style="margin:0; font-size:18px;">勤務実績表（${year}年${month}月）</h1>
+              <div style="font-size: 11px;">印刷日: ${new Date().toLocaleDateString('ja-JP')}</div>
+            </div>
+            <table><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>
+            <script>window.onload=function(){window.print();};<\\/script>
+          </body>
+        </html>
+      `;
+
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
+      } else {
+        Alert.alert('ポップアップ制限', 'ブラウザのポップアップ設定を許可してください。');
+      }
+    } catch (err) {
+      console.error('Print logic error:', err);
+      Alert.alert('エラー', 'データの生成中に問題が発生しました。');
+    }
   };
 
   const DropdownSelector = ({ label, value, options, onSelect, style }: any) => {
@@ -243,11 +293,26 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               ) : null}
 
               <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>📋 レポーティング</ThemeText>
+              
               <ThemeCard style={styles.itemRow}>
                 <View style={styles.iconCircle}><FileText size={20} color="#10b981" /></View>
-                <View style={{ flex: 1, marginLeft: 12 }}><ThemeText bold>全職員の出勤実績表</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{currentMonth + 1}月分の全スタッフ一覧表（A4横印刷用）</ThemeText></View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <ThemeText bold>全職員の勤務実績表</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>{currentMonth + 1}月分の全スタッフ一覧表（A4横印刷用）</ThemeText>
+                </View>
                 <TouchableOpacity style={styles.inlineBtn} onPress={handlePrintAttendanceReport}>
                   <Printer size={18} color="#38bdf8" /><ThemeText bold color="#38bdf8" style={{marginLeft:6}}>生成</ThemeText>
+                </TouchableOpacity>
+              </ThemeCard>
+
+              <ThemeCard style={styles.itemRow}>
+                <View style={styles.iconCircle}><QrCode size={20} color="#f59e0b" /></View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <ThemeText bold>アプリ配布用QRコード</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>スタッフにアプリを配布するためのQRコードを表示します</ThemeText>
+                </View>
+                <TouchableOpacity style={[styles.inlineBtn, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]} onPress={onShareApp}>
+                  <ThemeText bold color="#f59e0b">表示</ThemeText>
                 </TouchableOpacity>
               </ThemeCard>
 

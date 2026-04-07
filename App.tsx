@@ -34,14 +34,14 @@ const deduplicateRequests = (list: any[]) => {
   const isManual = (i: any) => {
     const idStr = String(i.id || '');
     if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('q-h-') || /^\d+$/.test(idStr)) return true;
-    const leaveTypes = ['年休', '有給休暇', '時間休', '振替', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '午前振替', '午後振替'];
+    const leaveTypes = ['年休', '有給休暇', '時間休', '振替', '1日振替', '半日振替', '振替＋時間休', '公休', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '午前振替', '午後振替'];
     if (leaveTypes.includes(i.type)) return true;
     return (i.details?.note && !i.details.note.includes('自動')) || (i.reason && i.reason !== '自動割当');
   };
 
   list.forEach(item => {
     if (!item?.id || !item?.staffName || !item?.date) return;
-    const key = `${item.staffId || 'legacy'}-${normalizeName(item.staffName)}-${item.date}`;
+    const key = `${normalizeName(item.staffName)}-${item.date}`;
     const existing = map.get(key);
 
     const isManualNew = isManual(item);
@@ -233,25 +233,22 @@ export default function App() {
   }, [profile, isInitialized, isSyncing]);
 
   const handleUpdateStaffList = async (update: any[] | ((prev: any[]) => any[])) => {
-    let nextList: any[] = [];
     setStaffList(prev => {
       const next = typeof update === 'function' ? update(prev) : update;
-      nextList = sortStaffByName(next || []);
-      return nextList;
+      const sorted = sortStaffByName(next || []);
+      saveData(STORAGE_KEYS.STAFF_LIST, sorted).catch(console.error);
+      return sorted;
     });
-    if (nextList.length > 0) await saveData(STORAGE_KEYS.STAFF_LIST, nextList);
   };
 
   const handleUpdateRequests = async (update: any[] | ((prev: any[]) => any[])) => {
-    let finalRequests: any[] = [];
     setRequests(prev => {
       const next = typeof update === 'function' ? update(prev) : update;
       if (!next) return prev;
       const { cleanList } = deduplicateRequests(next);
-      finalRequests = cleanList;
+      saveData(STORAGE_KEYS.REQUESTS, cleanList).catch(console.error);
       return cleanList;
     });
-    if (finalRequests.length > 0) await saveData(STORAGE_KEYS.REQUESTS, finalRequests);
   };
 
   const handleDeleteRequests = async (ids: string[]) => {

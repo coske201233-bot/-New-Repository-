@@ -97,7 +97,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       const userRequests = requestMap.get(dateStr)?.get(staff.name?.trim()) || [];
       const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
       
-      // 休暇申請（シフト休含む）を優先的に探す
+      // 休暇申請（公休含む）を優先的に探す
       const leaveRequest = userRequests.find(r => !attendanceTypes.includes(r.type) && r.status === 'approved');
       const workRequest = userRequests.find(r => attendanceTypes.includes(r.type) && r.status === 'approved');
       const pendingRequest = userRequests.find(r => r.status === 'pending');
@@ -188,7 +188,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                     id: `off-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                     staffName: staffName,
                     date: dateStr,
-                    type: 'シフト休',
+                    type: '公休',
                     status: 'approved',
                     reason: '管理者の調整',
                     createdAt: new Date().toISOString(),

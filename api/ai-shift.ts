@@ -202,10 +202,10 @@ export default async function handler(req: any, res: any) {
           staffWorkDays[cId].add(dStr);
           staffHolidayWorkCount[cId]++;
 
-          // 振替休日（シフト休）を平日にばらけさせる
+          // 振替休日（公休）を平日にばらけさせる
           const wkday = [...weekdays].sort((a, b) => {
-            const aOffs = autoAssigned.filter(x => x.date === a && x.type === 'シフト休').length;
-            const bOffs = autoAssigned.filter(x => x.date === b && x.type === 'シフト休').length;
+            const aOffs = autoAssigned.filter(x => x.date === a && x.type === '公休').length;
+            const bOffs = autoAssigned.filter(x => x.date === b && x.type === '公休').length;
             return aOffs - bOffs; // 振替休日が少ない日を優先
           }).find(wd => {
             const lim = schedule[wd].limit;
@@ -215,7 +215,7 @@ export default async function handler(req: any, res: any) {
           });
 
           if (wkday) {
-            autoAssigned.push({ staffId: cId, staffName: chosen.name, date: wkday, type: 'シフト休', details: { note: '休日振替' } });
+            autoAssigned.push({ staffId: cId, staffName: chosen.name, date: wkday, type: '公休', details: { note: '休日振替' } });
           }
         }
       }
@@ -240,7 +240,7 @@ export default async function handler(req: any, res: any) {
             const isUnavailable = s.status === '長期休暇' || s.status === '入職前' || s.isApproved === false;
             const alreadyAssigned = staffWorkDays[sId].has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
             const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type)) ||
-                          autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr && a.type === 'シフト休');
+                          autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr && a.type === '公休');
             
             // 平日は無理に連続出勤をさせず、他者に割り振る余地を残す
             return !isUnavailable && !alreadyAssigned && !isOff && !wouldExceedConsecutive(dStr, staffWorkDays[sId]);

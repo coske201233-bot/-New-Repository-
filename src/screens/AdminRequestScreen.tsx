@@ -19,7 +19,7 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved'>('pending');
   
   const filteredRequests = useMemo(() => {
-    let list = requests.filter(r => r && r.type !== '出勤' && r.type !== 'シフト休' && r.status !== 'deleted');
+    let list = requests.filter(r => r && r.type !== '出勤' && r.type !== '公休' && r.status !== 'deleted');
     if (filter !== 'all') {
       list = list.filter(r => r.status === filter);
     }
