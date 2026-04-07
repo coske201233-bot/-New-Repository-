@@ -292,7 +292,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </ThemeCard>
               ) : null}
 
-              <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>📋 レポーティング</ThemeText>
+              <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>📋 レポーティング & ツール</ThemeText>
               
               <ThemeCard style={styles.itemRow}>
                 <View style={styles.iconCircle}><FileText size={20} color="#10b981" /></View>
@@ -304,6 +304,41 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   <Printer size={18} color="#38bdf8" /><ThemeText bold color="#38bdf8" style={{marginLeft:6}}>生成</ThemeText>
                 </TouchableOpacity>
               </ThemeCard>
+
+              <ThemeCard style={styles.itemRow}>
+                <View style={styles.iconCircle}><Clock size={20} color="#38bdf8" /></View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <ThemeText bold>シフト自動割り当て</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>{currentMonth + 1}月の残り枠を自動的に埋めます</ThemeText>
+                </View>
+                <TouchableOpacity 
+                  style={[styles.inlineBtn, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }, isAssigning && { opacity: 0.5 }]} 
+                  onPress={async () => {
+                    if (isAssigning) return;
+                    setIsAssigning(true);
+                    try {
+                      await onAutoAssign(currentYear, currentMonth + 1, limits);
+                      Alert.alert('完了', 'シフトの自動割り当てが完了しました。');
+                    } catch (e) {
+                      console.error('Auto assign error:', e);
+                      Alert.alert('エラー', '自動割り当て中にエラーが発生しました。');
+                    } finally {
+                      setIsAssigning(false);
+                    }
+                  }}
+                  disabled={isAssigning}
+                >
+                  {isAssigning ? (
+                    <ActivityIndicator size="small" color="#38bdf8" />
+                  ) : (
+                    <>
+                      <Database size={18} color="#38bdf8" />
+                      <ThemeText bold color="#38bdf8" style={{marginLeft:6}}>実行</ThemeText>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </ThemeCard>
+
 
               <ThemeCard style={styles.itemRow}>
                 <View style={styles.iconCircle}><QrCode size={20} color="#f59e0b" /></View>
@@ -345,7 +380,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
       {/* --- モーダル群 --- */}
       <Modal visible={showStaffEditModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}><View style={[styles.detailModal, {maxHeight: '90%'}]}><View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:20}}><ThemeText variant="h2">職員情報の編集</ThemeText><TouchableOpacity onPress={() => setShowStaffEditModal(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity></View><ScrollView showsVerticalScrollIndicator={false}><ThemeText bold style={{marginBottom:8, fontSize:13, color:COLORS.textSecondary}}>氏名</ThemeText><TextInput style={styles.modalInput} value={editName} onChangeText={setEditName} placeholder="氏名を入力" placeholderTextColor={COLORS.textSecondary} /><DropdownSelector label="職種" value={editProfession} options={PROFESSION_OPTS} onSelect={setEditProfession} /><DropdownSelector label="役割(ポジション)" value={editPosition} options={POSITION_OPTS} onSelect={setEditPosition} /><DropdownSelector label="配置" value={editPlacement} options={PLACEMENT_OPTS} onSelect={setEditPlacement} /><DropdownSelector label="ステータス" value={editStatus} options={STATUS_OPTS} onSelect={setEditStatus} /><DropdownSelector label="休日設定 (AI割当条件)" value={editNoHoliday} options={HOLIDAY_SETTING_OPTS} onSelect={setEditNoHoliday} /><DropdownSelector label="アプリ権限" value={editRole} options={ROLE_OPTS} onSelect={setEditRole} /><View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}><TouchableOpacity style={styles.cancelBtn} onPress={() => setShowStaffEditModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={styles.confirmBtn} onPress={handleStaffUpdate}><ThemeText bold color="white">保存する</ThemeText></TouchableOpacity></View><TouchableOpacity style={{ marginTop: 24, padding: 12, alignItems: 'center' }} onPress={() => editStaff && handleDeleteStaff(editStaff.id, editStaff.name)}><ThemeText color="#ef4444">職員を削除する</ThemeText></TouchableOpacity></ScrollView></View></View></Modal>
+        <View style={styles.modalOverlay}><View style={[styles.detailModal, {maxHeight: '90%'}]}><View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:20}}><ThemeText variant="h2">職員情報の編集</ThemeText><TouchableOpacity onPress={() => setShowStaffEditModal(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity></View><ScrollView showsVerticalScrollIndicator={false}><ThemeText bold style={{marginBottom:8, fontSize:13, color:COLORS.textSecondary}}>氏名</ThemeText><TextInput style={styles.modalInput} value={editName} onChangeText={setEditName} placeholder="氏名を入力" placeholderTextColor={COLORS.textSecondary} /><DropdownSelector label="職種" value={editProfession} options={PROFESSION_OPTS} onSelect={setEditProfession} /><DropdownSelector label="役割(ポジション)" value={editPosition} options={POSITION_OPTS} onSelect={setEditPosition} /><DropdownSelector label="配置" value={editPlacement} options={PLACEMENT_OPTS} onSelect={setEditPlacement} /><DropdownSelector label="ステータス" value={editStatus} options={STATUS_OPTS} onSelect={setEditStatus} /><DropdownSelector label="休日設定 (自動割当条件)" value={editNoHoliday} options={HOLIDAY_SETTING_OPTS} onSelect={setEditNoHoliday} /><DropdownSelector label="アプリ権限" value={editRole} options={ROLE_OPTS} onSelect={setEditRole} /><View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}><TouchableOpacity style={styles.cancelBtn} onPress={() => setShowStaffEditModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={styles.confirmBtn} onPress={handleStaffUpdate}><ThemeText bold color="white">保存する</ThemeText></TouchableOpacity></View><TouchableOpacity style={{ marginTop: 24, padding: 12, alignItems: 'center' }} onPress={() => editStaff && handleDeleteStaff(editStaff.id, editStaff.name)}><ThemeText color="#ef4444">職員を削除する</ThemeText></TouchableOpacity></ScrollView></View></View></Modal>
       <Modal visible={showAdminAuthModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>管理者認証</ThemeText><TextInput style={styles.modalInput} placeholder="管理パスワード" secureTextEntry value={adminAuthInput} onChangeText={setAdminAuthInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowAdminAuthModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#38bdf8'}]} onPress={handleAdminAuth}><ThemeText bold color="white">ログイン</ThemeText></TouchableOpacity></View></View></View></Modal>
     </SafeAreaView>
   );
