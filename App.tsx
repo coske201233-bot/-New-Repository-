@@ -34,14 +34,14 @@ const deduplicateRequests = (list: any[]) => {
   const isManual = (i: any) => {
     const idStr = String(i.id || '');
     if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('q-h-') || /^\d+$/.test(idStr)) return true;
-    const leaveTypes = ['年休', '有給休暇', '時間休', '時間給', '看護休暇', '振替', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '午前振替', '午後振替'];
+    const leaveTypes = ['年休', '有給休暇', '時間休', '振替', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '午前振替', '午後振替'];
     if (leaveTypes.includes(i.type)) return true;
     return (i.details?.note && !i.details.note.includes('自動')) || (i.reason && i.reason !== '自動割当');
   };
 
   list.forEach(item => {
     if (!item?.id || !item?.staffName || !item?.date) return;
-    const key = `${item.staffId || 'legacy'}-${normalizeName(item.staffName)}-${item.date}-${item.type}`;
+    const key = `${item.staffId || 'legacy'}-${normalizeName(item.staffName)}-${item.date}`;
     const existing = map.get(key);
 
     const isManualNew = isManual(item);
@@ -68,7 +68,6 @@ const deduplicateRequests = (list: any[]) => {
 export default function App() {
   const [currentTab, setCurrentTab] = useState('home');
   const [showSetup, setShowSetup] = useState(false);
-  const [selectedWard, setSelectedWard] = useState('すべて');
 
   // Lifted States
   const [staffList, setStaffList] = useState<any[]>([]);
@@ -287,7 +286,8 @@ export default function App() {
 
       const cloudRequests = await cloudStorage.fetchRequests();
       if (cloudRequests && cloudRequests.length > 0) {
-        const { cleanList, discardedIds } = deduplicateRequests(cloudRequests);
+        // Merge with existing local requests to preserve unsynced/recent updates
+        const { cleanList, discardedIds } = deduplicateRequests([...requests, ...cloudRequests]);
         setRequests(cleanList);
         await saveData(STORAGE_KEYS.REQUESTS, cleanList);
         if (discardedIds.length > 0) {
@@ -456,15 +456,14 @@ export default function App() {
     };
 
     switch (currentTab) {
-      case 'home': return <HomeScreen onNavigateToStaff={(ward) => { setSelectedWard(ward); setCurrentTab('staff'); }} {...commonProps} />;
+      case 'home': return <HomeScreen onNavigateToStaff={() => setCurrentTab('staff')} {...commonProps} />;
       case 'calendar': return <CalendarScreen {...commonProps} />;
       case 'requests': return <RequestScreen {...commonProps} />;
-      case 'staff': return <StaffScreen initialWard={selectedWard} {...commonProps} isPrivileged={isAdminAuthenticated} />;
-      case 'admin': 
-        return <AdminScreen {...commonProps} />;
+      case 'staff': return <StaffScreen {...commonProps} isPrivileged={isAdminAuthenticated} />;
+      case 'admin': return <AdminScreen {...commonProps} />;
       case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={handleApproveRequest} deleteRequest={handleDeleteRequest} />;
       case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab('admin')} />;
-      default: return <HomeScreen onNavigateToStaff={(ward) => { setSelectedWard(ward); setCurrentTab('staff'); }} {...commonProps} />;
+      default: return <HomeScreen onNavigateToStaff={() => setCurrentTab('staff')} {...commonProps} />;
     }
   };
 
@@ -485,7 +484,7 @@ export default function App() {
               <View style={styles.tabBar}>
                 {[
                   { id: 'home', icon: Home, label: 'ホーム' },
-                  { id: 'calendar', icon: Calendar, label: '勤怠' },
+                  { id: 'calendar', icon: Calendar, label: '出勤' },
                   { id: 'staff', icon: Users, label: '職員' },
                   { id: 'requests', icon: ClipboardList, label: '申請' },
                   { id: 'admin', icon: User, label: (profile.role?.includes('管理者') || profile.role?.includes('開発者')) ? '管理・設定' : '設定' }

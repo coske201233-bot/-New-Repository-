@@ -6,7 +6,7 @@ const toDateStr = (d: Date): string =>
 const isWorkingType = (type: string) => {
   if (!type) return false;
   const t = String(type);
-  // 全ての「出勤」および「勤務」を含むタイプ、および午前休・午後休を勤務日としてカウント
+  // 全ての「出勤」および「出勤」を含むタイプ、および午前休・午後休を出勤日としてカウント
   return t.includes('出勤') || t.includes('日勤') || t.includes('通常') || t.includes('午前休') || t.includes('午後休');
 };
 
@@ -143,7 +143,7 @@ export default async function handler(req: any, res: any) {
         adjacentStr = toDateStr(sun);
       } 
 
-      // 土日連続勤務を避けるためのチェック
+      // 土日連続出勤を避けるためのチェック
       const hasAdjacent = adjacentStr ? (staffWorkDays[sId].has(adjacentStr) || 
                        autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === adjacentStr)) : false;
       
@@ -185,7 +185,7 @@ export default async function handler(req: any, res: any) {
             
             // 優先順位: 
             // 1. 今月の休日出勤回数が少ない人を最優先 (1回目が全員に回るまで2回目は選ばれない)
-            // 2. 土日連続勤務（隣接）にならない人を優先
+            // 2. 土日連続出勤（隣接）にならない人を優先
             const aPenalty = aStat.hasAdjacent ? 100 : 0;
             const bPenalty = bStat.hasAdjacent ? 100 : 0;
             
@@ -242,7 +242,7 @@ export default async function handler(req: any, res: any) {
             const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type)) ||
                           autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr && a.type === 'シフト休');
             
-            // 平日は無理に連続勤務をさせず、他者に割り振る余地を残す
+            // 平日は無理に連続出勤をさせず、他者に割り振る余地を残す
             return !isUnavailable && !alreadyAssigned && !isOff && !wouldExceedConsecutive(dStr, staffWorkDays[sId]);
           })
           .sort((a: any, b: any) => {

@@ -26,6 +26,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     reason: '',
     startTime: '08:30',
     endTime: '17:15',
+    hours: 1.0,
   });
   const [formError, setFormError] = useState('');
   const [syncMsg, setSyncMsg] = useState('');
@@ -73,21 +74,19 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     let duration = 0;
     if (newRequest.type === '午前休') {
       duration = MORNING_H;
-    } else if (newRequest.type === '午後休') {
+    } else if (newRequest.type === '午後休' || newRequest.type === '半日振替') {
       duration = AFTERNOON_H;
-    } else if (newRequest.type === '時間休' || newRequest.type === '時間給' || newRequest.type === '看護休暇' || newRequest.type === '特休') {
-      // Simple duration calculation from HH:MM
-      const [sh, sm] = newRequest.startTime.split(':').map(Number);
-      const [eh, em] = newRequest.endTime.split(':').map(Number);
-      duration = (eh + em / 60) - (sh + sm / 60);
-      if (duration < 0) duration = 0;
+    } else if (newRequest.type === '1日振替' || newRequest.type === '年休' || newRequest.type === '夏季休暇') {
+      duration = 7.75;
+    } else if (newRequest.type === '時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '特休') {
+      duration = newRequest.hours;
     }
 
     try {
       const now = new Date().toISOString();
       const request = {
         id: `m-${Date.now()}`,
-        staffId: profile.id, // IDを含めて確実に個々人を識別
+        staffId: profile.id,
         type: newRequest.type,
         date: newRequest.date,
         reason: newRequest.reason,
@@ -95,18 +94,17 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
         staffName: nameStr,
         createdAt: now,
         updatedAt: now,
-        details: (newRequest.type === '時間休' || newRequest.type === '時間給' || newRequest.type === '看護休暇' || newRequest.type === '特休') ? {
-          startTime: newRequest.startTime,
-          endTime: newRequest.endTime,
+        hours: duration,
+        details: (newRequest.type === '時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '特休') ? {
           duration: duration
-        } : (newRequest.type === '午前休' || newRequest.type === '午後休') ? {
+        } : (newRequest.type === '午前休' || newRequest.type === '午後休' || newRequest.type === '半日振替' || newRequest.type === '1日振替') ? {
           duration: duration
         } : null
       };
 
       setRequests(prev => [request, ...prev]);
       setShowForm(false);
-      setNewRequest({ type: '年休', date: '', reason: '', startTime: '08:30', endTime: '17:15' });
+      setNewRequest({ type: '年休', date: '', reason: '', startTime: '08:30', endTime: '17:15', hours: 1.0 });
       
       if (!isManager) {
         Alert.alert('送信完了', '申請を送信しました。管理者の承認をお待ちください。');
@@ -157,14 +155,12 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 const isWorkType = r.type === '出勤' || r.type === 'シフト休';
                 if (isWorkType || r.status === 'deleted') return false;
                 
-                // 管理者権限がない場合は自分の申請のみ表示
                 const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated;
                 if (!isManager && normalizeName(r.staffName) !== normalizeName(profile?.name)) return false;
                 
                 return true;
               })
               .sort((a, b) => {
-                // 日付が新しい順、同じ日付なら作成日時が新しい順
                 const dateDiff = new Date(b.date.replace(/-/g, '/')).getTime() - new Date(a.date.replace(/-/g, '/')).getTime();
                 if (dateDiff !== 0) return dateDiff;
                 const timeA = new Date(a.updatedAt || a.createdAt || a.created_at || 0).getTime();
@@ -174,8 +170,8 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
               .map((item) => (
               <ThemeCard key={item.id} style={styles.requestCard}>
                 <View style={styles.cardHeader}>
-                  <View style={[styles.typeBadge, { backgroundColor: item.type === '時間外勤務' ? 'rgba(249, 115, 22, 0.1)' : 'rgba(56, 189, 248, 0.1)' }]}>
-                    <ThemeText variant="caption" bold color={item.type === '時間外勤務' ? '#f97316' : '#38bdf8'}>{item.type}</ThemeText>
+                  <View style={[styles.typeBadge, { backgroundColor: item.type === '時間外出勤' ? 'rgba(249, 115, 22, 0.1)' : 'rgba(56, 189, 248, 0.1)' }]}>
+                    <ThemeText variant="caption" bold color={item.type === '時間外出勤' ? '#f97316' : '#38bdf8'}>{item.type}</ThemeText>
                   </View>
                   <View style={[
                     styles.statusBadge, 
@@ -267,7 +263,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
               <View style={styles.inputGroup}>
                 <ThemeText variant="label">種類</ThemeText>
                 <View style={styles.typeSelector}>
-                  {['年休', '時間休', '看護休暇', '振替', '夏季休暇', '午前休', '午後休', '特休'].map((t) => (
+                  {['年休', '時間休', '振替', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '午前休', '午後休', '特休'].map((t) => (
                     <TouchableOpacity 
                       key={t}
                       style={[styles.typeOption, newRequest.type === t && styles.typeOptionActive]}
@@ -279,27 +275,17 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 </View>
               </View>
   
-              {(newRequest.type === '時間休' || newRequest.type === '時間給' || newRequest.type === '看護休暇' || newRequest.type === '特休') && (
+              {(newRequest.type === '時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '看護休暇') && (
                 <View style={styles.timeSelectionArea}>
-                  <View style={styles.inputGroup}>
-                    <ThemeText variant="label">開始時間</ThemeText>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.timeScroll} keyboardShouldPersistTaps="always">
-                      {timeSlots.map((time) => (
-                        <TouchableOpacity key={`start-${time}`} style={[styles.timeChip, newRequest.startTime === time && styles.timeChipActive]} onPress={() => setNewRequest({ ...newRequest, startTime: time })}>
-                          <ThemeText variant="caption" color={newRequest.startTime === time ? COLORS.background : COLORS.text} bold>{time}</ThemeText>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
-                  <View style={styles.inputGroup}>
-                    <ThemeText variant="label">終了時間</ThemeText>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.timeScroll} keyboardShouldPersistTaps="always">
-                      {timeSlots.map((time) => (
-                        <TouchableOpacity key={`end-${time}`} style={[styles.timeChip, newRequest.endTime === time && styles.timeChipActive]} onPress={() => setNewRequest({ ...newRequest, endTime: time })}>
-                          <ThemeText variant="caption" color={newRequest.endTime === time ? COLORS.background : COLORS.text} bold>{time}</ThemeText>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
+                  <ThemeText variant="label" style={{ marginBottom: 12 }}>時間設定 (0.25h単位)</ThemeText>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                    <TouchableOpacity onPress={() => setNewRequest({ ...newRequest, hours: Math.max(0.25, newRequest.hours - 0.25) })} style={styles.stepperBtn}>
+                      <ThemeText bold color="white">-</ThemeText>
+                    </TouchableOpacity>
+                    <ThemeText variant="h2" color={COLORS.primary}>{newRequest.hours.toFixed(2)}h</ThemeText>
+                    <TouchableOpacity onPress={() => setNewRequest({ ...newRequest, hours: Math.min(8.0, newRequest.hours + 0.25) })} style={styles.stepperBtn}>
+                      <ThemeText bold color="white">+</ThemeText>
+                    </TouchableOpacity>
                   </View>
                 </View>
               )}
@@ -426,4 +412,5 @@ const styles = StyleSheet.create({
   button: { flex: 1, height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   cancelButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: COLORS.border },
   submitButton: { backgroundColor: COLORS.primary },
+  stepperBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(56, 189, 248, 0.4)', justifyContent: 'center', alignItems: 'center' },
 });

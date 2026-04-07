@@ -112,10 +112,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             </View>
           </View>
           <View style={{ marginTop: 24 }}>
-            <LimitAdjustmentRow label="平日勤務制限" type="weekday" val={limits.weekday} />
-            <LimitAdjustmentRow label="土曜勤務制限" type="sat" val={limits.sat} />
-            <LimitAdjustmentRow label="祝日勤務制限" type="pub" val={limits.pub} />
-            <LimitAdjustmentRow label="日曜勤務制限" type="sun" val={limits.sun} />
+            <LimitAdjustmentRow label="平日出勤制限" type="weekday" val={limits.weekday} />
+            <LimitAdjustmentRow label="土曜出勤制限" type="sat" val={limits.sat} />
+            <LimitAdjustmentRow label="祝日出勤制限" type="pub" val={limits.pub} />
+            <LimitAdjustmentRow label="日曜出勤制限" type="sun" val={limits.sun} />
           </View>
         </ThemeCard>
 

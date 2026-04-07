@@ -260,7 +260,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
 
 
-  const positions = ['科長', '係長', '主査', '主任', '主事', '会計年度', '時短勤務'];
+  const positions = ['科長', '係長', '主査', '主任', '主事', '会計年度', '時短出勤'];
   const placements = ['2F', '3F', '4F', '外来', 'フォロー', '兼務', '包括', '排尿支援', '訪問', '管理', '助手'];
   const professions = ['PT', 'OT', 'ST', '助手', 'その他'];
   const statuses = ['出勤', '休暇', '長期休暇', '入職前'];
@@ -328,7 +328,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               </View>
 
               <View style={styles.limitSettingItem}>
-                <ThemeText>施設全体勤務制限 (平日)</ThemeText>
+                <ThemeText>施設全体出勤制限 (平日)</ThemeText>
                 <View style={styles.limitControls}>
                   <TouchableOpacity onPress={() => updateLimits('weekday', Math.max(0, currentMonthly.weekday - 1), limitMonth)} style={styles.smallBtn}><ThemeText>-</ThemeText></TouchableOpacity>
                   <ThemeText style={styles.limitValue}>{currentMonthly.weekday}</ThemeText>
@@ -336,7 +336,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 </View>
               </View>
               <View style={styles.limitSettingItem}>
-                <ThemeText>施設全体勤務制限 (土曜)</ThemeText>
+                <ThemeText>施設全体出勤制限 (土曜)</ThemeText>
                 <View style={styles.limitControls}>
                   <TouchableOpacity onPress={() => updateLimits('saturday', Math.max(0, currentMonthly.sat - 1), limitMonth)} style={styles.smallBtn}><ThemeText>-</ThemeText></TouchableOpacity>
                   <ThemeText style={styles.limitValue}>{currentMonthly.sat}</ThemeText>
@@ -344,7 +344,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 </View>
               </View>
               <View style={styles.limitSettingItem}>
-                <ThemeText>施設全体勤務制限 (祝日)</ThemeText>
+                <ThemeText>施設全体出勤制限 (祝日)</ThemeText>
                 <View style={styles.limitControls}>
                   <TouchableOpacity onPress={() => updateLimits('publicHoliday', Math.max(0, currentMonthly.pub - 1), limitMonth)} style={styles.smallBtn}><ThemeText>-</ThemeText></TouchableOpacity>
                   <ThemeText style={styles.limitValue}>{currentMonthly.pub}</ThemeText>
@@ -352,7 +352,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 </View>
               </View>
               <View style={styles.limitSettingItem}>
-                <ThemeText>施設全体勤務制限 (日曜)</ThemeText>
+                <ThemeText>施設全体出勤制限 (日曜)</ThemeText>
                 <View style={styles.limitControls}>
                   <TouchableOpacity onPress={() => updateLimits('sunday', Math.max(0, currentMonthly.sun - 1), limitMonth)} style={styles.smallBtn}><ThemeText>-</ThemeText></TouchableOpacity>
                   <ThemeText style={styles.limitValue}>{currentMonthly.sun}</ThemeText>

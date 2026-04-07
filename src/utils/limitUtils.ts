@@ -1,7 +1,7 @@
 import { getDayType } from './dateUtils';
 
 /**
- * 指定された日付の勤務制限人数を取得します。
+ * 指定された日付の出勤制限人数を取得します。
  */
 export const getCurrentLimit = (
   date: Date,

@@ -77,7 +77,7 @@ export const exportShiftToPDF = async (staffName: string, requests: any[], curre
         </style>
       </head>
       <body>
-        <h1>勤務シフト表</h1>
+        <h1>出勤シフト表</h1>
         <div class="header-info">
           <p><strong>スタッフ氏名:</strong> ${staffName}</p>
           <p><strong>対象期間:</strong> ${monthName}</p>

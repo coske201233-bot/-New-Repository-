@@ -70,7 +70,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const PROFESSION_OPTS = ['PT', 'OT', 'ST', '助手'];
   const PLACEMENT_OPTS = ['外来', '２F', '包括', '４F', '排尿', '兼務', 'フォロー', '管理', '事務', '訪問リハ'];
   const POSITION_OPTS = ['科長', '係長', '主査', '主任', '主事', '会計年度'];
-  const STATUS_OPTS = ['常勤', '時短勤務', '長期休暇'];
+  const STATUS_OPTS = ['常勤', '時短出勤', '長期休暇'];
   const HOLIDAY_SETTING_OPTS = [{ label: '設定なし', value: false }, { label: '土日祝休み', value: true }];
   const ROLE_OPTS = [{ label: '一般スタッフ', value: ['スタッフ'] }, { label: 'シフト管理者', value: ['管理者', 'スタッフ'] }];
 
@@ -129,7 +129,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
-    printWindow.document.write(`<html><head><title>${year}年${month}月 勤務実績表</title><style>@page { size: A4 landscape; margin: 10mm; } body { font-family: sans-serif; padding: 20px; font-size: 12px; } h1 { font-size: 18px; margin-bottom: 20px; border-bottom: 2px solid #38bdf8; } table { width: 100%; border-collapse: collapse; table-layout: fixed; } th, td { border: 1px solid #cbd5e1; padding: 4px 2px; text-align: left; } th { background-color: #f1f5f9; font-size: 10px; } td { font-size: 11px; } .sun { color: #ef4444; }</style></head><body><h1>勤務実績一覧（${year}年${month}月）</h1><table><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table><script>window.onload=function(){window.print();setTimeout(()=>window.close(),500);};</script></body></html>`);
+    printWindow.document.write(`<html><head><title>${year}年${month}月 出勤実績表</title><style>@page { size: A4 landscape; margin: 10mm; } body { font-family: sans-serif; padding: 20px; font-size: 12px; } h1 { font-size: 18px; margin-bottom: 20px; border-bottom: 2px solid #38bdf8; } table { width: 100%; border-collapse: collapse; table-layout: fixed; } th, td { border: 1px solid #cbd5e1; padding: 4px 2px; text-align: left; } th { background-color: #f1f5f9; font-size: 10px; } td { font-size: 11px; } .sun { color: #ef4444; }</style></head><body><h1>出勤実績一覧（${year}年${month}月）</h1><table><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table><script>window.onload=function(){window.print();setTimeout(()=>window.close(),500);};</script></body></html>`);
     printWindow.document.close();
   };
 
@@ -245,7 +245,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>📋 レポーティング</ThemeText>
               <ThemeCard style={styles.itemRow}>
                 <View style={styles.iconCircle}><FileText size={20} color="#10b981" /></View>
-                <View style={{ flex: 1, marginLeft: 12 }}><ThemeText bold>全職員の勤務実績表</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{currentMonth + 1}月分の全スタッフ一覧表（A4横印刷用）</ThemeText></View>
+                <View style={{ flex: 1, marginLeft: 12 }}><ThemeText bold>全職員の出勤実績表</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{currentMonth + 1}月分の全スタッフ一覧表（A4横印刷用）</ThemeText></View>
                 <TouchableOpacity style={styles.inlineBtn} onPress={handlePrintAttendanceReport}>
                   <Printer size={18} color="#38bdf8" /><ThemeText bold color="#38bdf8" style={{marginLeft:6}}>生成</ThemeText>
                 </TouchableOpacity>
