@@ -171,13 +171,15 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             const dateStr = getDateStr(selectedDate);
             const dayType = getDayType(selectedDate);
             
-            requests
-              .filter(r => r.staffName?.trim() === staffName.trim() && r.date === dateStr)
-              .forEach(r => {
-                if (r.id && !String(r.id).startsWith('auto-')) {
-                  onDeleteRequest(r.id);
-                }
-              });
+            // Delete existing manual requests
+            const existingManualIds = requests
+              .filter(r => r.staffName?.trim() === staffName.trim() && r.date === dateStr && !String(r.id).startsWith('auto-'))
+              .map(r => r.id);
+            
+            if (existingManualIds.length > 0) {
+              // App.tsxのhandleDeleteRequests経由で同期
+              onDeleteRequest(existingManualIds[0]); // ひとつずつ処理
+            }
             
             setRequests((prev: any[]) => {
               const filtered = prev.filter(r => !(r.staffName?.trim() === staffName.trim() && r.date === dateStr));
@@ -190,17 +192,16 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                     date: dateStr,
                     type: '公休',
                     status: 'approved',
-                    reason: '管理者の調整',
+                    reason: 'シフト調整',
                     createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
                   };
                   return [...filtered, offRequest];
                 }
-                // 土日祝なら、既存の出勤申請を消すだけでデフォルト（公休）に戻るため、filtered を返すだけでOK
               }
-              
-              // 「休暇リスト」からの削除、または休日での削除は、フィルタリング結果を返すだけでデフォルト状態に戻る
               return filtered;
             });
+            Alert.alert('完了', 'シフトを解除・調整しました。');
           }
         }
       ]
@@ -415,12 +416,12 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-                  {isPrivileged && (
+                  {(isPrivileged || (profile?.name?.trim() === item.staff.name?.trim())) && (
                     <TouchableOpacity 
                       onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, true)}
-                      style={{ padding: 4 }}
+                      style={{ padding: 8 }}
                     >
-                      <Trash2 size={14} color={COLORS.textSecondary} />
+                      <Trash2 size={16} color={COLORS.textSecondary} />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -434,39 +435,38 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             <View style={styles.sectionDivider} />
             <View style={styles.leavesTitleRow}><UserMinus size={16} color="#ef4444" /><ThemeText variant="label" style={{ color: '#ef4444', marginLeft: 8 }}>休暇・休日</ThemeText></View>
             {offStaff.length > 0 ? offStaff.map((item, idx) => (
-              <View key={idx} style={styles.leafItem}>
-                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                  <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>{item.staff.name}</ThemeText>
-                  <ThemeText variant="caption" style={{ marginLeft: 8, color: COLORS.textSecondary }} numberOfLines={1}>
-                    ({item.type})
-                    {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
-                    {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.duration}h</ThemeText>}
-                    {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
-                  </ThemeText>
+                <View key={idx} style={styles.leafItem}>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>{item.staff.name}</ThemeText>
+                    <ThemeText variant="caption" style={{ marginLeft: 8, color: COLORS.textSecondary }} numberOfLines={1}>
+                      ({item.type})
+                      {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
+                      {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.duration}h</ThemeText>}
+                      {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
+                    </ThemeText>
+                  </View>
+                  {(isPrivileged || (profile?.name?.trim() === item.staff.name?.trim())) && (
+                    <TouchableOpacity 
+                      onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, false)}
+                      style={{ padding: 8 }}
+                    >
+                      <Trash2 size={16} color={COLORS.textSecondary} />
+                    </TouchableOpacity>
+                  )}
                 </View>
-                {isPrivileged && (
-                  <TouchableOpacity 
-                    onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, false)}
-                    style={{ padding: 4 }}
-                  >
-                    <Trash2 size={14} color={COLORS.textSecondary} />
-                  </TouchableOpacity>
-                )}
-              </View>
             )) : (
               <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>休暇者なし</ThemeText>
             )}
           </View>
 
-          {/* Finalize/Close Button for better UX */}
           <TouchableOpacity 
-            style={[styles.finishBtn, { marginTop: 24 }]} 
+            style={[styles.finishBtn, { marginTop: 32 }]} 
             onPress={() => {
-              Alert.alert('完了', '当日のシフト調整を確定しました。');
+              Alert.alert('完了', 'シフト調整を確定しました。');
             }}
           >
             <Check size={20} color="white" />
-            <ThemeText bold color="white" style={{ marginLeft: 8 }}>この日の設定を完了</ThemeText>
+            <ThemeText bold color="white" style={{ marginLeft: 12 }}>決定</ThemeText>
           </TouchableOpacity>
         </ThemeCard>
       </View>
