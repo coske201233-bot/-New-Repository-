@@ -234,38 +234,35 @@ export default function App() {
   }, [profile, isInitialized, isSyncing]);
 
   const handleUpdateStaffList = async (update: any[] | ((prev: any[]) => any[])) => {
-    let nextList: any[] = [];
-    setStaffList(prev => {
-      const next = typeof update === 'function' ? update(prev) : update;
-      nextList = sortStaffByName(next || []);
-      saveData(STORAGE_KEYS.STAFF_LIST, nextList).catch(console.error);
-      // Cloud Sync
-      if (nextList.length > 0) {
-        cloudStorage.upsertStaff(nextList).catch(err => {
-          console.error('Cloud staff sync error:', err);
-        });
+    const next = typeof update === 'function' ? update(staffList) : update;
+    const sorted = sortStaffByName(next || []);
+    setStaffList(sorted);
+    
+    // Side effects outside the state setter
+    try {
+      await saveData(STORAGE_KEYS.STAFF_LIST, sorted);
+      if (sorted.length > 0) {
+        await cloudStorage.upsertStaff(sorted);
       }
-      return nextList;
-    });
+    } catch (err) {
+      console.error('Staff sync error:', err);
+    }
   };
 
   const handleUpdateRequests = async (update: any[] | ((prev: any[]) => any[])) => {
-    let nextReqs: any[] = [];
-    setRequests(prev => {
-      const next = typeof update === 'function' ? update(prev) : update;
-      if (!next) return prev;
-      const { cleanList } = deduplicateRequests(next);
-      nextReqs = cleanList;
-      saveData(STORAGE_KEYS.REQUESTS, nextReqs).catch(console.error);
-      
-      // Cloud Sync
-      if (nextReqs.length > 0) {
-        cloudStorage.upsertRequests(nextReqs).catch(err => {
-          console.error('Cloud requests sync error:', err);
-        });
+    const next = typeof update === 'function' ? update(requests) : update;
+    if (!next) return;
+    const { cleanList } = deduplicateRequests(next);
+    setRequests(cleanList);
+    
+    try {
+      await saveData(STORAGE_KEYS.REQUESTS, cleanList);
+      if (cleanList.length > 0) {
+        await cloudStorage.upsertRequests(cleanList);
       }
-      return nextReqs;
-    });
+    } catch (err) {
+      console.error('Requests sync error:', err);
+    }
   };
 
   const handleDeleteRequests = async (ids: string[]) => {
@@ -442,15 +439,26 @@ export default function App() {
       });
 
       const data = await response.json();
-      if (!data.newRequests) throw new Error('Generation failed');
+      if (!data.newRequests) throw new Error('自動割り当ての生成に失敗しました');
 
-      // Update state and persistence
-      const updated = [...requests.filter(r => !String(r.id).startsWith('af-') && !String(r.id).startsWith('ah-') && !String(r.id).startsWith('aw-')), ...data.newRequests];
+      // 各リクエストに一意のIDとタイムスタンプを付与
+      const nowStr = new Date().toISOString();
+      const newWithIds = data.newRequests.map((r: any) => ({
+        ...r,
+        id: r.id || `auto-${r.staffId}-${r.date}-${Math.random().toString(36).substr(2, 6)}`,
+        createdAt: nowStr,
+        status: r.status || 'approved'
+      }));
+
+      // 既存の自動割当分（auto-プレフィックス）を除去して新しい分と合体
+      const filteredRequests = requests.filter(r => !String(r.id).startsWith('auto-'));
+      const updated = [...filteredRequests, ...newWithIds];
+      
       setRequests(updated);
       await saveData(STORAGE_KEYS.REQUESTS, updated);
-      await cloudStorage.upsertRequests(data.newRequests);
+      await cloudStorage.upsertRequests(newWithIds);
     } catch (e) {
-      console.error(e);
+      console.error('Auto Assign Error:', e);
       throw e;
     }
   };
