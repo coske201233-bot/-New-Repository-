@@ -4,7 +4,7 @@ import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Check, Trash2 } from 'lucide-react-native';
-import { getDayType, formatDate, getDateStr } from '../utils/dateUtils';
+import { getDayType, formatDate, getDateStr, normalizeName } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 
 const getSeasonalTheme = (month: number) => {
@@ -42,13 +42,14 @@ interface CalendarScreenProps {
   setCurrentDate: (d: Date | ((prev: Date) => Date)) => void;
   onDeleteRequest: (id: string) => void;
   onDeleteRequests?: (ids: string[]) => void;
+  approveRequest?: (id: string, status: string) => void;
 }
 
 export const CalendarScreen: React.FC<CalendarScreenProps> = ({ 
   requests, setRequests, weekdayLimit, holidayLimit, 
   saturdayLimit, sundayLimit, publicHolidayLimit,
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,
-  currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests 
+  currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest
 }) => {
   const [selectedDate, setSelectedDate] = useState(currentDate);
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
@@ -449,7 +450,24 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-
+                  {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      {item.status === 'pending' && (
+                        <TouchableOpacity 
+                          style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
+                          onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
+                        >
+                          <Check size={14} color={COLORS.primary} />
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity 
+                        style={styles.smallActionBtn}
+                        onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, true)}
+                      >
+                        <Trash2 size={14} color="#ef4444" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               )) : (
                 <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>出勤予定なし</ThemeText>
@@ -471,7 +489,24 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-
+                  {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      {item.status === 'pending' && (
+                        <TouchableOpacity 
+                          style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
+                          onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
+                        >
+                          <Check size={14} color={COLORS.primary} />
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity 
+                        style={styles.smallActionBtn}
+                        onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, false)}
+                      >
+                        <Trash2 size={14} color="#ef4444" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
             )) : (
               <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>休暇者なし</ThemeText>

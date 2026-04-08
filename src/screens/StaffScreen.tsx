@@ -7,7 +7,8 @@ import {
   ChevronLeft, ChevronRight, Calendar, User, 
   Check, X, Clock, MapPin, Briefcase, Trash2, Settings, Shield, Printer
 } from 'lucide-react-native';
-import { getMonthInfo, normalizeName, getDayType } from '../utils/dateUtils';
+import { getMonthInfo, getDayType } from '../utils/dateUtils';
+import { normalizeName } from '../utils/staffUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import * as Print from 'expo-print';
 
@@ -403,9 +404,16 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                     </View>
                   )}
                   {(isPrivileged || isAdminAuthenticated || (profile && selectedStaff && normalize(profile.name) === normalize(selectedStaff.name))) && (
-                    <View style={{ marginTop: 20 }}>
+                    <View style={{ marginTop: 20, gap: 12 }}>
                       <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmShift} disabled={isSaving}>
                         {isSaving ? <ActivityIndicator color="white" /> : <ThemeText bold color="white">確定</ThemeText>}
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.confirmBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: '#ef4444' }]} 
+                        onPress={() => handleDeleteCurrentDay()} 
+                        disabled={isSaving}
+                      >
+                        <ThemeText bold color="#ef4444">現在の予定を削除</ThemeText>
                       </TouchableOpacity>
                     </View>
                   )}
