@@ -369,7 +369,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </View>
                 <View style={styles.limitGrid}>
                   <DropdownSelector label="日曜" value={limits.sun} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('sunday', v, currentMonthStr)} style={{flex:1}} />
-                  <DropdownSelector label="祝日" value={limits.pub} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('public', v, currentMonthStr)} style={{flex:1}} />
+                  <DropdownSelector label="祝日" value={limits.pub} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('publicHoliday', v, currentMonthStr)} style={{flex:1}} />
                 </View>
               </View>
             </View>

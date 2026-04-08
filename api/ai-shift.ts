@@ -161,19 +161,18 @@ export default async function handler(req: any, res: any) {
             const sId = String(s.id || s.name);
             const sName = normalize(s.name);
             const isAssistant = s.profession === '助手' || s.placement === '助手';
-            const isUnavailable = s.status === '長期休暇' || s.status === '入職前' || s.isApproved === false;
+            const isUnavailable = s.status === '長期休暇' || s.status === '入職前';
+            const isNotApproved = s.isApproved === false; // 明示的に false の場合のみ除外
             const isNoHoliday = s.noHoliday === true;
             
-            // 助手と出勤不可スタッフ、休日出勤なし設定のスタッフは除外
-            if (isAssistant || isUnavailable || isNoHoliday) return false;
+            // 助手、長期休暇、未承認、休日出勤不可設定のスタッフを除外
+            if (isAssistant || isUnavailable || isNotApproved || isNoHoliday) return false;
 
             const alreadyAssigned = staffWorkDays[sId].has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
             const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type));
             
-            // 既に予定がある、または休み希望を出している場合は除外
             if (alreadyAssigned || isOff) return false;
 
-            // 5連勤制限のチェック（厳守）
             return !wouldExceedConsecutive(dStr, staffWorkDays[sId], 5);
           })
           .sort((a: any, b: any) => {

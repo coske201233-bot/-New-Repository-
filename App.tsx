@@ -393,24 +393,25 @@ export default function App() {
   };
 
   const handleUpdateLimits = async (type: string, val: number, monthStr?: string) => {
+    const normalizedType = (type === 'public' || type === 'publicHoliday') ? 'publicHoliday' : type;
     if (monthStr) {
       const prevMonth = monthlyLimits[monthStr] || { weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit };
       const updated = { ...prevMonth };
-      if (type === 'weekday') updated.weekday = val;
-      if (type === 'saturday') updated.sat = val;
-      if (type === 'sunday') updated.sun = val;
-      if (type === 'publicHoliday') updated.pub = val;
+      if (normalizedType === 'weekday') updated.weekday = val;
+      if (normalizedType === 'saturday') updated.sat = val;
+      if (normalizedType === 'sunday') updated.sun = val;
+      if (normalizedType === 'publicHoliday') updated.pub = val;
       const newLimits = { ...monthlyLimits, [monthStr]: updated };
       setMonthlyLimits(newLimits);
       await saveData(STORAGE_KEYS.MONTHLY_LIMITS, newLimits);
       cloudStorage.saveConfig(STORAGE_KEYS.MONTHLY_LIMITS, newLimits).catch(console.error);
       return;
     }
-    if (type === 'weekday') setWeekdayLimit(val);
-    else if (type === 'saturday') setSaturdayLimit(val);
-    else if (type === 'sunday') setSundayLimit(val);
-    else if (type === 'publicHoliday') setPublicHolidayLimit(val);
-    const key = type === 'weekday' ? STORAGE_KEYS.WEEKDAY_LIMIT : type === 'saturday' ? STORAGE_KEYS.SATURDAY_LIMIT : type === 'sunday' ? STORAGE_KEYS.SUNDAY_LIMIT : STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT;
+    if (normalizedType === 'weekday') setWeekdayLimit(val);
+    else if (normalizedType === 'saturday') setSaturdayLimit(val);
+    else if (normalizedType === 'sunday') setSundayLimit(val);
+    else if (normalizedType === 'publicHoliday') setPublicHolidayLimit(val);
+    const key = normalizedType === 'weekday' ? STORAGE_KEYS.WEEKDAY_LIMIT : normalizedType === 'saturday' ? STORAGE_KEYS.SATURDAY_LIMIT : normalizedType === 'sunday' ? STORAGE_KEYS.SUNDAY_LIMIT : STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT;
     await saveData(key, val);
     cloudStorage.saveConfig(key, val).catch(console.error);
   };
