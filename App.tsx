@@ -250,19 +250,19 @@ export default function App() {
   };
 
   const handleUpdateRequests = async (update: any[] | ((prev: any[]) => any[])) => {
-    const next = typeof update === 'function' ? update(requests) : update;
-    if (!next) return;
-    const { cleanList } = deduplicateRequests(next);
-    setRequests(cleanList);
-    
-    try {
-      await saveData(STORAGE_KEYS.REQUESTS, cleanList);
+    setRequests(prev => {
+      const next = typeof update === 'function' ? update(prev) : update;
+      const { cleanList } = deduplicateRequests(next || []);
+      
+      // Side effects with latest cleanList
+      saveData(STORAGE_KEYS.REQUESTS, cleanList).catch(console.error);
       if (cleanList.length > 0) {
-        await cloudStorage.upsertRequests(cleanList);
+        cloudStorage.upsertRequests(cleanList).catch(err => {
+          console.error('Cloud requests sync error:', err);
+        });
       }
-    } catch (err) {
-      console.error('Requests sync error:', err);
-    }
+      return cleanList;
+    });
   };
 
   const handleDeleteRequests = async (ids: string[]) => {

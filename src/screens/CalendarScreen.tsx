@@ -419,9 +419,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                   {(isPrivileged || (profile?.name?.trim() === item.staff.name?.trim())) && (
                     <TouchableOpacity 
                       onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, true)}
-                      style={{ padding: 8 }}
+                      style={[styles.smallActionBtn, { borderColor: '#ef4444' }]}
                     >
-                      <Trash2 size={16} color={COLORS.textSecondary} />
+                      <ThemeText variant="caption" style={{ color: '#ef4444', fontWeight: 'bold' }}>削除</ThemeText>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -448,9 +448,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                   {(isPrivileged || (profile?.name?.trim() === item.staff.name?.trim())) && (
                     <TouchableOpacity 
                       onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, false)}
-                      style={{ padding: 8 }}
+                      style={[styles.smallActionBtn, { borderColor: '#ef4444' }]}
                     >
-                      <Trash2 size={16} color={COLORS.textSecondary} />
+                      <ThemeText variant="caption" style={{ color: '#ef4444', fontWeight: 'bold' }}>削除</ThemeText>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -630,5 +630,6 @@ const styles = StyleSheet.create({
   modalButton: { flex: 1, height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   modalCancelButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: COLORS.border },
   modalSubmitButton: { backgroundColor: COLORS.primary },
+  smallActionBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: 'rgba(239, 68, 68, 0.05)' },
   finishBtn: { backgroundColor: COLORS.primary, height: 54, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
 });
