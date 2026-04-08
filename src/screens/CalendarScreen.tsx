@@ -342,7 +342,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={true}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 160 }} showsVerticalScrollIndicator={true}>
         <View style={styles.header}>
         <ThemeText variant="h1">カレンダー</ThemeText>
         <ThemeText variant="caption">シフト・稼働予定の確認</ThemeText>
@@ -416,10 +416,10 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-                  {(isPrivileged || (profile?.name?.trim() === item.staff.name?.trim())) && (
+                  {(isPrivileged || profile?.name === item.staff.name) && (
                     <TouchableOpacity 
                       onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, true)}
-                      style={[styles.smallActionBtn, { borderColor: '#ef4444' }]}
+                      style={[styles.smallActionBtn, { borderColor: '#ef4444', zIndex: 5 }]}
                     >
                       <ThemeText variant="caption" style={{ color: '#ef4444', fontWeight: 'bold' }}>削除</ThemeText>
                     </TouchableOpacity>
@@ -445,10 +445,10 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-                  {(isPrivileged || (profile?.name?.trim() === item.staff.name?.trim())) && (
+                  {(isPrivileged || profile?.name === item.staff.name) && (
                     <TouchableOpacity 
                       onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, false)}
-                      style={[styles.smallActionBtn, { borderColor: '#ef4444' }]}
+                      style={[styles.smallActionBtn, { borderColor: '#ef4444', zIndex: 5 }]}
                     >
                       <ThemeText variant="caption" style={{ color: '#ef4444', fontWeight: 'bold' }}>削除</ThemeText>
                     </TouchableOpacity>
@@ -630,6 +630,6 @@ const styles = StyleSheet.create({
   modalButton: { flex: 1, height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   modalCancelButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: COLORS.border },
   modalSubmitButton: { backgroundColor: COLORS.primary },
-  smallActionBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: 'rgba(239, 68, 68, 0.05)' },
-  finishBtn: { backgroundColor: COLORS.primary, height: 54, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
+  smallActionBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: 'rgba(239, 68, 68, 0.05)', zIndex: 10 },
+  finishBtn: { backgroundColor: COLORS.primary, height: 54, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4, zIndex: 20 },
 });
