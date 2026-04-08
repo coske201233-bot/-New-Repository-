@@ -86,7 +86,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ staffList, onLogin, on
 
               <View style={styles.staffList}>
                 {filteredStaff.length > 0 ? (
-                  filteredStaff.slice(0, 10).map(staff => (
+                  filteredStaff.map(staff => (
                     <TouchableOpacity 
                       key={staff.id} 
                       style={styles.staffItem} 
