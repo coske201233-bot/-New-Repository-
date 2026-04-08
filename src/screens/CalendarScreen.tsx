@@ -217,8 +217,32 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     );
   };
 
-  const handleAddStaff = (staffNames: string[]) => {
+  const handleAddStaff = async (staffNames: string[]) => {
     const dateStr = getDateStr(selectedDate);
+
+    if (selectedType === '空欄') {
+      const idsToDelete = requests
+        .filter(r => r.date === dateStr && staffNames.includes(r.staffName?.trim()) && !String(r.id).startsWith('auto-'))
+        .map(r => r.id);
+      
+      if (idsToDelete.length > 0) {
+        if (onDeleteRequests) {
+          await onDeleteRequests(idsToDelete);
+        } else {
+          for (const id of idsToDelete) {
+            await onDeleteRequest(id);
+          }
+        }
+        
+        setRequests((prev: any[]) => prev.filter(r => !idsToDelete.includes(r.id)));
+        Alert.alert('完了', 'シフトをクリアしました。');
+      }
+      setIsAddStaffModalVisible(false);
+      setIsTypeModalVisible(false);
+      setSelectedStaffToAdd([]);
+      return;
+    }
+
     const newReqs = staffNames.map(name => ({
       id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       staffName: name,
@@ -425,14 +449,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-                  {(isPrivileged || profile?.name === item.staff.name) && (
-                    <TouchableOpacity 
-                      onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, true)}
-                      style={[styles.smallActionBtn, { borderColor: '#ef4444', zIndex: 5 }]}
-                    >
-                      <ThemeText variant="caption" style={{ color: '#ef4444', fontWeight: 'bold' }}>削除</ThemeText>
-                    </TouchableOpacity>
-                  )}
+
                 </View>
               )) : (
                 <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>出勤予定なし</ThemeText>
@@ -454,14 +471,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-                  {(isPrivileged || profile?.name === item.staff.name) && (
-                    <TouchableOpacity 
-                      onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, false)}
-                      style={[styles.smallActionBtn, { borderColor: '#ef4444', zIndex: 5 }]}
-                    >
-                      <ThemeText variant="caption" style={{ color: '#ef4444', fontWeight: 'bold' }}>削除</ThemeText>
-                    </TouchableOpacity>
-                  )}
+
                 </View>
             )) : (
               <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>休暇者なし</ThemeText>
@@ -475,7 +485,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             }}
           >
             <Check size={20} color="white" />
-            <ThemeText bold color="white" style={{ marginLeft: 12 }}>決定</ThemeText>
+            <ThemeText bold color="white" style={{ marginLeft: 12 }}>確定</ThemeText>
           </TouchableOpacity>
         </ThemeCard>
       </View>
@@ -558,7 +568,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-              {['出勤', '午前休', '午後休', '時間休', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇'].map(t => (
+              {['出勤', '午前休', '午後休', '時間休', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇', '空欄'].map(t => (
                 <TouchableOpacity 
                   key={t}
                   style={[

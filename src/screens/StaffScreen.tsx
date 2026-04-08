@@ -31,7 +31,7 @@ interface MonthDay {
 }
 
 export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
-  const { staffList, requests, setRequests, onDeleteRequest, isPrivileged } = props;
+  const { staffList, requests, setRequests, onDeleteRequest, isPrivileged, profile } = props;
   const isAdminAuthenticated = props.isAdminAuthenticated || isPrivileged;
   
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
@@ -43,7 +43,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const [isSaving, setIsSaving] = useState(false);
 
   // Constants
-  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休'];
+  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '空欄'];
   const HOUR_SELECTOR_TYPES = ['時間休', '振替＋時間休', '特休', '時間給', '看護休暇', '午前休', '午後休'];
 
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
@@ -115,6 +115,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
   const handleConfirmShift = async () => {
     if (!selectedDay || !selectedStaff || isSaving) return;
+
+    if (selectedType === '空欄') {
+      await handleDeleteCurrentDay(false);
+      return;
+    }
+
     setIsSaving(true);
     try {
       const type = selectedType;
@@ -148,40 +154,48 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     }
   };
 
-  const handleDeleteCurrentDay = async () => {
+  const handleDeleteCurrentDay = async (showConfirm = true) => {
     if (!selectedDay || !selectedStaff || isSaving) return;
     const sT = normalize(selectedStaff.name);
-    const existing = requests.filter((r: any) => r && ( (String(r.staffId) === selectedStaff.id || normalize(r.staffName) === sT) && r.date === selectedDay ));
+    const existing = requests.filter((r: any) => r && ( (String(r.staffId) === selectedStaff.id || normalize(r.staffName) === sT) && r.date === selectedDay ) && r.status !== 'deleted');
     
     if (existing.length === 0) {
-      Alert.alert('情報', '削除する予定がありません。');
+      if (showConfirm) Alert.alert('情報', '削除する予定がありません。');
       return;
     }
 
-    Alert.alert('予定の削除', `${selectedDay} の予定を完全に削除しますか？`, [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: '削除する', style: 'destructive', onPress: async () => {
-        setIsSaving(true);
-        try {
-          for (const r of existing) {
-            if (r.id) {
-              if (onDeleteRequest) {
-                onDeleteRequest(r.id);
-              } else {
-                setRequests((prev: any[]) => prev.filter((req: any) => req.id !== r.id));
-                await cloudStorage.upsertRequests([{ ...r, status: 'deleted', updatedAt: new Date().toISOString() }]);
-              }
+    const performDelete = async () => {
+      setIsSaving(true);
+      try {
+        for (const r of existing) {
+          if (r.id) {
+            if (onDeleteRequest) {
+              onDeleteRequest(r.id);
+            } else {
+              setRequests((prev: any[]) => prev.filter((req: any) => req.id !== r.id));
+              await cloudStorage.upsertRequests([{ ...r, status: 'deleted', updatedAt: new Date().toISOString() }]);
             }
           }
-          setSelectedDay(null);
-          Alert.alert('完了', '予定を削除しました。');
-        } catch (e) {
-          Alert.alert('エラー', '削除に失敗しました。');
-        } finally {
-          setIsSaving(false);
         }
-      }}
-    ]);
+        // Instead of setting selectedDay to null and closing everything, just update the state
+        setSelectedType('出勤');
+        setSelectedHours(1.0);
+        if (showConfirm) Alert.alert('完了', '予定を削除しました。');
+      } catch (e) {
+        Alert.alert('エラー', '削除に失敗しました。');
+      } finally {
+        setIsSaving(false);
+      }
+    };
+
+    if (showConfirm) {
+      Alert.alert('予定の削除', `${selectedDay} の予定を完全に削除しますか？`, [
+        { text: 'キャンセル', style: 'cancel' },
+        { text: '削除する', style: 'destructive', onPress: performDelete }
+      ]);
+    } else {
+      await performDelete();
+    }
   };
 
   const handlePrint = () => {
@@ -388,13 +402,10 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                       </View>
                     </View>
                   )}
-                  {(isPrivileged || isAdminAuthenticated) && (
-                    <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
-                      <TouchableOpacity style={[styles.confirmBtn, { flex: 2 }]} onPress={handleConfirmShift} disabled={isSaving}>
+                  {(isPrivileged || isAdminAuthenticated || (profile && selectedStaff && normalize(profile.name) === normalize(selectedStaff.name))) && (
+                    <View style={{ marginTop: 20 }}>
+                      <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmShift} disabled={isSaving}>
                         {isSaving ? <ActivityIndicator color="white" /> : <ThemeText bold color="white">確定</ThemeText>}
-                      </TouchableOpacity>
-                      <TouchableOpacity style={[styles.deleteBtn, { flex: 1 }]} onPress={handleDeleteCurrentDay} disabled={isSaving}>
-                        <ThemeText bold color="#ef4444">削除</ThemeText>
                       </TouchableOpacity>
                     </View>
                   )}
