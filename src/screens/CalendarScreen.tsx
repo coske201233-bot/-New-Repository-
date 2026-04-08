@@ -3,7 +3,7 @@ import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Al
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Check } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Check, Trash2 } from 'lucide-react-native';
 import { getDayType, formatDate, getDateStr } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 
@@ -408,13 +408,21 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                 <View key={idx} style={styles.leafItem}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                     <ThemeText variant="caption" bold>{item.staff.name}</ThemeText>
-                    <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginLeft: 8 }}>
+                    <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginLeft: 8 }} numberOfLines={1}>
                       ({item.type}{item.isHomeVisit ? ' / 訪問' : ''})
                       {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
                       {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.duration}h</ThemeText>}
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
+                  {isPrivileged && (
+                    <TouchableOpacity 
+                      onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, true)}
+                      style={{ padding: 4 }}
+                    >
+                      <Trash2 size={14} color={COLORS.textSecondary} />
+                    </TouchableOpacity>
+                  )}
                 </View>
               )) : (
                 <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>出勤予定なし</ThemeText>
@@ -429,13 +437,21 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               <View key={idx} style={styles.leafItem}>
                 <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                   <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>{item.staff.name}</ThemeText>
-                  <ThemeText variant="caption" style={{ marginLeft: 8, color: COLORS.textSecondary }}>
+                  <ThemeText variant="caption" style={{ marginLeft: 8, color: COLORS.textSecondary }} numberOfLines={1}>
                     ({item.type})
                     {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
                     {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.duration}h</ThemeText>}
                     {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                   </ThemeText>
                 </View>
+                {isPrivileged && (
+                  <TouchableOpacity 
+                    onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, false)}
+                    style={{ padding: 4 }}
+                  >
+                    <Trash2 size={14} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                )}
               </View>
             )) : (
               <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>休暇者なし</ThemeText>
