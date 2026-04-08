@@ -3,7 +3,8 @@ import { StyleSheet, View, TouchableOpacity, SafeAreaView, Alert, Platform, AppS
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Home, Calendar, User, ClipboardList, Users, Shield } from 'lucide-react-native';
+import { Home, Calendar, User, ClipboardList, Users, Shield, RefreshCw } from 'lucide-react-native';
+import { ThemeCard } from './src/components/ThemeCard';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { CalendarScreen } from './src/screens/CalendarScreen';
 import { RequestScreen } from './src/screens/RequestScreen';
@@ -233,21 +234,37 @@ export default function App() {
   }, [profile, isInitialized, isSyncing]);
 
   const handleUpdateStaffList = async (update: any[] | ((prev: any[]) => any[])) => {
+    let nextList: any[] = [];
     setStaffList(prev => {
       const next = typeof update === 'function' ? update(prev) : update;
-      const sorted = sortStaffByName(next || []);
-      saveData(STORAGE_KEYS.STAFF_LIST, sorted).catch(console.error);
-      return sorted;
+      nextList = sortStaffByName(next || []);
+      saveData(STORAGE_KEYS.STAFF_LIST, nextList).catch(console.error);
+      // Cloud Sync
+      if (nextList.length > 0) {
+        cloudStorage.upsertStaff(nextList).catch(err => {
+          console.error('Cloud staff sync error:', err);
+        });
+      }
+      return nextList;
     });
   };
 
   const handleUpdateRequests = async (update: any[] | ((prev: any[]) => any[])) => {
+    let nextReqs: any[] = [];
     setRequests(prev => {
       const next = typeof update === 'function' ? update(prev) : update;
       if (!next) return prev;
       const { cleanList } = deduplicateRequests(next);
-      saveData(STORAGE_KEYS.REQUESTS, cleanList).catch(console.error);
-      return cleanList;
+      nextReqs = cleanList;
+      saveData(STORAGE_KEYS.REQUESTS, nextReqs).catch(console.error);
+      
+      // Cloud Sync
+      if (nextReqs.length > 0) {
+        cloudStorage.upsertRequests(nextReqs).catch(err => {
+          console.error('Cloud requests sync error:', err);
+        });
+      }
+      return nextReqs;
     });
   };
 
@@ -474,6 +491,43 @@ export default function App() {
           ) : (
             <LoginScreen staffList={staffList} onLogin={handleUpdateProfile} onGoToSetup={() => setShowSetup(true)} />
           )
+        ) : profile.isApproved === false ? (
+          <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+            <View style={{ width: '100%', alignItems: 'center' }}>
+              <ThemeCard style={{ padding: 40, width: '100%', alignItems: 'center', borderRadius: 32 }}>
+                <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.1)', padding: 24, borderRadius: 100, marginBottom: 24 }}>
+                  <Shield size={48} color={COLORS.primary} />
+                </View>
+                <ThemeText variant="h1" style={{ marginBottom: 12, textAlign: 'center' }}>登録承認待ち</ThemeText>
+                <ThemeText variant="body" color={COLORS.textSecondary} style={{ textAlign: 'center', lineHeight: 24, marginBottom: 32 }}>
+                  {profile.name} さんの登録申請を送信しました。{"\n"}
+                  管理者が承認するまで、しばらくお待ちください。{"\n"}
+                  （承認後にアプリが利用可能になります）
+                </ThemeText>
+                
+                <TouchableOpacity 
+                  style={{ backgroundColor: COLORS.primary, paddingHorizontal: 32, paddingVertical: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center' }}
+                  onPress={async () => {
+                    setIsSyncing(true);
+                    const success = await handleForceCloudSync();
+                    if (success) {
+                      Alert.alert('確認', '最新のステータスを確認しました。');
+                    }
+                  }}
+                >
+                  <RefreshCw size={20} color="white" style={{ marginRight: 8 }} />
+                  <ThemeText bold color="white">最新の状態に更新</ThemeText>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={{ marginTop: 40 }}
+                  onPress={handleLogout}
+                >
+                  <ThemeText color="#ef4444">入力をやり直す (ログアウト)</ThemeText>
+                </TouchableOpacity>
+              </ThemeCard>
+            </View>
+          </SafeAreaView>
         ) : (
           <>
             <View style={styles.content}>{renderContent()}</View>
@@ -484,7 +538,7 @@ export default function App() {
                   { id: 'calendar', icon: Calendar, label: '出勤' },
                   { id: 'staff', icon: Users, label: '職員' },
                   { id: 'requests', icon: ClipboardList, label: '申請' },
-                  { id: 'admin', icon: User, label: (profile.role?.includes('管理者') || profile.role?.includes('開発者')) ? '管理・設定' : '設定' }
+                  { id: 'admin', icon: (profile.role?.includes('管理者') || profile.role?.includes('開発者')) ? Shield : User, label: (profile.role?.includes('管理者') || profile.role?.includes('開発者')) ? '管理・設定' : '設定' }
                 ].map(tab => (
                   <TouchableOpacity key={tab.id} style={styles.tabItem} onPress={() => setCurrentTab(tab.id)} activeOpacity={0.7}>
                     <tab.icon size={24} color={currentTab === tab.id ? COLORS.primary : COLORS.textSecondary} />
