@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, TouchableOpacity, SafeAreaView, Alert, Platform, AppState, TextInput } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, SafeAreaView, Alert, Platform, AppState, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -296,6 +296,15 @@ export default function App() {
         const sorted = sortStaffByName(normalized);
         setStaffList(sorted);
         await saveData(STORAGE_KEYS.STAFF_LIST, sorted);
+        
+        // 更新：現在のプロファイルも最新データに基づいて同期する
+        if (profile) {
+          const latest = normalized.find((s: any) => String(s.id) === String(profile.id));
+          if (latest) {
+            setProfile(latest);
+            await saveData(STORAGE_KEYS.PROFILE, latest);
+          }
+        }
       }
 
       const cloudRequests = await cloudStorage.fetchRequests();
@@ -506,17 +515,21 @@ export default function App() {
                 </ThemeText>
                 
                 <TouchableOpacity 
-                  style={{ backgroundColor: COLORS.primary, paddingHorizontal: 32, paddingVertical: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center' }}
+                  style={{ backgroundColor: COLORS.primary, paddingHorizontal: 32, paddingVertical: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', opacity: isSyncing ? 0.7 : 1 }}
+                  disabled={isSyncing}
                   onPress={async () => {
-                    setIsSyncing(true);
                     const success = await handleForceCloudSync();
                     if (success) {
                       Alert.alert('確認', '最新のステータスを確認しました。');
                     }
                   }}
                 >
-                  <RefreshCw size={20} color="white" style={{ marginRight: 8 }} />
-                  <ThemeText bold color="white">最新の状態に更新</ThemeText>
+                  {isSyncing ? (
+                    <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                  ) : (
+                    <RefreshCw size={20} color="white" style={{ marginRight: 8 }} />
+                  )}
+                  <ThemeText bold color="white">{isSyncing ? '確認中...' : '最新の状態に更新'}</ThemeText>
                 </TouchableOpacity>
 
                 <TouchableOpacity 
