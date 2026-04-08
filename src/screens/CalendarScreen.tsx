@@ -341,7 +341,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={true}>
         <View style={styles.header}>
         <ThemeText variant="h1">カレンダー</ThemeText>
         <ThemeText variant="caption">シフト・稼働予定の確認</ThemeText>
@@ -457,6 +457,17 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>休暇者なし</ThemeText>
             )}
           </View>
+
+          {/* Finalize/Close Button for better UX */}
+          <TouchableOpacity 
+            style={[styles.finishBtn, { marginTop: 24 }]} 
+            onPress={() => {
+              Alert.alert('完了', '当日のシフト調整を確定しました。');
+            }}
+          >
+            <Check size={20} color="white" />
+            <ThemeText bold color="white" style={{ marginLeft: 8 }}>この日の設定を完了</ThemeText>
+          </TouchableOpacity>
         </ThemeCard>
       </View>
       </ScrollView>
@@ -619,4 +630,5 @@ const styles = StyleSheet.create({
   modalButton: { flex: 1, height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   modalCancelButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: COLORS.border },
   modalSubmitButton: { backgroundColor: COLORS.primary },
+  finishBtn: { backgroundColor: COLORS.primary, height: 54, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
 });
