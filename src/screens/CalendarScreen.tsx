@@ -41,13 +41,14 @@ interface CalendarScreenProps {
   currentDate: Date;
   setCurrentDate: (d: Date | ((prev: Date) => Date)) => void;
   onDeleteRequest: (id: string) => void;
+  onDeleteRequests?: (ids: string[]) => void;
 }
 
 export const CalendarScreen: React.FC<CalendarScreenProps> = ({ 
   requests, setRequests, weekdayLimit, holidayLimit, 
   saturdayLimit, sundayLimit, publicHolidayLimit,
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,
-  currentDate, setCurrentDate, onDeleteRequest 
+  currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests 
 }) => {
   const [selectedDate, setSelectedDate] = useState(currentDate);
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
@@ -158,7 +159,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                        currentDayType === 'sun' ? currentMonthly.sun :
                        currentMonthly.pub;
 
-  const handleDeleteShift = (staffName: string, requestId: string, isManual: boolean, wasWorking: boolean) => {
+  const handleDeleteShift = async (staffName: string, requestId: string, isManual: boolean, wasWorking: boolean) => {
     Alert.alert(
       'シフトの解除・調整',
       `${staffName} さんの当日の予定を削除または変更しますか？`,
@@ -167,41 +168,49 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
         { 
           text: '実行する', 
           style: 'destructive', 
-          onPress: () => {
+          onPress: async () => {
             const dateStr = getDateStr(selectedDate);
             const dayType = getDayType(selectedDate);
             
-            // Delete existing manual requests
-            const existingManualIds = requests
+            // 1. 対象スタッフ・対象日の「手動リクエスト」をすべて特定
+            const manualRequestIds = requests
               .filter(r => r.staffName?.trim() === staffName.trim() && r.date === dateStr && !String(r.id).startsWith('auto-'))
               .map(r => r.id);
-            
-            if (existingManualIds.length > 0) {
-              // App.tsxのhandleDeleteRequests経由で同期
-              onDeleteRequest(existingManualIds[0]); // ひとつずつ処理
+
+            // 2. クラウド/グローバルステートから一括削除
+            if (manualRequestIds.length > 0) {
+              if (onDeleteRequests) {
+                await onDeleteRequests(manualRequestIds);
+              } else {
+                for (const id of manualRequestIds) {
+                  await onDeleteRequest(id);
+                }
+              }
             }
-            
+
+            // 3. ローカルステートの更新と「状態保持（公休化）」
             setRequests((prev: any[]) => {
+              // まず対象の全リクエストをフィルタリング
               const filtered = prev.filter(r => !(r.staffName?.trim() === staffName.trim() && r.date === dateStr));
               
-              if (wasWorking) {
-                if (dayType === 'weekday') {
-                  const offRequest = {
-                    id: `off-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                    staffName: staffName,
-                    date: dateStr,
-                    type: '公休',
-                    status: 'approved',
-                    reason: 'シフト調整',
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                  };
-                  return [...filtered, offRequest];
-                }
+              // 平日で「出勤」を削除した場合のみ、「公休（休み）」として状態を上書き保持する
+              if (wasWorking && dayType === 'weekday') {
+                const offRequest = {
+                  id: `off-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                  staffName: staffName,
+                  date: dateStr,
+                  type: '公休',
+                  status: 'approved',
+                  reason: '調整',
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                };
+                return [...filtered, offRequest];
               }
               return filtered;
             });
-            Alert.alert('完了', 'シフトを解除・調整しました。');
+
+            Alert.alert('完了', 'シフトの解除・調整が完了しました。');
           }
         }
       ]
