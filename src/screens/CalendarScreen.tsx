@@ -460,12 +460,6 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                           <Check size={14} color={COLORS.primary} />
                         </TouchableOpacity>
                       )}
-                      <TouchableOpacity 
-                        style={styles.smallActionBtn}
-                        onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, true)}
-                      >
-                        <Trash2 size={14} color="#ef4444" />
-                      </TouchableOpacity>
                     </View>
                   )}
                 </View>
@@ -499,12 +493,6 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                           <Check size={14} color={COLORS.primary} />
                         </TouchableOpacity>
                       )}
-                      <TouchableOpacity 
-                        style={styles.smallActionBtn}
-                        onPress={() => handleDeleteShift(item.staff.name, item.requestId, item.isManual, false)}
-                      >
-                        <Trash2 size={14} color="#ef4444" />
-                      </TouchableOpacity>
                     </View>
                   )}
                 </View>
@@ -513,15 +501,6 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             )}
           </View>
 
-          <TouchableOpacity 
-            style={[styles.finishBtn, { marginTop: 32 }]} 
-            onPress={() => {
-              Alert.alert('完了', 'シフト調整を確定しました。');
-            }}
-          >
-            <Check size={20} color="white" />
-            <ThemeText bold color="white" style={{ marginLeft: 12 }}>確定</ThemeText>
-          </TouchableOpacity>
         </ThemeCard>
       </View>
       </ScrollView>

@@ -403,17 +403,10 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                       </View>
                     </View>
                   )}
-                  {(isPrivileged || isAdminAuthenticated || (profile && selectedStaff && normalize(profile.name) === normalize(selectedStaff.name))) && (
-                    <View style={{ marginTop: 20, gap: 12 }}>
+                  {(isPrivileged || isAdminAuthenticated) && (
+                    <View style={{ marginTop: 20 }}>
                       <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmShift} disabled={isSaving}>
                         {isSaving ? <ActivityIndicator color="white" /> : <ThemeText bold color="white">確定</ThemeText>}
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        style={[styles.confirmBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: '#ef4444' }]} 
-                        onPress={() => handleDeleteCurrentDay()} 
-                        disabled={isSaving}
-                      >
-                        <ThemeText bold color="#ef4444">現在の予定を削除</ThemeText>
                       </TouchableOpacity>
                     </View>
                   )}
