@@ -55,7 +55,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
   const [selectedStaffToAdd, setSelectedStaffToAdd] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState('出勤');
-  const [hourlyDuration, setHourlyDuration] = useState(1.0);
+  const [hourlyDuration, setHourlyDuration] = useState(0);
   const [isTypeModalVisible, setIsTypeModalVisible] = useState(false);
 
   React.useEffect(() => {
@@ -83,10 +83,10 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   const getDetailedDayInfo = (date: Date) => {
     const dateStr = getDateStr(date);
     const dayType = getDayType(date);
-    const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-
     const working: any[] = [];
     const off: any[] = [];
+    const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
 
     (staffList || []).forEach(staff => {
       if (!staff || !staff.name) return;
@@ -98,8 +98,6 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       if (isOut) return;
 
       const userRequests = requestMap.get(dateStr)?.get(staff.name.trim()) || [];
-      const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
-      
       const approvedReqs = userRequests.filter(r => r.status === 'approved');
       const pendingReqs = userRequests.filter(r => r.status === 'pending');
       const isNoHoliday = (dayType !== 'weekday') && (staff.monthlyNoHoliday?.[monthStr] ?? staff.noHoliday);

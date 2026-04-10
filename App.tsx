@@ -28,63 +28,73 @@ const deduplicateRequests = (list: any[]) => {
   const discardedIds: string[] = [];
   
   const getTime = (i: any) => {
-    // 優先順位: 手動指定の updatedAt > 作成日時 > 0
     const t = i.updatedAt || i.updated_at || i.createdAt || i.created_at || 0;
     return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
   };
 
   const isManual = (i: any) => {
-    if (i.isManual === true || i.isManual === 'true' || i.isManual === 1) return true;
+    if (!i) return false;
     const idStr = String(i.id || '');
-    if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('q-h-') || /^\d+$/.test(idStr)) return true;
-    const leaveTypes = ['年休', '有給休暇', '時間休', '時間給', '振替', '1日振替', '半日振替', '振替＋時間休', '公休', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '午前振替', '午後振替', '看護休暇', '1日休暇'];
-    if (leaveTypes.includes(i.type)) return true;
-    return (i.details?.isManual === true) || (i.details?.note && !i.details.note.includes('自動')) || (i.reason && i.reason !== '自動割当');
+    // タイプ名や理由、備考をトリム（空白除去）して取得
+    const type = String(i.type || '').trim();
+    const reason = String(i.reason || '').trim();
+    const note = String(i.details?.note || '').trim();
+    
+    // 【最優先】ID接頭辞判定
+    if (idStr.startsWith('m-') || idStr.startsWith('manual-')) return true;
+
+    // 【追加：最優先】振替という文字があれば無条件で手動（自動生成されないタイプのため）
+    if (type.includes('振替')) return true;
+    
+    // 確実なフラグ
+    if (i.isManual === true || i.isManual === 'true' || i.isManual === 1) return true;
+    
+    // システム生成判定 (auto- 等で始まり、かつ「自動」という言葉が含まれる場合のみ自動。それ以外は手動扱い)
+    if (idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-')) {
+      if (reason.includes('自動') || note.includes('自動')) return false;
+      if (reason === '' && note === '') return false;
+      return true;
+    }
+
+    // 休暇・振替系タイプ判定 (部分一致も許容)
+    const leaveTypes = ['年休', '有給', '時間', '振替', '公休', '夏季', '特休', '休暇', '欠勤', '休'];
+    if (leaveTypes.some(lt => type.includes(lt))) return true;
+    
+    const h = i.hours ?? i.details?.duration ?? i.duration;
+    if (h !== undefined && h !== null && h !== 0 && h !== '0') return true;
+
+    if (/^\d+$/.test(idStr) && !type.includes('出勤')) return true;
+
+    return i.details?.isManual === true;
   };
 
   list.forEach(item => {
-    // staffNameとdateがあれば、idがなくても処理対象にする
     if (!item || !item.staffName || !item.date) return;
+    if (!item.id) item.id = `temp-${item.staffName}-${item.date}-${Date.now()}`;
     
-    // idがない場合は一時的なIDを付与
-    if (!item.id) {
-      item.id = `temp-${item.staffName}-${item.date}-${Date.now()}`;
-    }
-    
-    // 同一人物・同一日・同一タイプの予定を統合対象とする（タイプが違えば別々の予定として保持）
-    // （時間休など、複数の項目が同じ日に並び立つケースを許可する）
+    // キーには「タイプ」を含めず、「人-日」で一意にする（1日1件が基本だが、時間給などの併記は表示側でこなす）
+    // ※ここを人-日-タイプにすると、同じ日に別タイプの「自動」が残ってしまうため。
+    // 手動と自動の競合をここで確実に解決する。
     const key = `${normalizeName(item.staffName)}-${item.date}-${item.type}`;
     const existing = map.get(key);
 
-    const isManualNew = isManual(item);
-    const wasManualOld = existing && isManual(existing);
-    
-    const isMobileNew = String(item.id).startsWith('m-') || item.priority === 'mobile';
-    const wasMobileOld = existing && (String(existing.id).startsWith('m-') || existing.priority === 'mobile');
+    const isManNew = isManual(item);
+    const wasManOld = existing ? isManual(existing) : false;
 
     let isPriority = false;
-    if (existing && existing.id === item.id) { isPriority = false; }
-    else if (!existing) {
+    if (!existing) {
       isPriority = true;
-    } else if (isManualNew && !wasManualOld) {
+    } else if (isManNew && !wasManOld) {
       isPriority = true;
-    } else if (!isManualNew && wasManualOld) {
+    } else if (!isManNew && wasManOld) {
       isPriority = false;
     } else {
-      if (isMobileNew && !wasMobileOld) {
+      const timeNew = getTime(item);
+      const timeOld = getTime(existing);
+      if (timeNew > timeOld) {
         isPriority = true;
-      } else if (!isMobileNew && wasMobileOld) {
-        isPriority = false;
-      } else {
-        const timeNew = getTime(item);
-        const timeOld = getTime(existing);
-        if (timeNew > timeOld) {
-          isPriority = true;
-        } else if (timeNew < timeOld) {
-          isPriority = false;
-        } else {
-          isPriority = item.status === 'approved' && existing.status !== 'approved';
-        }
+      } else if (timeNew === timeOld) {
+        isPriority = (item.status === 'approved' && existing.status !== 'approved');
       }
     }
 
@@ -96,27 +106,20 @@ const deduplicateRequests = (list: any[]) => {
     }
   });
 
-  // さらに、同じ日の「自動割り当て」と「手動」が混在している場合、その日の「自動」をすべて消す強固なクリーンアップを実施
-  const finalMap = new Map();
-  Array.from(map.values()).forEach(req => {
-    const dayKey = `${normalizeName(req.staffName)}-${req.date}`;
-    const isAuto = !isManual(req);
-    
-    if (!finalMap.has(dayKey)) {
-      finalMap.set(dayKey, [req]);
-    } else {
-      const dayReqs = finalMap.get(dayKey);
-      const hasManual = dayReqs.some((r: any) => isManual(r)) || !isAuto;
-      
-      if (hasManual && isAuto) {
-        discardedIds.push(req.id); // 手動が1つでもある日の自動予定は削除
-      } else {
-        dayReqs.push(req);
-      }
+  // 2次パス: 手動（公休等）がある日は同じ日の自動（auto等）を排除
+  const tempResults = Array.from(map.values());
+  const dayManuals = new Set();
+  tempResults.forEach(r => { if (isManual(r)) dayManuals.add(`${normalizeName(r.staffName)}-${r.date}`); });
+
+  const cleanList = tempResults.filter(r => {
+    if (dayManuals.has(`${normalizeName(r.staffName)}-${r.date}`) && !isManual(r)) {
+      if (!discardedIds.includes(r.id)) discardedIds.push(r.id);
+      return false;
     }
+    return true;
   });
 
-  return { cleanList: Array.from(map.values()).filter(r => !discardedIds.includes(r.id)), discardedIds };
+  return { cleanList, discardedIds };
 };
 
 export default function App() {
@@ -537,9 +540,7 @@ export default function App() {
 
   const handleAutoAssign = async (year: number, month: number, limits: any) => {
     try {
-      // 履歴を保存
       setRequestsHistory(prev => [...prev.slice(-4), [...requests]]);
-
       const response = await fetch('/api/ai-shift', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -557,12 +558,11 @@ export default function App() {
         })
       });
 
+      if (!response.ok) throw new Error(`API Error: ${response.status}`);
       const data = await response.json();
       if (!data.newRequests) throw new Error('自動割り当ての生成に失敗しました');
 
       const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
-
-      // 各リクエストに一意のIDとタイムスタンプを付与
       const nowStr = new Date().toISOString();
       const newWithIds = data.newRequests.map((r: any) => ({
         ...r,
@@ -570,14 +570,10 @@ export default function App() {
         createdAt: nowStr,
         status: r.status || 'approved'
       })).filter((r: any) => {
-        // もしそのスタッフが当該月でロックされているなら、新しい自動割当は採用しない
         const staff = staffList.find(s => String(s.id) === String(r.staffId));
-        const isLocked = staff?.lockedMonths?.[monthPrefix] === true;
-        return !isLocked;
+        return !(staff?.lockedMonths?.[monthPrefix]);
       });
 
-      // 既存の自動割当分（auto- および過去の legacy ID：af-, aw-, plan-）を除去
-      // ※必ず対象月（monthPrefix）に一致するものだけを削除対象とする
       const filteredRequests = requests.filter(r => {
         const idStr = String(r.id || '');
         const isAuto = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-');
@@ -591,12 +587,15 @@ export default function App() {
         return !(isAuto && isTargetMonth && !isLocked);
       });
       const updated = [...filteredRequests, ...newWithIds];
-      
       setRequests(updated);
       await saveData(STORAGE_KEYS.REQUESTS, updated);
-      await cloudStorage.upsertRequests(newWithIds);
+      
+      if (newWithIds.length > 0) {
+        await cloudStorage.upsertRequests(newWithIds);
+      }
     } catch (e) {
       console.error('Auto Assign Error:', e);
+      Alert.alert('割り当てエラー', '通信に失敗しました。');
       throw e;
     }
   };

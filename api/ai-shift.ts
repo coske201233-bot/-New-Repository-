@@ -138,7 +138,8 @@ export default async function handler(req: any, res: any) {
 
     // 各日の「現場」出勤者数を事前計算（助手・訪問スタッフを除外）
     const dailyOccupants = new Map();
-    for (const dStr of [...holidays, ...weekdays]) {
+    const allDays = [...holidays, ...weekdays];
+    allDays.forEach(dStr => {
       const count = currentRequests.filter(r => {
         if (r.date !== dStr || !isWorkingType(r.type)) return false;
         const s = staffMap.get(String(r.staffId)) || staffMap.get(normalize(r.staffName));
@@ -147,7 +148,7 @@ export default async function handler(req: any, res: any) {
         return !isAssistant && !isHomeVisit;
       }).length;
       dailyOccupants.set(dStr, count);
-    }
+    });
 
     // 休日連続チェック関数
     const getHolidayPenaltyInfo = (sId: string, sName: string, dateStr: string) => {
@@ -162,17 +163,17 @@ export default async function handler(req: any, res: any) {
         adjacentStr = toDateStr(sun);
       } 
 
-      const hasAdjacent = adjacentStr ? (staffWorkDays[sId].has(adjacentStr) || 
+      const hasAdjacent = adjacentStr ? (staffWorkDays[sId]?.has(adjacentStr) || 
                        autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === adjacentStr)) : false;
       
-      const alreadyWorkedHoliday = staffHolidayWorkCount[sId] > 0;
+      const alreadyWorkedHoliday = (staffHolidayWorkCount[sId] || 0) > 0;
       return { hasAdjacent, alreadyWorkedHoliday };
     };
 
     // 1. 休日（土日祝）の割り当て
     for (const dStr of holidays) {
       const config = schedule[dStr];
-      if (config.limit <= 0) continue;
+      if (!config || config.limit <= 0) continue;
 
       const occupants = dailyOccupants.get(dStr) || 0;
       let remaining = config.limit - occupants;
@@ -185,33 +186,27 @@ export default async function handler(req: any, res: any) {
             const isAssistant = s.profession === '助手' || s.placement === '助手';
             const isHomeVisit = s.placement === '訪問';
             const isUnavailable = s.status === '長期休暇' || s.status === '入職前';
-            const isNotApproved = s.isApproved === false;
             const isNoHolidayValue = s.noHoliday ?? s.no_holiday;
             const isNoHoliday = isNoHolidayValue === true || isNoHolidayValue === 'true' || isNoHolidayValue === 1 || isNoHolidayValue === '1';
             
-            // 助手、訪問担当、長期休暇、未承認、休日出勤不可設定のスタッフを除外
-            if (isAssistant || isHomeVisit || isUnavailable || isNotApproved || isNoHoliday) return false;
+            if (isAssistant || isHomeVisit || isUnavailable || isNoHoliday) return false;
 
-            const alreadyAssigned = staffWorkDays[sId].has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
+            const alreadyAssigned = staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
             const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type));
             
             if (alreadyAssigned || isOff) return false;
-
-            return !wouldExceedConsecutive(dStr, staffWorkDays[sId], 5);
+            return !wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5);
           })
           .sort((a: any, b: any) => {
             const aId = String(a.id || a.name);
             const bId = String(b.id || b.name);
             const aName = normalize(a.name);
             const bName = normalize(b.name);
-            
             const aStat = getHolidayPenaltyInfo(aId, aName, dStr);
             const bStat = getHolidayPenaltyInfo(bId, bName, dStr);
-            
-            // 平準化優先（今月の休日出勤が少ない人）、次に土日連続出勤回避
-            if (staffHolidayWorkCount[aId] !== staffHolidayWorkCount[bId]) {
-              return staffHolidayWorkCount[aId] - staffHolidayWorkCount[bId];
-            }
+            const aCount = staffHolidayWorkCount[aId] || 0;
+            const bCount = staffHolidayWorkCount[bId] || 0;
+            if (aCount !== bCount) return aCount - bCount;
             const aPenalty = aStat.hasAdjacent ? 1 : 0;
             const bPenalty = bStat.hasAdjacent ? 1 : 0;
             return aPenalty - bPenalty;
@@ -220,74 +215,62 @@ export default async function handler(req: any, res: any) {
         if (candidates.length > 0) {
           const chosen = candidates[0];
           const cId = String(chosen.id || chosen.name);
-          const cName = chosen.name;
-          
-          // 休日出勤を追加
-          autoAssigned.push({ staffId: cId, staffName: cName, date: dStr, type: '出勤', details: { note: '自動割当(休日)' } });
+          const cKey = normalize(chosen.name);
+          autoAssigned.push({ staffId: cId, staffName: chosen.name, date: dStr, type: '出勤', details: { note: '自動割当(休日)' } });
+          if (!staffWorkDays[cId]) staffWorkDays[cId] = new Set();
           staffWorkDays[cId].add(dStr);
-          staffHolidayWorkCount[cId]++;
+          staffHolidayWorkCount[cId] = (staffHolidayWorkCount[cId] || 0) + 1;
 
           // 2. 振替公休（平日）の付与
-          // 休日出勤した週か翌週の平日の中で、最も連勤を短縮できる日を選ぶ
           const bestWkday = [...weekdays].filter(wd => {
-            const sT = normalize(cName);
-            // 既に予定（申請または自動公休）がある日は除外
-            const hasJob = staffWorkDays[cId].has(wd) || currentRequests.some(r => r.date === wd && (String(r.staffId) === cId || normalize(r.staffName) === sT));
-            const hasAutoOff = autoAssigned.some(a => (String(a.staffId) === cId || normalize(a.staffName) === sT) && a.date === wd && a.type === '公休');
+            const hasJob = staffWorkDays[cId].has(wd) || currentRequests.some(r => r.date === wd && (String(r.staffId) === cId || normalize(r.staffName) === cKey));
+            const hasAutoOff = autoAssigned.some(a => (String(a.staffId) === cId || normalize(a.staffName) === cKey) && a.date === wd && a.type === '公休');
             return !hasJob && !hasAutoOff;
           }).sort((a, b) => {
-            // 公休者が少ない日を優先して選ぶ（平日の稼働確保）
             const aOffs = autoAssigned.filter(x => x.date === a && x.type === '公休').length;
             const bOffs = autoAssigned.filter(x => x.date === b && x.type === '公休').length;
             return aOffs - bOffs;
           })[0];
 
           if (bestWkday) {
-            autoAssigned.push({ staffId: cId, staffName: cName, date: bestWkday, type: '公休', details: { note: '休日振替' } });
-            // staffWorkDays[cId] には追加しない（公休なので）
+            autoAssigned.push({ staffId: cId, staffName: chosen.name, date: bestWkday, type: '公休', details: { note: '休日振替' } });
           }
         }
       }
     }
 
-    // 3. 平日の割り当て（不足人数の補充と平準化）
+    // 3. 平日の割り当て
     for (const dStr of weekdays) {
       const config = schedule[dStr];
-      const targetLim = config.limit;
-      if (targetLim <= 0) continue;
+      if (!config || config.limit <= 0) continue;
 
       const occupants = (dailyOccupants.get(dStr) || 0) + autoAssigned.filter(a => a.date === dStr && isWorkingType(a.type)).length;
-      let remaining = targetLim - occupants;
+      let remaining = config.limit - occupants;
 
       for (let i = 0; i < remaining; i++) {
         const candidates = (staffList || [])
           .filter((s: any) => {
             const sId = String(s.id || s.name);
             const sName = normalize(s.name);
-            const isAssistant = s.profession === '助手' || s.placement === '助手';
-            const isHomeVisit = s.placement === '訪問';
-            const isUnavailable = s.status === '長期休暇' || s.status === '入職前' || s.isApproved === false;
-            
-            if (isAssistant || isHomeVisit || isUnavailable) return false;
+            if (s.profession === '助手' || s.placement === '助手' || s.placement === '訪問' || s.status === '長期休暇' || s.status === '入職前') return false;
 
-            const alreadyAssigned = staffWorkDays[sId].has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
+            const alreadyAssigned = (staffWorkDays[sId]?.has(dStr)) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
             const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type)) ||
                           autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr && a.type === '公休');
             
-            // 既に予定がある、休み、または振替公休なら除外。また5連勤制限を守る。
-            return !alreadyAssigned && !isOff && !wouldExceedConsecutive(dStr, staffWorkDays[sId], 5);
+            return !alreadyAssigned && !isOff && !wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5);
           })
           .sort((a: any, b: any) => {
-             const aId = String(a.id || a.name);
-             const bId = String(b.id || b.name);
-             // 今月の出勤日数が少ない人を優先して「平均化」する
-             return staffWorkDays[aId].size - staffWorkDays[bId].size;
+            const aId = String(a.id || a.name);
+            const bId = String(b.id || b.name);
+            return (staffWorkDays[aId]?.size || 0) - (staffWorkDays[bId]?.size || 0);
           });
 
         if (candidates.length > 0) {
           const chosen = candidates[0];
           const cId = String(chosen.id || chosen.name);
           autoAssigned.push({ staffId: cId, staffName: chosen.name, date: dStr, type: '出勤', details: { note: '自動割当(平日)' } });
+          if (!staffWorkDays[cId]) staffWorkDays[cId] = new Set();
           staffWorkDays[cId].add(dStr);
         }
       }

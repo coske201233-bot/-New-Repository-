@@ -47,11 +47,11 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState('出勤');
-  const [selectedHours, setSelectedHours] = useState(1.0);
+  const [selectedHours, setSelectedHours] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
 
   // Constants
-  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '空欄'];
+  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '時間給', '空欄'];
   const HOUR_SELECTOR_TYPES = ['時間休', '振替＋時間休', '特休', '時間給', '看護休暇', '午前休', '午後休'];
 
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
@@ -87,9 +87,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       } catch (e) {}
     }
 
-    // 最終的な救済措置：0 や NaN を返さない
+    // 最終的な救済措置：0 や NaN を返さない（ただし時間給系で 0 を許可）
     if (r.type === '半日振替') return 3.75;
-    if (['時間給', '時間休', '看護休暇', '特休'].includes(r.type)) return 1.0;
     return 0;
   };
 
@@ -127,10 +126,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     const existing = requestMap.get(d.dateStr)?.get(sT);
     if (existing) {
       setSelectedType((existing.type === '日勤' || existing.type === '出勤' || existing.type === '勤務') ? '出勤' : existing.type);
-      setSelectedHours(getReqHours(existing) || 1.0);
+      setSelectedHours(getReqHours(existing));
     } else {
-      setSelectedType('出勤');
-      setSelectedHours(1.0);
+      const date = new Date(d.dateStr);
+      const isWeekday = getDayType(date) === 'weekday';
+      setSelectedType(isWeekday ? '出勤' : '公休');
+      setSelectedHours(0);
     }
   };
 
@@ -201,7 +202,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         }
         // Instead of setting selectedDay to null and closing everything, just update the state
         setSelectedType('出勤');
-        setSelectedHours(1.0);
+        setSelectedHours(0);
         if (showConfirm) Alert.alert('完了', '予定を削除しました。');
       } catch (e) {
         Alert.alert('エラー', '削除に失敗しました。');
@@ -305,7 +306,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             } else if (req.type === '半日振替') {
               displayLabel = '振(半)'; labelColor = '#ef4444';
             } else if (['時間休', '時間給', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(req.type)) {
-              const displayH = (h > 0) ? h : 1.0;
+              const displayH = h;
               displayLabel = `${req.type.charAt(0)}(${displayH}h)`; labelColor = '#ef4444';
             } else {
               displayLabel = req.type.slice(0, 2);

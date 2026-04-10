@@ -5,7 +5,11 @@
  */
 export const normalizeName = (name: string) => {
   if (!name || typeof name !== 'string') return '';
-  return name.trim().replace(/\u3000/g, ' ').replace(/\s+/g, ' ');
+  // 1. 空白、タブ、改行、および一般的な記号（カッコ等）の除去
+  let n = name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '');
+  // 2. 漢字の表記ゆれ吸収
+  n = n.replace(/條/g, '条');
+  return n;
 };
 
 export const sortStaffByName = (staffList: any[]) => {
