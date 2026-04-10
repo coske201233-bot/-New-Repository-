@@ -139,9 +139,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         hours: HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : undefined,
         status: 'approved',
         createdAt: now,
-        updatedAt: now,
+        updatedAt: now, // 常に最新の時刻をセットして重複排除で勝つようにする
         isShift: true,
-        isManual: true // 強固に保持するための保護フラグ
+        isManual: true // 手動フラグを確実に立てる
       };
       
       const sT = normalize(selectedStaff.name);
@@ -304,6 +304,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             if (dtype === 'weekday') {
               displayLabel = '出勤'; labelColor = '#38bdf8';
             } else {
+              // 休日出勤不可スタッフ（noHoliday）は「日勤」、それ以外は「公休」として表示
               if (isNoHoliday) {
                 displayLabel = '日勤'; labelColor = '#38bdf8';
               } else {

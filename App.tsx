@@ -67,18 +67,30 @@ const deduplicateRequests = (list: any[]) => {
     if (!existing) {
       isPriority = true;
     } else if (isManualNew && !wasManualOld) {
+      // 新しい方が手動で、古い方が自動なら、無条件で新しい方を採用
       isPriority = true;
     } else if (!isManualNew && wasManualOld) {
+      // 新しい方が自動で、古い方が手動なら、古い方を維持
       isPriority = false;
     } else {
-      // 両者が同じ種別（手動同士など）の場合：
-      // 1. スマホからの更新であれば、僅かな時間の遅れがあってもスマホを優先
-      // 2. それ以外は新しいタイムスタンプを優先
+      // 両者が同じ種別（両方手動、または両方自動）の場合：
+      // 1. スマホからの更新であれば優先
       if (isMobileNew && !wasMobileOld) {
         isPriority = true; 
+      } else if (!isMobileNew && wasMobileOld) {
+        isPriority = false;
       } else {
-        isPriority = (getTime(item) > getTime(existing)) ||
-                     (getTime(item) === getTime(existing) && item.status === 'approved' && existing.status !== 'approved');
+        // 2. タイムスタンプが新しい方を優先
+        const timeNew = getTime(item);
+        const timeOld = getTime(existing);
+        if (timeNew > timeOld) {
+          isPriority = true;
+        } else if (timeNew < timeOld) {
+          isPriority = false;
+        } else {
+          // 3. 全く同じ時間なら、確定済み(approved)を優先
+          isPriority = item.status === 'approved' && existing.status !== 'approved';
+        }
       }
     }
 
