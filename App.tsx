@@ -34,12 +34,12 @@ const deduplicateRequests = (list: any[]) => {
   };
 
   const isManual = (i: any) => {
-    if (i.isManual === true) return true;
+    if (i.isManual === true || i.isManual === 'true' || i.isManual === 1) return true;
     const idStr = String(i.id || '');
     if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('q-h-') || /^\d+$/.test(idStr)) return true;
-    const leaveTypes = ['年休', '有給休暇', '時間休', '振替', '1日振替', '半日振替', '振替＋時間休', '公休', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '午前振替', '午後振替'];
+    const leaveTypes = ['年休', '有給休暇', '時間休', '時間給', '振替', '1日振替', '半日振替', '振替＋時間休', '公休', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '午前振替', '午後振替', '看護休暇', '1日休暇'];
     if (leaveTypes.includes(i.type)) return true;
-    return (i.details?.note && !i.details.note.includes('自動')) || (i.reason && i.reason !== '自動割当') || i.details?.isManual === true;
+    return (i.details?.isManual === true) || (i.details?.note && !i.details.note.includes('自動')) || (i.reason && i.reason !== '自動割当');
   };
 
   list.forEach(item => {
@@ -64,23 +64,27 @@ const deduplicateRequests = (list: any[]) => {
     const wasMobileOld = existing && (String(existing.id).startsWith('m-') || existing.priority === 'mobile');
 
     let isPriority = false;
-    if (!existing) {
+    if (existing && existing.id === item.id) { isPriority = false; } // 全く同じIDならスルー
+    else if (!existing) {
       isPriority = true;
     } else if (isManualNew && !wasManualOld) {
-      // 新しい方が手動で、古い方が自動なら、無条件で新しい方を採用
+      // 手動 vs 自動 -> 手動が勝つ
       isPriority = true;
     } else if (!isManualNew && wasManualOld) {
-      // 新しい方が自動で、古い方が手動なら、古い方を維持
+      // 自動 vs 手動 -> 手動を維持
       isPriority = false;
     } else {
-      // 両者が同じ種別（両方手動、または両方自動）の場合：
-      // 1. スマホからの更新であれば優先
-      if (isMobileNew && !wasMobileOld) {
-        isPriority = true; 
-      } else if (!isMobileNew && wasMobileOld) {
+      // 手動同士、または自動同士の場合：
+      // m- または manual- または priority: mobile を持つものを最優先（タイムスタンプより強い）
+      const isStrongManualNew = isMobileNew; 
+      const wasStrongManualOld = wasMobileOld;
+      
+      if (isStrongManualNew && !wasStrongManualOld) {
+        isPriority = true;
+      } else if (!isStrongManualNew && wasStrongManualOld) {
         isPriority = false;
       } else {
-        // 2. タイムスタンプが新しい方を優先
+        // タイムスタンプ比較
         const timeNew = getTime(item);
         const timeOld = getTime(existing);
         if (timeNew > timeOld) {
@@ -88,7 +92,6 @@ const deduplicateRequests = (list: any[]) => {
         } else if (timeNew < timeOld) {
           isPriority = false;
         } else {
-          // 3. 全く同じ時間なら、確定済み(approved)を優先
           isPriority = item.status === 'approved' && existing.status !== 'approved';
         }
       }
@@ -126,9 +129,15 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [activeDate, setActiveDate] = useState(new Date());
   const [requestsHistory, setRequestsHistory] = useState<any[][]>([]);
+  const [staffLocks, setStaffLocks] = useState<Record<string, Record<string, boolean>>>({});
 
   // Initial Load (Cloud Sync Integrated)
   useEffect(() => {
+    // ウェブ版でChromeの自動翻訳（公休→休みなど）を防止する設定
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      document.documentElement.lang = 'ja';
+    }
+
     const init = async () => {
       try {
         const loadSyncConfig = async (key: string, setter: (val: any) => void, defaultValue: any) => {
@@ -211,6 +220,12 @@ export default function App() {
         await loadSyncConfig(STORAGE_KEYS.ADMIN_PASSWORD, setAdminPassword, '1114');
         await loadSyncConfig(STORAGE_KEYS.STAFF_VIEW_MODE, setStaffViewMode, false);
         
+        // ロック情報の読み込み
+        try {
+          const cloudLocks = await cloudStorage.fetchConfig('staff_locks');
+          if (cloudLocks) setStaffLocks(cloudLocks);
+        } catch (e) {}
+        
         setIsInitialized(true);
       } catch (e: any) {
         console.error('Initialization error:', e);
@@ -292,38 +307,59 @@ export default function App() {
   };
 
   const handleUpdateRequests = async (update: any[] | ((prev: any[]) => any[])) => {
+    if (isSyncing) return; // 同期中や保存中は重複実行を避ける
+    setIsSyncing(true);
+    
     let finalRequests: any[] = [];
     const now = new Date().toISOString();
-    // モバイル環境かどうかを簡易判定（PCブラウザ以外を優先）
     const isMobile = Platform.OS !== 'web' || (typeof window !== 'undefined' && window.innerWidth < 768);
     
-    setRequests(prev => {
-      const next = typeof update === 'function' ? update(prev) : update;
-      // 新規追加時はidが未付与の場合があるため、staffNameとdateがあれば有効とみなす
+    try {
+      // 既存のステートを取得して計算（セッター外で行うことで副作用への影響を確実に）
+      const prevRequests = requests;
+      const next = typeof update === 'function' ? update(prevRequests) : update;
       const validOnly = (next || []).filter((r: any) => r && r.staffName && r.date);
       
-      // 新しいデータにタイムスタンプ、優先フラグ、および不足しているIDを付与
       const withTimestamp = validOnly.map(r => {
-        // IDがなければここで生成
         const finalId = r.id || `m-${r.staffName}-${r.date}-${Math.random().toString(36).substr(2, 9)}`;
-        const isNew = !prev.find(p => p.id === finalId && p.status === r.status && p.type === r.type);
-        if (isNew) {
+        const existing = prevRequests.find(p => p.id === finalId);
+        const isChanged = !existing || existing.type !== r.type || existing.status !== r.status || existing.hours !== r.hours;
+        
+        if (isChanged) {
            return { ...r, id: finalId, updatedAt: now, priority: isMobile ? 'mobile' : 'pc' };
         }
         return { ...r, id: finalId };
       });
+
       const { cleanList } = deduplicateRequests(withTimestamp);
-      finalRequests = cleanList;
-      return cleanList;
-    });
-    
-    try {
+      
+      // 保存前に、時間休(hours)が確実に数値として残っているか確認（0h問題の対策）
+      const validatedList = cleanList.map(r => {
+        let h = r.hours ?? r.details?.duration ?? r.duration;
+        if (h === undefined || h === null || h === '' || isNaN(parseFloat(String(h)))) {
+          // 数値がない場合のフォールバック
+          if (r.type === '半日振替') h = 3.75;
+          else if (['時間給', '時間休', '特休', '看護休暇'].includes(r.type)) h = 1.0;
+          else h = undefined;
+        } else {
+          h = Math.max(0.25, parseFloat(String(h))); // 最低0.25hを保証
+        }
+        return { ...r, hours: h };
+      });
+
+      finalRequests = validatedList;
+      
+      // ステートとローカル保存、クラウド保存を順番に行う
+      setRequests(finalRequests);
       await saveData(STORAGE_KEYS.REQUESTS, finalRequests);
+      
       if (finalRequests.length > 0) {
         await cloudStorage.upsertRequests(finalRequests);
       }
     } catch (err) {
-      console.error('Cloud save failed:', err);
+      console.error('Unified UpdateRequests failed:', err);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -517,6 +553,8 @@ export default function App() {
       const data = await response.json();
       if (!data.newRequests) throw new Error('自動割り当ての生成に失敗しました');
 
+      const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+
       // 各リクエストに一意のIDとタイムスタンプを付与
       const nowStr = new Date().toISOString();
       const newWithIds = data.newRequests.map((r: any) => ({
@@ -524,7 +562,12 @@ export default function App() {
         id: r.id || `auto-${r.staffId}-${r.date}-${Math.random().toString(36).substr(2, 6)}`,
         createdAt: nowStr,
         status: r.status || 'approved'
-      }));
+      })).filter((r: any) => {
+        // もしそのスタッフが当該月でロックされているなら、新しい自動割当は採用しない
+        const staff = staffList.find(s => String(s.id) === String(r.staffId));
+        const isLocked = staff?.lockedMonths?.[monthPrefix] === true;
+        return !isLocked;
+      });
 
       // 既存の自動割当分（auto- および過去の legacy ID：af-, aw-, plan-）を除去
       // ※必ず対象月（monthPrefix）に一致するものだけを削除対象とする
@@ -532,8 +575,13 @@ export default function App() {
         const idStr = String(r.id || '');
         const isAuto = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-');
         const isTargetMonth = r.date && r.date.startsWith(monthPrefix);
-        // 「自動割当ID」かつ「対象月」の場合のみ削除（それ以外は残す）
-        return !(isAuto && isTargetMonth);
+        
+        // 当該月・当該スタッフがロックされている場合は、自動割当データであっても削除せずに残す（上書き防止）
+        const staff = staffList.find(s => String(s.id) === String(r.staffId));
+        const isLocked = staff?.lockedMonths?.[monthPrefix] === true;
+        
+        // 「自動割当ID」かつ「対象月」かつ「ロックされていない」場合のみ削除（それ以外は残す）
+        return !(isAuto && isTargetMonth && !isLocked);
       });
       const updated = [...filteredRequests, ...newWithIds];
       
@@ -603,9 +651,13 @@ export default function App() {
       setSessionDuration: async (val: number) => { setSessionDuration(val); await saveData(STORAGE_KEYS.SESSION_DURATION, val); },
       onForceCloudSync: handleForceCloudSync,
       currentDate: activeDate, setCurrentDate: setActiveDate,
-      onAutoAssign: handleAutoAssign,
       onUndoAutoAssign: handleUndoAutoAssign,
       canUndoAutoAssign: requestsHistory.length > 0,
+      staffLocks,
+      setStaffLocks: async (newLocks: any) => {
+        setStaffLocks(newLocks);
+        await cloudStorage.saveConfig('staff_locks', newLocks).catch(console.error);
+      }
     };
 
     switch (currentTab) {

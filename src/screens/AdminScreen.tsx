@@ -134,12 +134,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               const dDate = new Date(d.dateStr);
               const dtype = getDayType(dDate);
               const isNoHoliday = (dtype !== 'weekday') && (s.monthlyNoHoliday?.[currentMonthKey] ?? s.noHoliday);
-              type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '日勤' : '公休');
+              type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '公休' : '公休');
             }
 
             const isOff = ['公休', '年休', '特休', '休暇', '欠勤'].includes(type);
             const style = isOff ? 'background-color: #fef2f2; color: #ef4444;' : '';
-            const label = type === '公休' ? '公' : (type === '日勤' || type === '出勤' ? '日' : (type === '夜勤' ? '夜' : (type === '早番' ? '早' : (type === '遅番' ? '遅' : (type ? type.charAt(0) : '')))));
+            const label = type === '公休' ? '公' : (type === '出勤' ? '出' : (type === '夜勤' ? '夜' : (type === '早番' ? '早' : (type === '遅番' ? '遅' : (type ? type.charAt(0) : '')))));
             row += `<td style="${style}">${label}</td>`;
           }
         });

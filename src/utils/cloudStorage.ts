@@ -24,7 +24,7 @@ const mapFromSql = (obj: any, mapping: Record<string, string>) => {
   return result;
 };
 
-const STAFF_MAP = { noHoliday: 'no_holiday', createdAt: 'created_at', isApproved: 'is_approved', pin: 'pin' };
+const STAFF_MAP = { noHoliday: 'no_holiday', createdAt: 'created_at', isApproved: 'is_approved', pin: 'pin', isLocked: 'is_locked', lockedMonths: 'locked_months' };
 const REQ_MAP = { staffName: 'staff_name', createdAt: 'created_at' };
 const MSG_MAP = { fromId: 'from_id', fromName: 'from_name', toId: 'to_id', createdAt: 'created_at' };
 
@@ -61,7 +61,7 @@ export const cloudStorage = {
     console.log('Staff synced to cloud successfully');
   },
   async upsertSingleStaff(s: any) {
-    const validKeys = ['id', 'name', 'placement', 'position', 'profession', 'status', 'noHoliday', 'isApproved', 'role', 'password'];
+    const validKeys = ['id', 'name', 'placement', 'position', 'profession', 'status', 'noHoliday', 'isApproved', 'role', 'password', 'isLocked', 'lockedMonths'];
     const obj: any = {};
     validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });
     const { error } = await supabase.from('staff').upsert(mapToSql(obj, STAFF_MAP), { onConflict: 'id' });
@@ -91,6 +91,16 @@ export const cloudStorage = {
       }
       if (mapped.details?.priority) {
         mapped.priority = mapped.details.priority;
+      }
+      // 時間数(hours)の復元
+      const rawDuration = mapped.hours ?? mapped.details?.duration ?? mapped.duration;
+      if (rawDuration !== undefined && rawDuration !== null && rawDuration !== '') {
+        const parsed = parseFloat(String(rawDuration));
+        mapped.hours = isNaN(parsed) ? (mapped.type === '半日振替' ? 3.75 : 1.0) : parsed;
+      } else {
+        // デフォルト値のフォールバック
+        if (mapped.type === '半日振替') mapped.hours = 3.75;
+        else if (['時間給', '時間休', '特休', '看護休暇'].includes(mapped.type)) mapped.hours = 1.0;
       }
       return mapped;
     });

@@ -78,7 +78,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     return map;
   }, [requests]);
 
-  const isPrivileged = ((profile.role?.includes('シフト管理者') || profile.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
+  const isPrivileged = ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
 
   const getDetailedDayInfo = (date: Date) => {
     const dateStr = getDateStr(date);
@@ -95,8 +95,8 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       const isHomeVisit = staff.placement === '訪問';
       const isAssistant = staff.profession === '助手' || staff.placement === '助手';
       
-      // 除外条件: 長期休暇、入職前、訪問担当
-      if (isOut || isHomeVisit) return;
+      // 除外条件: 長期休暇、入職前（訪問担当と助手は表示するように変更）
+      if (isOut) return;
 
       const userRequests = requestMap.get(dateStr)?.get(staff.name.trim()) || [];
       const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
@@ -139,13 +139,11 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
           }
         }
       } else {
-        if (!isAssistant) {
-          const isScheduledToWork = dayType === 'weekday';
-          if (isScheduledToWork) {
-            working.push({ staff, type: '出勤', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, status: 'approved' });
-          } else {
-            off.push({ staff, type: isNoHoliday ? '休日出勤不要' : '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, status: 'approved' });
-          }
+        const isScheduledToWork = dayType === 'weekday';
+        if (isScheduledToWork) {
+          working.push({ staff, type: '出勤', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, status: 'approved' });
+        } else {
+          off.push({ staff, type: isNoHoliday ? '休日出勤不要' : '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, status: 'approved' });
         }
       }
     });
@@ -444,9 +442,11 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               {workingStaff.length > 0 ? workingStaff.map((item, idx) => (
                 <View key={idx} style={styles.leafItem}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                    <ThemeText variant="caption" bold>{item.staff.name}</ThemeText>
+                    <ThemeText variant="caption" bold>{item.staff?.name || '不明'}</ThemeText>
+                    {item.isHomeVisit && <View style={[styles.badgeTiny, { backgroundColor: '#ec4899' }]}><ThemeText style={styles.badgeTinyText}>訪問</ThemeText></View>}
+                    {(item.staff?.profession === '助手' || item.staff?.placement === '助手') && <View style={[styles.badgeTiny, { backgroundColor: '#8b5cf6' }]}><ThemeText style={styles.badgeTinyText}>助手</ThemeText></View>}
                     <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginLeft: 8 }} numberOfLines={1}>
-                      ({item.type}{item.isHomeVisit ? ' / 訪問' : ''})
+                      ({item.type})
                       {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
                       {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.duration}h</ThemeText>}
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
@@ -477,7 +477,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             {offStaff.length > 0 ? offStaff.map((item, idx) => (
                 <View key={idx} style={styles.leafItem}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                    <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>{item.staff.name}</ThemeText>
+                    <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>{item.staff?.name || '不明'}</ThemeText>
+                    {item.isHomeVisit && <View style={[styles.badgeTiny, { backgroundColor: '#ec4899' }]}><ThemeText style={styles.badgeTinyText}>訪問</ThemeText></View>}
+                    {(item.staff?.profession === '助手' || item.staff?.placement === '助手') && <View style={[styles.badgeTiny, { backgroundColor: '#8b5cf6' }]}><ThemeText style={styles.badgeTinyText}>助手</ThemeText></View>}
                     <ThemeText variant="caption" style={{ marginLeft: 8, color: COLORS.textSecondary }} numberOfLines={1}>
                       ({item.type})
                       {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
@@ -485,7 +487,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-                  {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
+                  {(isPrivileged || (profile?.name && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
                     <View style={{ flexDirection: 'row', gap: 8 }}>
                       {item.status === 'pending' && (
                         <TouchableOpacity 
@@ -667,4 +669,6 @@ const styles = StyleSheet.create({
   modalSubmitButton: { backgroundColor: COLORS.primary },
   smallActionBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: 'rgba(239, 68, 68, 0.05)', zIndex: 10 },
   finishBtn: { backgroundColor: COLORS.primary, height: 54, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4, zIndex: 20 },
+  badgeTiny: { paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 4, marginLeft: 6, marginBottom: 1 },
+  badgeTinyText: { color: 'white', fontSize: 9.5, fontWeight: 'bold' },
 });

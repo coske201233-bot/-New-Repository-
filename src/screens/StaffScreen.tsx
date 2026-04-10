@@ -4,8 +4,9 @@ import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { 
-  ChevronLeft, ChevronRight, Calendar, User, 
-  Check, X, Clock, MapPin, Briefcase, Trash2, Settings, Shield, Printer
+  Shield, Users, ChevronLeft, ChevronRight, MapPin, Briefcase, 
+  Calendar, Info, AlertCircle, XCircle, Trash2, CheckCircle, 
+  Clock, Plus, Filter, Lock, Unlock, Printer, X
 } from 'lucide-react-native';
 import { getMonthInfo, getDayType, isHoliday, getDateStr } from '../utils/dateUtils';
 import { normalizeName } from '../utils/staffUtils';
@@ -24,6 +25,8 @@ interface StaffScreenProps {
   initialWard?: string;
   currentDate: Date;
   setCurrentDate: (d: Date | ((prev: Date) => Date)) => void;
+  staffLocks?: Record<string, Record<string, boolean>>;
+  setStaffLocks?: (locks: any) => Promise<void>;
 }
 
 interface MonthDay {
@@ -34,7 +37,7 @@ interface MonthDay {
 }
 
 export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
-  const { staffList, requests, setRequests, onDeleteRequest, isPrivileged, profile, currentDate, setCurrentDate } = props;
+  const { staffList, setStaffList, requests, setRequests, onDeleteRequest, isPrivileged, profile, currentDate, setCurrentDate, staffLocks, setStaffLocks } = props;
   const isAdminAuthenticated = props.isAdminAuthenticated || isPrivileged;
   
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
@@ -77,9 +80,16 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       try {
         const [sh, sm] = String(r.details.startTime).split(':').map(Number);
         const [eh, em] = String(r.details.endTime).split(':').map(Number);
-        if (!isNaN(sh) && !isNaN(eh)) return (eh + em / 60) - (sh + sm / 60);
+        if (!isNaN(sh) && !isNaN(eh)) {
+          const hours = (eh + em / 60) - (sh + sm / 60);
+          if (hours > 0) return hours;
+        }
       } catch (e) {}
     }
+
+    // 最終的な救済措置：0 や NaN を返さない
+    if (r.type === '半日振替') return 3.75;
+    if (['時間給', '時間休', '看護休暇', '特休'].includes(r.type)) return 1.0;
     return 0;
   };
 
@@ -104,13 +114,19 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     return map;
   }, [requests]);
 
+  const currentMonthKey = `${activeDate.getFullYear()}-${String(activeDate.getMonth() + 1).padStart(2, '0')}`;
+  const isMonthLocked = staffLocks?.[selectedStaff?.id]?.[currentMonthKey] === true;
+
   const handleDayPress = (d: MonthDay) => {
-    if (!d || d.empty) return;
+    if (isMonthLocked) {
+      Alert.alert('保護されています', `${activeDate.getMonth() + 1}月のカレンダーは保護されているため編集できません。一番右上の「保護中」ボタンを押して解除してください。`);
+      return;
+    }
     setSelectedDay(d.dateStr);
     const sT = normalize(selectedStaff?.name || '');
     const existing = requestMap.get(d.dateStr)?.get(sT);
     if (existing) {
-      setSelectedType((existing.type === '日勤' || existing.type === '出勤') ? '出勤' : existing.type);
+      setSelectedType((existing.type === '日勤' || existing.type === '出勤' || existing.type === '勤務') ? '出勤' : existing.type);
       setSelectedHours(getReqHours(existing) || 1.0);
     } else {
       setSelectedType('出勤');
@@ -226,7 +242,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           const dDate = new Date(d.dateStr);
           const dtype = getDayType(dDate);
           const isNoHoliday = (dtype !== 'weekday') && (selectedStaff.monthlyNoHoliday?.[currentMonthKey] ?? selectedStaff.noHoliday);
-          type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '日勤' : '公休');
+          type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '公休' : '公休');
         }
 
         const h = r ? getReqHours(r) : 0;
@@ -276,7 +292,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           let labelColor = 'white';
           if (req) {
             const h = getReqHours(req);
-            if (['出勤', '日勤'].includes(req.type)) {
+            if (['出勤', '日勤', '勤務'].includes(req.type)) {
               displayLabel = '出勤'; labelColor = '#38bdf8';
             } else if (req.type === '公休') {
               displayLabel = '公休'; labelColor = '#ef4444';
@@ -289,7 +305,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             } else if (req.type === '半日振替') {
               displayLabel = '振(半)'; labelColor = '#ef4444';
             } else if (['時間休', '時間給', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(req.type)) {
-              displayLabel = `${req.type.charAt(0)}(${h}h)`; labelColor = '#ef4444';
+              const displayH = (h > 0) ? h : 1.0;
+              displayLabel = `${req.type.charAt(0)}(${displayH}h)`; labelColor = '#ef4444';
             } else {
               displayLabel = req.type.slice(0, 2);
               if (['公休', '欠勤', '休暇', '全休'].includes(req.type)) labelColor = '#ef4444';
@@ -304,12 +321,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             if (dtype === 'weekday') {
               displayLabel = '出勤'; labelColor = '#38bdf8';
             } else {
-              // 休日出勤不可スタッフ（noHoliday）は「日勤」、それ以外は「公休」として表示
-              if (isNoHoliday) {
-                displayLabel = '日勤'; labelColor = '#38bdf8';
-              } else {
-                displayLabel = '公休'; labelColor = '#ef4444';
-              }
+              displayLabel = '公休'; labelColor = '#ef4444';
             }
           }
 
@@ -408,8 +420,33 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         <View style={styles.modalOverlay}>
           <View style={styles.calendarModal}>
             <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }}><ThemeText variant="h2">{selectedStaff?.name || ''}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{activeDate.getFullYear()}年 {activeDate.getMonth() + 1}月</ThemeText></View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <View style={{ flex: 1 }}>
+                <ThemeText variant="h2">{selectedStaff?.name || ''} さんのカレンダー</ThemeText>
+                <ThemeText variant="caption" color={COLORS.textSecondary}>{activeDate.getFullYear()}年 {activeDate.getMonth() + 1}月</ThemeText>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                {/* 保護（ロック）ボタン */}
+                <TouchableOpacity 
+                  style={[styles.lockBtn, isMonthLocked && styles.lockBtnActive]}
+                  onPress={async () => {
+                    if (!selectedStaff || !setStaffLocks) return;
+                    
+                    const newAllLocks = { ...(staffLocks || {}) };
+                    const staffId = String(selectedStaff.id);
+                    const staffMonthLocks = { ...(newAllLocks[staffId] || {}) };
+                    
+                    staffMonthLocks[currentMonthKey] = !isMonthLocked;
+                    newAllLocks[staffId] = staffMonthLocks;
+                    
+                    try {
+                      await setStaffLocks(newAllLocks);
+                    } catch (e) {
+                      console.error('Lock save error:', e);
+                    }
+                  }}
+                >
+                  {isMonthLocked ? <Lock size={18} color="white" /> : <Unlock size={18} color={COLORS.textSecondary} />}
+                </TouchableOpacity>
                 {Platform.OS === 'web' && ( <TouchableOpacity onPress={handlePrint} style={styles.iconBtn}><Printer size={22} color="#38bdf8" /></TouchableOpacity> )}
                 <TouchableOpacity onPress={() => setIsCalendarModalVisible(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity>
               </View>
@@ -491,4 +528,6 @@ const styles = StyleSheet.create({
   placeholderSection: { height: 100, justifyContent: 'center', alignItems: 'center' },
   addStaffBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   deleteBtn: { borderWidth: 1, borderColor: '#ef4444', padding: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  lockBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  lockBtnActive: { backgroundColor: '#ef4444', borderColor: '#ef4444' },
 });

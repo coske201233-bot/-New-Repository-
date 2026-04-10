@@ -6,8 +6,8 @@ const toDateStr = (d: Date): string =>
 const isWorkingType = (type: string) => {
   if (!type) return false;
   const t = String(type);
-  // 全ての「出勤」および「出勤」を含むタイプ、および午前休・午後休を出勤日としてカウント
-  return t.includes('出勤') || t.includes('日勤') || t.includes('通常') || t.includes('午前休') || t.includes('午後休');
+  // 全ての「出勤」および「勤務」を含むタイプ、および午前休・午後休を出勤日としてカウント
+  return t.includes('出勤') || t.includes('勤務') || t.includes('通常') || t.includes('午前休') || t.includes('午後休');
 };
 
 const wouldExceedConsecutive = (date: string, workDays: Set<string>, max = 5): boolean => {
@@ -153,7 +153,13 @@ export default async function handler(req: any, res: any) {
       const config = schedule[dStr];
       if (config.limit <= 0) continue;
 
-      let occupants = currentRequests.filter((r: any) => r.date === dStr && isWorkingType(r.type)).length;
+      let occupants = currentRequests.filter((r: any) => {
+        if (!isWorkingType(r.type)) return false;
+        const s = staffList.find(s => String(s.id) === String(r.staffId) || normalize(s.name) === normalize(r.staffName));
+        const isAssistant = s?.profession === '助手' || s?.placement === '助手';
+        const isHomeVisit = s?.placement === '訪問';
+        return !isAssistant && !isHomeVisit;
+      }).length;
       let remaining = config.limit - occupants;
 
       for (let i = 0; i < remaining; i++) {
@@ -162,13 +168,14 @@ export default async function handler(req: any, res: any) {
             const sId = String(s.id || s.name);
             const sName = normalize(s.name);
             const isAssistant = s.profession === '助手' || s.placement === '助手';
+            const isHomeVisit = s.placement === '訪問';
             const isUnavailable = s.status === '長期休暇' || s.status === '入職前';
-            const isNotApproved = s.isApproved === false; // 明示的に false の場合のみ除外
+            const isNotApproved = s.isApproved === false;
             const isNoHolidayValue = s.noHoliday ?? s.no_holiday;
             const isNoHoliday = isNoHolidayValue === true || isNoHolidayValue === 'true' || isNoHolidayValue === 1 || isNoHolidayValue === '1';
             
-            // 助手、長期休暇、未承認、休日出勤不可設定のスタッフを除外
-            if (isAssistant || isUnavailable || isNotApproved || isNoHoliday) return false;
+            // 助手、訪問担当、長期休暇、未承認、休日出勤不可設定のスタッフを除外
+            if (isAssistant || isHomeVisit || isUnavailable || isNotApproved || isNoHoliday) return false;
 
             const alreadyAssigned = staffWorkDays[sId].has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
             const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type));
@@ -234,8 +241,13 @@ export default async function handler(req: any, res: any) {
       const targetLim = config.limit;
       if (targetLim <= 0) continue;
 
-      let occupants = currentRequests.filter((r: any) => r.date === dStr && isWorkingType(r.type)).length + 
-                      autoAssigned.filter(a => a.date === dStr && isWorkingType(a.type)).length;
+      let occupants = currentRequests.filter((r: any) => {
+        if (r.date !== dStr || !isWorkingType(r.type)) return false;
+        const s = staffList.find(s => String(s.id) === String(r.staffId) || normalize(s.name) === normalize(r.staffName));
+        const isAssistant = s?.profession === '助手' || s?.placement === '助手';
+        const isHomeVisit = s?.placement === '訪問';
+        return !isAssistant && !isHomeVisit;
+      }).length + autoAssigned.filter(a => a.date === dStr && isWorkingType(a.type)).length;
       
       let remaining = targetLim - occupants;
 
@@ -245,9 +257,10 @@ export default async function handler(req: any, res: any) {
             const sId = String(s.id || s.name);
             const sName = normalize(s.name);
             const isAssistant = s.profession === '助手' || s.placement === '助手';
+            const isHomeVisit = s.placement === '訪問';
             const isUnavailable = s.status === '長期休暇' || s.status === '入職前' || s.isApproved === false;
             
-            if (isAssistant || isUnavailable) return false;
+            if (isAssistant || isHomeVisit || isUnavailable) return false;
 
             const alreadyAssigned = staffWorkDays[sId].has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
             const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type)) ||

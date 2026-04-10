@@ -67,7 +67,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     
     const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated;
     const nameStr = profile?.name || '不明な職員';
-    const isFiscalYear = (profile.position?.trim() === '会計年度');
+    const isFiscalYear = (profile?.position?.trim() === '会計年度');
     const MORNING_H = 4.0;
     const AFTERNOON_H = isFiscalYear ? 3.5 : 3.75;
     
@@ -161,8 +161,11 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 return true;
               })
               .sort((a, b) => {
-                const dateDiff = new Date(b.date.replace(/-/g, '/')).getTime() - new Date(a.date.replace(/-/g, '/')).getTime();
-                if (dateDiff !== 0) return dateDiff;
+                const dateA = a.date ? new Date(String(a.date).replace(/-/g, '/')).getTime() : 0;
+                const dateB = b.date ? new Date(String(b.date).replace(/-/g, '/')).getTime() : 0;
+                
+                if (dateB !== dateA) return dateB - dateA;
+                
                 const timeA = new Date(a.updatedAt || a.createdAt || a.created_at || 0).getTime();
                 const timeB = new Date(b.updatedAt || b.createdAt || b.created_at || 0).getTime();
                 return timeB - timeA;
@@ -198,10 +201,10 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   <View style={styles.infoRow}>
                     <CalendarIcon size={14} color={COLORS.textSecondary} />
                     <ThemeText variant="body" style={styles.infoText}>{formatDate(item.date)}</ThemeText>
-                    {item.details?.duration && (
+                    {item.hours !== undefined && (
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 12 }}>
                         <Clock size={14} color={COLORS.accent} />
-                        <ThemeText variant="caption" style={{ marginLeft: 4, color: COLORS.accent }} bold>{item.details.duration}時間</ThemeText>
+                        <ThemeText variant="caption" style={{ marginLeft: 4, color: COLORS.accent }} bold>{item.hours}時間</ThemeText>
                       </View>
                     )}
                   </View>
