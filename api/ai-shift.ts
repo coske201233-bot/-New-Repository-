@@ -109,6 +109,14 @@ export default async function handler(req: any, res: any) {
 
     const normalize = (name: string) => String(name || '').replace(/\s+/g, '');
 
+    // 高速ルックアップ用のスタッフマップを作成
+    const staffMap = new Map();
+    (staffList || []).forEach(s => {
+      const sId = String(s.id || s.name);
+      staffMap.set(sId, s);
+      staffMap.set(normalize(s.name), s);
+    });
+
     (staffList || []).forEach((s: any) => {
       const sId = String(s.id || s.name);
       const sName = normalize(s.name);
@@ -127,6 +135,19 @@ export default async function handler(req: any, res: any) {
       const currentHolidays = works.filter((dStr: string) => holidays.includes(dStr)).length;
       staffHolidayWorkCount[sId] = currentHolidays;
     });
+
+    // 各日の「現場」出勤者数を事前計算（助手・訪問スタッフを除外）
+    const dailyOccupants = new Map();
+    for (const dStr of [...holidays, ...weekdays]) {
+      const count = currentRequests.filter(r => {
+        if (r.date !== dStr || !isWorkingType(r.type)) return false;
+        const s = staffMap.get(String(r.staffId)) || staffMap.get(normalize(r.staffName));
+        const isAssistant = s?.profession === '助手' || s?.placement === '助手';
+        const isHomeVisit = s?.placement === '訪問';
+        return !isAssistant && !isHomeVisit;
+      }).length;
+      dailyOccupants.set(dStr, count);
+    }
 
     // 休日連続チェック関数
     const getHolidayPenaltyInfo = (sId: string, sName: string, dateStr: string) => {
@@ -153,13 +174,7 @@ export default async function handler(req: any, res: any) {
       const config = schedule[dStr];
       if (config.limit <= 0) continue;
 
-      let occupants = currentRequests.filter((r: any) => {
-        if (!isWorkingType(r.type)) return false;
-        const s = staffList.find(s => String(s.id) === String(r.staffId) || normalize(s.name) === normalize(r.staffName));
-        const isAssistant = s?.profession === '助手' || s?.placement === '助手';
-        const isHomeVisit = s?.placement === '訪問';
-        return !isAssistant && !isHomeVisit;
-      }).length;
+      const occupants = dailyOccupants.get(dStr) || 0;
       let remaining = config.limit - occupants;
 
       for (let i = 0; i < remaining; i++) {
@@ -241,14 +256,7 @@ export default async function handler(req: any, res: any) {
       const targetLim = config.limit;
       if (targetLim <= 0) continue;
 
-      let occupants = currentRequests.filter((r: any) => {
-        if (r.date !== dStr || !isWorkingType(r.type)) return false;
-        const s = staffList.find(s => String(s.id) === String(r.staffId) || normalize(s.name) === normalize(r.staffName));
-        const isAssistant = s?.profession === '助手' || s?.placement === '助手';
-        const isHomeVisit = s?.placement === '訪問';
-        return !isAssistant && !isHomeVisit;
-      }).length + autoAssigned.filter(a => a.date === dStr && isWorkingType(a.type)).length;
-      
+      const occupants = (dailyOccupants.get(dStr) || 0) + autoAssigned.filter(a => a.date === dStr && isWorkingType(a.type)).length;
       let remaining = targetLim - occupants;
 
       for (let i = 0; i < remaining; i++) {

@@ -349,37 +349,39 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     const daysInMonthCount = new Date(year, month + 1, 0).getDate();
     
     let workDays = 0, holidayWorkDays = 0, leaveHours = 0;
-    
+    const attendanceTypes = ['出勤', '日勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
+    const offTypes = ['公休', '振替', '1日振替', '半日振替', '振替休日', '全休'];
+
     for (let day = 1; day <= daysInMonthCount; day++) {
       const date = new Date(year, month, day);
       const dateStr = getDateStr(date);
       const sT = normalize(staff.name);
-      
-      // requestMapを直接引くか、requestsをフィルタリングする（ここでは正確な算出のためrequestsを使用）
       const req = requests.find(r => r && normalize(r.staffName) === sT && r.date === dateStr && r.status !== 'deleted');
+      const dtype = getDayType(date);
       
       if (req) {
-        if (['出勤', '日勤'].includes(req.type)) {
-          if (getDayType(date) === 'weekday' && !isHoliday(date)) workDays++; else holidayWorkDays++;
-        } else {
-          // 振替は統計から除外、時間休などは加算
-          if (['振替', '1日振替', '半日振替', '振替休日'].includes(req.type)) continue;
-
+        // 出勤系（一部でも出勤していれば日数にカウント）
+        if (attendanceTypes.includes(req.type)) {
+          if (dtype === 'weekday') workDays++; else holidayWorkDays++;
+          
+          // 時間休などは休暇時間としても加算
+          const h = getReqHours(req);
+          if (h > 0) leaveHours += h;
+        } 
+        // 休暇系
+        else if (!offTypes.includes(req.type)) {
           const h = getReqHours(req);
           if (h > 0) {
             leaveHours += h;
-          } else if (['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤'].includes(req.type)) {
+          } else if (['年休', '有給休暇', '夏季休暇', '休暇', '欠勤'].includes(req.type)) {
             leaveHours += 7.75;
           }
         }
       } else {
-        // デフォルトロジック
-        const dtype = getDayType(date);
-        const isNoHoliday = (dtype !== 'weekday') && (staff.monthlyNoHoliday?.[targetMonth] ?? staff.noHoliday);
+        // デフォルトロジック（カレンダーの表示と同一）
+        // 平日は出勤、土日祝は休み（休日出勤は申請がない限りカウントしない）
         if (dtype === 'weekday') {
           workDays++;
-        } else if (isNoHoliday) {
-          holidayWorkDays++;
         }
       }
     }

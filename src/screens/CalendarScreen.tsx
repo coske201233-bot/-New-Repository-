@@ -95,49 +95,37 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       const isHomeVisit = staff.placement === '訪問';
       const isAssistant = staff.profession === '助手' || staff.placement === '助手';
       
-      // 除外条件: 長期休暇、入職前（訪問担当と助手は表示するように変更）
       if (isOut) return;
 
       const userRequests = requestMap.get(dateStr)?.get(staff.name.trim()) || [];
       const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
       
-      // 休暇申請（公休含む）を優先的に探す
-      const leaveRequest = userRequests.find(r => !attendanceTypes.includes(r.type) && r.status === 'approved');
-      const workRequest = userRequests.find(r => attendanceTypes.includes(r.type) && r.status === 'approved');
-      const pendingRequest = userRequests.find(r => r.status === 'pending');
-
+      const approvedReqs = userRequests.filter(r => r.status === 'approved');
+      const pendingReqs = userRequests.filter(r => r.status === 'pending');
       const isNoHoliday = (dayType !== 'weekday') && (staff.monthlyNoHoliday?.[monthStr] ?? staff.noHoliday);
 
-      // ロジックの優先順位: 1. 休暇申請 2. 出勤申請 3. デフォルト（平日: 出勤 / 休日: 公休）
-      if (leaveRequest) {
-        off.push({ staff, type: leaveRequest.type, requestId: leaveRequest.id, isManual: true, isHomeVisit, status: 'approved', details: leaveRequest.details });
-      } else if (workRequest) {
-        if (isAssistant) {
-          // 助手の場合、「出勤」以外の特殊な勤怠（午前休、特休など）なら休暇リストに表示して把握可能にする
-          if (workRequest.type !== '出勤') {
-            off.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, status: 'approved', details: workRequest.details });
+      if (approvedReqs.length > 0) {
+        approvedReqs.forEach(req => {
+          const isAtt = attendanceTypes.includes(req.type);
+          if (isAtt) {
+            if (!isAssistant) {
+              working.push({ staff, type: req.type, requestId: req.id, isManual: true, isHomeVisit, status: 'approved', details: req.details });
+            }
+            if (req.type !== '出勤') {
+              off.push({ staff, type: req.type, requestId: req.id, isManual: true, isHomeVisit, status: 'approved', details: req.details });
+            }
+          } else {
+            off.push({ staff, type: req.type, requestId: req.id, isManual: true, isHomeVisit, status: 'approved', details: req.details });
           }
-        } else {
-          working.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, status: 'approved', details: workRequest.details });
-          // 時間休などは出勤しつつ休暇扱いとなるため、休暇・休日リスト（off）にも表示させる
-          if (workRequest.type !== '出勤') {
-            off.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, status: 'approved', details: workRequest.details });
+        });
+      } else if (pendingReqs.length > 0) {
+        pendingReqs.forEach(req => {
+          const list = attendanceTypes.includes(req.type) ? working : off;
+          list.push({ staff, type: req.type, requestId: req.id, isManual: true, isHomeVisit, status: 'pending', details: req.details });
+          if (list === working && req.type !== '出勤') {
+            off.push({ staff, type: req.type, requestId: req.id, isManual: true, isHomeVisit, status: 'pending', details: req.details });
           }
-        }
-      } else if (pendingRequest) {
-        // Show pending on the side they apply to
-        const list = attendanceTypes.includes(pendingRequest.type) ? working : off;
-        if (isAssistant) {
-          if (pendingRequest.type !== '出勤') {
-            off.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, status: 'pending', details: pendingRequest.details });
-          }
-        } else {
-          list.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, status: 'pending', details: pendingRequest.details });
-          // ペンディングであっても「出勤」以外なら両方に表示させる
-          if (list === working && pendingRequest.type !== '出勤') {
-            off.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, status: 'pending', details: pendingRequest.details });
-          }
-        }
+        });
       } else {
         const isScheduledToWork = dayType === 'weekday';
         if (isScheduledToWork) {
@@ -150,6 +138,25 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
 
     return { working, off };
   };
+
+  // その月の全日分の情報を事前計算する（描画高速化のため）
+  const monthDataMap = React.useMemo(() => {
+    const dataMap = new Map();
+    const daysInMonthCnt = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+    
+    for (let day = 1; day <= daysInMonthCnt; day++) {
+      const d = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+      const info = getDetailedDayInfo(d);
+      const dayType = getDayType(d);
+      
+      dataMap.set(day, {
+        workingCount: info.working.filter(w => !w.isHomeVisit).length,
+        holidayWorkers: dayType !== 'weekday' ? info.working.filter(w => !w.isHomeVisit).map(w => w.staff.name) : [],
+        dayType
+      });
+    }
+    return dataMap;
+  }, [currentDate, staffList, requestMap, monthlyLimits, weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit]);
 
   const { working: workingStaff, off: offStaff } = getDetailedDayInfo(selectedDate);
   const currentDayType = getDayType(selectedDate);
@@ -289,8 +296,8 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       currentDate.getMonth() === new Date().getMonth() && 
                       currentDate.getFullYear() === new Date().getFullYear();
       
-      const d = day ? new Date(currentDate.getFullYear(), currentDate.getMonth(), day) : null;
-      const dayType = d ? getDayType(d) : 'weekday';
+      const dayData = day ? monthDataMap.get(day) : null;
+      const dayType = dayData ? dayData.dayType : 'weekday';
       const monthly = monthlyLimits[monthStr] || { weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit };
       const limit = dayType === 'weekday' ? monthly.weekday : 
                     dayType === 'sat' ? monthly.sat :
@@ -301,16 +308,8 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       if (dayType === 'sun' || dayType === 'holiday') dateColor = '#ef4444';
       if (dayType === 'sat') dateColor = '#3b82f6';
 
-      let workingCount = 0;
-      let holidayWorkers: any[] = [];
-      if (day) {
-        const info = getDetailedDayInfo(d!);
-        workingCount = info.working.filter(w => !w.isHomeVisit).length;
-        if (dayType !== 'weekday') {
-          holidayWorkers = info.working.filter(w => !w.isHomeVisit).map(w => w.staff.name);
-        }
-      }
-
+      const workingCount = dayData ? dayData.workingCount : 0;
+      const holidayWorkers = dayData ? dayData.holidayWorkers : [];
       const isUnderLimit = workingCount < limit;
 
       cells.push(

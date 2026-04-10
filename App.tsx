@@ -51,40 +51,31 @@ const deduplicateRequests = (list: any[]) => {
       item.id = `temp-${item.staffName}-${item.date}-${Date.now()}`;
     }
     
-    const key = `${normalizeName(item.staffName)}-${item.date}`;
+    // 同一人物・同一日・同一タイプの予定を統合対象とする（タイプが違えば別々の予定として保持）
+    // （時間休など、複数の項目が同じ日に並び立つケースを許可する）
+    const key = `${normalizeName(item.staffName)}-${item.date}-${item.type}`;
     const existing = map.get(key);
 
     const isManualNew = isManual(item);
     const wasManualOld = existing && isManual(existing);
     
-    // 【スマホ優先ロジック】 
-    // mobileからの更新(idにm-が含まれる、またはpriorityがmobile)を、
-    // 同じ手動決定同士であれば優先的に採用する。
     const isMobileNew = String(item.id).startsWith('m-') || item.priority === 'mobile';
     const wasMobileOld = existing && (String(existing.id).startsWith('m-') || existing.priority === 'mobile');
 
     let isPriority = false;
-    if (existing && existing.id === item.id) { isPriority = false; } // 全く同じIDならスルー
+    if (existing && existing.id === item.id) { isPriority = false; }
     else if (!existing) {
       isPriority = true;
     } else if (isManualNew && !wasManualOld) {
-      // 手動 vs 自動 -> 手動が勝つ
       isPriority = true;
     } else if (!isManualNew && wasManualOld) {
-      // 自動 vs 手動 -> 手動を維持
       isPriority = false;
     } else {
-      // 手動同士、または自動同士の場合：
-      // m- または manual- または priority: mobile を持つものを最優先（タイムスタンプより強い）
-      const isStrongManualNew = isMobileNew; 
-      const wasStrongManualOld = wasMobileOld;
-      
-      if (isStrongManualNew && !wasStrongManualOld) {
+      if (isMobileNew && !wasMobileOld) {
         isPriority = true;
-      } else if (!isStrongManualNew && wasStrongManualOld) {
+      } else if (!isMobileNew && wasMobileOld) {
         isPriority = false;
       } else {
-        // タイムスタンプ比較
         const timeNew = getTime(item);
         const timeOld = getTime(existing);
         if (timeNew > timeOld) {
@@ -104,7 +95,28 @@ const deduplicateRequests = (list: any[]) => {
       if (item.id !== existing.id) discardedIds.push(item.id);
     }
   });
-  return { cleanList: Array.from(map.values()), discardedIds };
+
+  // さらに、同じ日の「自動割り当て」と「手動」が混在している場合、その日の「自動」をすべて消す強固なクリーンアップを実施
+  const finalMap = new Map();
+  Array.from(map.values()).forEach(req => {
+    const dayKey = `${normalizeName(req.staffName)}-${req.date}`;
+    const isAuto = !isManual(req);
+    
+    if (!finalMap.has(dayKey)) {
+      finalMap.set(dayKey, [req]);
+    } else {
+      const dayReqs = finalMap.get(dayKey);
+      const hasManual = dayReqs.some((r: any) => isManual(r)) || !isAuto;
+      
+      if (hasManual && isAuto) {
+        discardedIds.push(req.id); // 手動が1つでもある日の自動予定は削除
+      } else {
+        dayReqs.push(req);
+      }
+    }
+  });
+
+  return { cleanList: Array.from(map.values()).filter(r => !discardedIds.includes(r.id)), discardedIds };
 };
 
 export default function App() {
@@ -188,13 +200,17 @@ export default function App() {
         try {
           const cloudStaff = await cloudStorage.fetchStaff();
           if (cloudStaff && cloudStaff.length > 0) {
-            const normalized = cloudStaff.map((s: any) => {
-              const n = { ...s, name: normalizeName(s.name) };
+            const merged = cloudStaff.map((cs: any) => {
+              const localMatch = (localStaff || []).find((ls: any) => String(ls.id) === String(cs.id));
+              const n = { ...cs, name: normalizeName(cs.name) };
+              // ロック情報を統合
+              n.lockedMonths = { ...(cs.lockedMonths || {}), ...(localMatch?.lockedMonths || {}) };
               if (n.status === '休暇' || n.status === '全休') n.status = '常勤';
               return n;
             });
-            setStaffList(sortStaffByName(normalized));
-            await saveData(STORAGE_KEYS.STAFF_LIST, normalized);
+            const sorted = sortStaffByName(merged);
+            setStaffList(sorted);
+            await saveData(STORAGE_KEYS.STAFF_LIST, sorted);
           }
 
           const cloudRequests = await cloudStorage.fetchRequests();
@@ -307,57 +323,43 @@ export default function App() {
   };
 
   const handleUpdateRequests = async (update: any[] | ((prev: any[]) => any[])) => {
-    if (isSyncing) return; // 同期中や保存中は重複実行を避ける
+    if (isSyncing) return;
     setIsSyncing(true);
     
-    let finalRequests: any[] = [];
-    const now = new Date().toISOString();
-    const isMobile = Platform.OS !== 'web' || (typeof window !== 'undefined' && window.innerWidth < 768);
-    
     try {
-      // 既存のステートを取得して計算（セッター外で行うことで副作用への影響を確実に）
       const prevRequests = requests;
       const next = typeof update === 'function' ? update(prevRequests) : update;
       const validOnly = (next || []).filter((r: any) => r && r.staffName && r.date);
       
-      const withTimestamp = validOnly.map(r => {
-        const finalId = r.id || `m-${r.staffName}-${r.date}-${Math.random().toString(36).substr(2, 9)}`;
-        const existing = prevRequests.find(p => p.id === finalId);
-        const isChanged = !existing || existing.type !== r.type || existing.status !== r.status || existing.hours !== r.hours;
+      const now = new Date().toISOString();
+      const processed = validOnly.map(r => {
+        const id = r.id || `m-${r.staffName}-${r.date}-${Math.random().toString(36).substr(2, 9)}`;
+        const existing = prevRequests.find(p => p.id === id);
+        const isChanged = !existing || existing.type !== r.type || existing.status !== r.status || existing.date !== r.date;
         
         if (isChanged) {
-           return { ...r, id: finalId, updatedAt: now, priority: isMobile ? 'mobile' : 'pc' };
+          return { ...r, id, updatedAt: now };
         }
-        return { ...r, id: finalId };
+        return { ...r, id };
       });
 
-      const { cleanList } = deduplicateRequests(withTimestamp);
+      const { cleanList: validatedList } = deduplicateRequests(processed);
       
-      // 保存前に、時間休(hours)が確実に数値として残っているか確認（0h問題の対策）
-      const validatedList = cleanList.map(r => {
-        let h = r.hours ?? r.details?.duration ?? r.duration;
-        if (h === undefined || h === null || h === '' || isNaN(parseFloat(String(h)))) {
-          // 数値がない場合のフォールバック
-          if (r.type === '半日振替') h = 3.75;
-          else if (['時間給', '時間休', '特休', '看護休暇'].includes(r.type)) h = 1.0;
-          else h = undefined;
-        } else {
-          h = Math.max(0.25, parseFloat(String(h))); // 最低0.25hを保証
-        }
-        return { ...r, hours: h };
+      // 変更があったレコードだけを抽出してクラウドに送る
+      const changedRecords = validatedList.filter(nr => {
+        const old = prevRequests.find(o => o.id === nr.id);
+        if (!old) return true;
+        return old.type !== nr.type || old.status !== nr.status || old.date !== nr.date;
       });
 
-      finalRequests = validatedList;
+      setRequests(validatedList);
+      await saveData(STORAGE_KEYS.REQUESTS, validatedList);
       
-      // ステートとローカル保存、クラウド保存を順番に行う
-      setRequests(finalRequests);
-      await saveData(STORAGE_KEYS.REQUESTS, finalRequests);
-      
-      if (finalRequests.length > 0) {
-        await cloudStorage.upsertRequests(finalRequests);
+      if (changedRecords.length > 0) {
+        await cloudStorage.upsertRequests(changedRecords);
       }
     } catch (err) {
-      console.error('Unified UpdateRequests failed:', err);
+      console.error('UpdateRequests failed:', err);
     } finally {
       setIsSyncing(false);
     }
@@ -385,13 +387,18 @@ export default function App() {
       // 1. スタッフ情報の取得とマージ
       const cloudStaff = await cloudStorage.fetchStaff();
       if (cloudStaff && cloudStaff.length > 0) {
-        const normalized = cloudStaff.map((s: any) => ({ ...s, name: normalizeName(s.name) }));
-        const sorted = sortStaffByName(normalized);
+        const merged = cloudStaff.map((cs: any) => {
+          const localMatch = staffList.find((ls: any) => String(ls.id) === String(cs.id));
+          const n = { ...cs, name: normalizeName(cs.name) };
+          n.lockedMonths = { ...(cs.lockedMonths || {}), ...(localMatch?.lockedMonths || {}) };
+          return n;
+        });
+        const sorted = sortStaffByName(merged);
         setStaffList(sorted);
         await saveData(STORAGE_KEYS.STAFF_LIST, sorted);
         
         if (profile) {
-          const latest = normalized.find((s: any) => String(s.id) === String(profile.id));
+          const latest = merged.find((s: any) => String(s.id) === String(profile.id));
           if (latest) setProfile(latest);
         }
       }

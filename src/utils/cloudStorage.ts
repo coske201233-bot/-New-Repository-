@@ -78,7 +78,8 @@ export const cloudStorage = {
 
   // --- Requests ---
   async fetchRequests() {
-    const { data, error } = await supabase.from('requests').select('*').limit(10000);
+    // 取得上限を大幅に引き上げ（将来的に期間フィルタリングを推奨）
+    const { data, error } = await supabase.from('requests').select('*').limit(100000);
     if (error) throw error;
     return data.map(r => {
       const mapped = mapFromSql(r, REQ_MAP);
