@@ -80,24 +80,51 @@ export const cloudStorage = {
   async fetchRequests() {
     const { data, error } = await supabase.from('requests').select('*').limit(10000);
     if (error) throw error;
-    return data.map(r => mapFromSql(r, REQ_MAP));
+    return data.map(r => {
+      const mapped = mapFromSql(r, REQ_MAP);
+      // details内に埋め込まれたタイムスタンプや保護フラグがあればトップレベルに復元
+      if (mapped.details?.updatedAt) {
+        mapped.updatedAt = mapped.details.updatedAt;
+      }
+      if (mapped.details?.isManual !== undefined) {
+        mapped.isManual = mapped.details.isManual;
+      }
+      if (mapped.details?.priority) {
+        mapped.priority = mapped.details.priority;
+      }
+      return mapped;
+    });
   },
   async upsertRequests(requests: any[]) {
     const filtered = requests.map(r => {
       const obj: any = {};
       const validKeys = ['id', 'staffName', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
+      
+      // updatedAt, isManual, priority を details の中に確実に保存する（DBに列がないため）
+      const details = { ...(r.details || {}) };
+      if (r.updatedAt) details.updatedAt = r.updatedAt;
+      if (r.isManual !== undefined) details.isManual = r.isManual;
+      if (r.priority) details.priority = r.priority;
+      r.details = details;
+      
       validKeys.forEach(k => { if (r[k] !== undefined) obj[k] = r[k]; });
       return mapToSql(obj, REQ_MAP);
     });
     const { error } = await supabase.from('requests').upsert(filtered, { onConflict: 'id' });
     if (error) {
-      console.error('Requests sync error:', error);
-      throw error;
+       console.error('Requests sync error:', error);
+       throw error;
     }
     console.log('Requests synced to cloud successfully');
   },
   async upsertSingleRequest(r: any) {
     const validKeys = ['id', 'staffName', 'staffId', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
+    const details = { ...(r.details || {}) };
+    if (r.updatedAt) details.updatedAt = r.updatedAt;
+    if (r.isManual !== undefined) details.isManual = r.isManual;
+    if (r.priority) details.priority = r.priority;
+    r.details = details;
+    
     const obj: any = {};
     validKeys.forEach(k => { if (r[k] !== undefined) obj[k] = r[k]; });
     const { error } = await supabase.from('requests').upsert(mapToSql(obj, REQ_MAP), { onConflict: 'id' });
@@ -119,6 +146,24 @@ export const cloudStorage = {
       const { error } = await supabase.from('requests').delete().in('id', chunk);
       if (error) throw error;
     }
+  },
+
+  // --- Realtime ---
+  subscribeToChanges(callback: () => void) {
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, () => {
+        console.log('Cloud data changed, triggering sync...');
+        callback();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'staff' }, () => {
+        callback();
+      })
+      .subscribe();
+    return channel;
+  },
+  unsubscribe(channel: any) {
+    supabase.removeChannel(channel);
   },
 
   // --- Messages ---

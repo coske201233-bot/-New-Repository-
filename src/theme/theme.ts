@@ -5,7 +5,7 @@ export const COLORS = {
   secondary: '#94A3B8',  // Slate 400
   text: '#F8FAFC',       // Slate 50
   textSecondary: '#CBD5E1', // Slate 300
-  accent: '#FACC15',     // Yellow 400 (Gold)
+  accent: 'rgba(250, 204, 21, 1)',     // Yellow 400 (Gold)
   border: '#334155',     // Slate 700
   success: '#22C55E',    // Green 500
   danger: '#EF4444',     // Red 500

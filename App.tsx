@@ -28,33 +28,59 @@ const deduplicateRequests = (list: any[]) => {
   const discardedIds: string[] = [];
   
   const getTime = (i: any) => {
-    const t = i.updatedAt || i.createdAt || i.created_at || 0;
-    return typeof t === 'string' ? new Date(t).getTime() : t;
+    // 優先順位: 手動指定の updatedAt > 作成日時 > 0
+    const t = i.updatedAt || i.updated_at || i.createdAt || i.created_at || 0;
+    return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
   };
 
   const isManual = (i: any) => {
+    if (i.isManual === true) return true;
     const idStr = String(i.id || '');
     if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('q-h-') || /^\d+$/.test(idStr)) return true;
     const leaveTypes = ['年休', '有給休暇', '時間休', '振替', '1日振替', '半日振替', '振替＋時間休', '公休', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '午前振替', '午後振替'];
     if (leaveTypes.includes(i.type)) return true;
-    return (i.details?.note && !i.details.note.includes('自動')) || (i.reason && i.reason !== '自動割当');
+    return (i.details?.note && !i.details.note.includes('自動')) || (i.reason && i.reason !== '自動割当') || i.details?.isManual === true;
   };
 
   list.forEach(item => {
-    if (!item?.id || !item?.staffName || !item?.date) return;
+    // staffNameとdateがあれば、idがなくても処理対象にする
+    if (!item || !item.staffName || !item.date) return;
+    
+    // idがない場合は一時的なIDを付与
+    if (!item.id) {
+      item.id = `temp-${item.staffName}-${item.date}-${Date.now()}`;
+    }
+    
     const key = `${normalizeName(item.staffName)}-${item.date}`;
     const existing = map.get(key);
 
     const isManualNew = isManual(item);
     const wasManualOld = existing && isManual(existing);
+    
+    // 【スマホ優先ロジック】 
+    // mobileからの更新(idにm-が含まれる、またはpriorityがmobile)を、
+    // 同じ手動決定同士であれば優先的に採用する。
+    const isMobileNew = String(item.id).startsWith('m-') || item.priority === 'mobile';
+    const wasMobileOld = existing && (String(existing.id).startsWith('m-') || existing.priority === 'mobile');
 
-    const isPriority = !existing || 
-      (isManualNew && !wasManualOld) ||
-      (isManualNew === wasManualOld && (
-        getTime(item) > getTime(existing) ||
-        (getTime(item) === getTime(existing) && item.status === 'approved' && existing.status !== 'approved') ||
-        (getTime(item) === getTime(existing) && String(item.id).length > String(existing.id).length)
-      ));
+    let isPriority = false;
+    if (!existing) {
+      isPriority = true;
+    } else if (isManualNew && !wasManualOld) {
+      isPriority = true;
+    } else if (!isManualNew && wasManualOld) {
+      isPriority = false;
+    } else {
+      // 両者が同じ種別（手動同士など）の場合：
+      // 1. スマホからの更新であれば、僅かな時間の遅れがあってもスマホを優先
+      // 2. それ以外は新しいタイムスタンプを優先
+      if (isMobileNew && !wasMobileOld) {
+        isPriority = true; 
+      } else {
+        isPriority = (getTime(item) > getTime(existing)) ||
+                     (getTime(item) === getTime(existing) && item.status === 'approved' && existing.status !== 'approved');
+      }
+    }
 
     if (isPriority) {
       if (existing && existing.id !== item.id) discardedIds.push(existing.id);
@@ -87,6 +113,7 @@ export default function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [activeDate, setActiveDate] = useState(new Date());
+  const [requestsHistory, setRequestsHistory] = useState<any[][]>([]);
 
   // Initial Load (Cloud Sync Integrated)
   useEffect(() => {
@@ -181,26 +208,27 @@ export default function App() {
     init();
   }, []);
 
-  // Background Sync logic - Use a ref to prevent loops
-  const syncTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Realtime subscription
   useEffect(() => {
     if (!isInitialized) return;
-    
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    
-    syncTimerRef.current = setTimeout(async () => {
-      if (isSyncing) return;
-      try {
-        await handleForceCloudSync(true);
-      } catch (e) {
-        console.error('Background sync failed:', e);
-      }
-    }, 15000); // 15 seconds to reduce load
-    
+    const channel = cloudStorage.subscribeToChanges(() => {
+      handleForceCloudSync(true);
+    });
     return () => {
-      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      cloudStorage.unsubscribe(channel);
     };
-  }, [isInitialized, weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, staffList, requests, adminPassword]);
+  }, [isInitialized]);
+
+  // Background Sync loop
+  useEffect(() => {
+    if (!isInitialized) return;
+    const interval = setInterval(async () => {
+      if (!isSyncing) {
+        await handleForceCloudSync(true);
+      }
+    }, 20000); // 20s interval for background polling
+    return () => clearInterval(interval);
+  }, [isInitialized, isSyncing]);
 
   // Profile Sync logic
   useEffect(() => {
@@ -235,7 +263,9 @@ export default function App() {
 
   const handleUpdateStaffList = async (update: any[] | ((prev: any[]) => any[])) => {
     const next = typeof update === 'function' ? update(staffList) : update;
-    const sorted = sortStaffByName(next || []);
+    // 不正なデータを除去
+    const cleaned = (next || []).filter((s: any) => s && s.name);
+    const sorted = sortStaffByName(cleaned);
     setStaffList(sorted);
     
     // Side effects outside the state setter
@@ -250,32 +280,53 @@ export default function App() {
   };
 
   const handleUpdateRequests = async (update: any[] | ((prev: any[]) => any[])) => {
+    let finalRequests: any[] = [];
+    const now = new Date().toISOString();
+    // モバイル環境かどうかを簡易判定（PCブラウザ以外を優先）
+    const isMobile = Platform.OS !== 'web' || (typeof window !== 'undefined' && window.innerWidth < 768);
+    
     setRequests(prev => {
       const next = typeof update === 'function' ? update(prev) : update;
-      const { cleanList } = deduplicateRequests(next || []);
+      // 新規追加時はidが未付与の場合があるため、staffNameとdateがあれば有効とみなす
+      const validOnly = (next || []).filter((r: any) => r && r.staffName && r.date);
       
-      // Side effects with latest cleanList
-      saveData(STORAGE_KEYS.REQUESTS, cleanList).catch(console.error);
-      if (cleanList.length > 0) {
-        cloudStorage.upsertRequests(cleanList).catch(err => {
-          console.error('Cloud requests sync error:', err);
-        });
-      }
+      // 新しいデータにタイムスタンプ、優先フラグ、および不足しているIDを付与
+      const withTimestamp = validOnly.map(r => {
+        // IDがなければここで生成
+        const finalId = r.id || `m-${r.staffName}-${r.date}-${Math.random().toString(36).substr(2, 9)}`;
+        const isNew = !prev.find(p => p.id === finalId && p.status === r.status && p.type === r.type);
+        if (isNew) {
+           return { ...r, id: finalId, updatedAt: now, priority: isMobile ? 'mobile' : 'pc' };
+        }
+        return { ...r, id: finalId };
+      });
+      const { cleanList } = deduplicateRequests(withTimestamp);
+      finalRequests = cleanList;
       return cleanList;
     });
+    
+    try {
+      await saveData(STORAGE_KEYS.REQUESTS, finalRequests);
+      if (finalRequests.length > 0) {
+        await cloudStorage.upsertRequests(finalRequests);
+      }
+    } catch (err) {
+      console.error('Cloud save failed:', err);
+    }
   };
 
   const handleDeleteRequests = async (ids: string[]) => {
     if (!ids || ids.length === 0) return;
+    let remaining: any[] = [];
     setRequests(prev => {
-      const remaining = prev.filter(r => !ids.includes(r.id));
-      saveData(STORAGE_KEYS.REQUESTS, remaining).catch(console.error);
+      remaining = prev.filter(r => !ids.includes(r.id));
       return remaining;
     });
     try {
+      await saveData(STORAGE_KEYS.REQUESTS, remaining);
       await cloudStorage.deleteRequests(ids);
     } catch (e) {
-      console.error('Cloud delete failed:', e);
+      console.error('Delete sync failed:', e);
     }
   };
 
@@ -283,37 +334,47 @@ export default function App() {
     if (isSyncing) return false;
     setIsSyncing(true);
     try {
+      // 1. スタッフ情報の取得とマージ
       const cloudStaff = await cloudStorage.fetchStaff();
       if (cloudStaff && cloudStaff.length > 0) {
-        const normalized = cloudStaff.map((s: any) => {
-          const n = { ...s, name: normalizeName(s.name) };
-          if (n.status === '休暇' || n.status === '全休') n.status = '常勤';
-          return n;
-        });
+        const normalized = cloudStaff.map((s: any) => ({ ...s, name: normalizeName(s.name) }));
         const sorted = sortStaffByName(normalized);
         setStaffList(sorted);
         await saveData(STORAGE_KEYS.STAFF_LIST, sorted);
         
-        // 更新：現在のプロファイルも最新データに基づいて同期する
         if (profile) {
           const latest = normalized.find((s: any) => String(s.id) === String(profile.id));
-          if (latest) {
-            setProfile(latest);
-            await saveData(STORAGE_KEYS.PROFILE, latest);
-          }
+          if (latest) setProfile(latest);
         }
       }
 
+      // 2. リクエスト情報の取得・マージ・双方向同期
       const cloudRequests = await cloudStorage.fetchRequests();
-      if (cloudRequests && cloudRequests.length > 0) {
-        // Merge with existing local requests to preserve unsynced/recent updates
-        const { cleanList, discardedIds } = deduplicateRequests([...requests, ...cloudRequests]);
-        setRequests(cleanList);
-        await saveData(STORAGE_KEYS.REQUESTS, cleanList);
-        if (discardedIds.length > 0) {
-          await cloudStorage.deleteRequests(discardedIds).catch(console.error);
-        }
+      const localRequests = requests.length > 0 ? requests : (await loadData(STORAGE_KEYS.REQUESTS) || []);
+      
+      const { cleanList, discardedIds } = deduplicateRequests([...localRequests, ...(cloudRequests || [])]);
+      
+      // ローカルの状態を更新
+      setRequests(cleanList);
+      await saveData(STORAGE_KEYS.REQUESTS, cleanList);
+      
+      // 【完全同期の要】クラウド側が古ければローカルから押し上げる
+      const needsPush = cleanList.some(lr => {
+        const cr = cloudRequests?.find(c => c.id === lr.id);
+        if (!cr) return true; // クラウドにないなら追加
+        const lt = lr.updatedAt || lr.updated_at || lr.createdAt || lr.created_at || 0;
+        const ct = cr.updatedAt || cr.created_at || 0;
+        return new Date(lt).getTime() > new Date(ct).getTime();
+      });
+
+      if (needsPush) {
+        await cloudStorage.upsertRequests(cleanList).catch(console.error);
       }
+
+      if (discardedIds.length > 0) {
+        await cloudStorage.deleteRequests(discardedIds).catch(console.error);
+      }
+      
       return true;
     } catch (e) {
       if (!isBackground) console.error('Sync failed:', e);
@@ -421,6 +482,9 @@ export default function App() {
 
   const handleAutoAssign = async (year: number, month: number, limits: any) => {
     try {
+      // 履歴を保存
+      setRequestsHistory(prev => [...prev.slice(-4), [...requests]]);
+
       const response = await fetch('/api/ai-shift', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -428,10 +492,10 @@ export default function App() {
           staffList,
           requests,
           limits: {
-            weekday: limits.weekday,
-            saturday: limits.sat,
-            sunday: limits.sun,
-            publicHoliday: limits.pub
+            weekday: limits?.weekday ?? weekdayLimit,
+            saturday: limits?.sat ?? saturdayLimit,
+            sunday: limits?.sun ?? sundayLimit,
+            publicHoliday: limits?.pub ?? publicHolidayLimit
           },
           month,
           year
@@ -450,8 +514,15 @@ export default function App() {
         status: r.status || 'approved'
       }));
 
-      // 既存の自動割当分（auto-プレフィックス）を除去して新しい分と合体
-      const filteredRequests = requests.filter(r => !String(r.id).startsWith('auto-'));
+      // 既存の自動割当分（auto- および過去の legacy ID：af-, aw-, plan-）を除去
+      // ※必ず対象月（monthPrefix）に一致するものだけを削除対象とする
+      const filteredRequests = requests.filter(r => {
+        const idStr = String(r.id || '');
+        const isAuto = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-');
+        const isTargetMonth = r.date && r.date.startsWith(monthPrefix);
+        // 「自動割当ID」かつ「対象月」の場合のみ削除（それ以外は残す）
+        return !(isAuto && isTargetMonth);
+      });
       const updated = [...filteredRequests, ...newWithIds];
       
       setRequests(updated);
@@ -460,6 +531,42 @@ export default function App() {
     } catch (e) {
       console.error('Auto Assign Error:', e);
       throw e;
+    }
+  };
+
+  const handleUndoAutoAssign = async () => {
+    if (requestsHistory.length === 0) {
+      Alert.alert('情報', '戻せる履歴がありません。');
+      return;
+    }
+
+    const previous = requestsHistory[requestsHistory.length - 1];
+    const current = [...requests];
+    
+    // 現在あって、履歴にないIDを特定して削除
+    const prevIds = new Set(previous.map(r => String(r.id)));
+    const toDelete = current.filter(r => !prevIds.has(String(r.id))).map(r => String(r.id));
+
+    try {
+      setIsSyncing(true);
+      setRequests(previous);
+      setRequestsHistory(prev => prev.slice(0, -1));
+      
+      await saveData(STORAGE_KEYS.REQUESTS, previous);
+      
+      if (toDelete.length > 0) {
+        await cloudStorage.deleteRequests(toDelete);
+      }
+      
+      // 履歴にある全データを再プッシュ（念のため）
+      await cloudStorage.upsertRequests(previous);
+      
+      Alert.alert('完了', '一つ前の状態に戻しました。');
+    } catch (e) {
+      console.error('Undo failed:', e);
+      Alert.alert('エラー', '元に戻す処理中にエラーが発生しました。');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -485,6 +592,8 @@ export default function App() {
       onForceCloudSync: handleForceCloudSync,
       currentDate: activeDate, setCurrentDate: setActiveDate,
       onAutoAssign: handleAutoAssign,
+      onUndoAutoAssign: handleUndoAutoAssign,
+      canUndoAutoAssign: requestsHistory.length > 0,
     };
 
     switch (currentTab) {

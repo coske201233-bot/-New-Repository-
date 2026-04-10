@@ -46,22 +46,22 @@ export default async function handler(req: any, res: any) {
 
   try {
     const lims = {
-      weekday: limits?.weekday ?? 10,
-      sat: limits?.saturday ?? limits?.sat ?? 2,
-      sun: limits?.sunday ?? limits?.sun ?? 2,
-      pub: limits?.publicHoliday ?? limits?.public ?? limits?.pub ?? 2,
+      weekday: Number(limits?.weekday ?? 10),
+      sat: Number(limits?.saturday ?? limits?.sat ?? 2),
+      sun: Number(limits?.sunday ?? limits?.sun ?? 2),
+      pub: Number(limits?.publicHoliday ?? limits?.public ?? limits?.pub ?? 2),
     };
 
-    const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+    // JSの月は0始まりのため、送られてきた1始まりの月を-1する
+    const jsMonth = Number(month) - 1;
+    const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
     const currentRequests = (requests || []).filter((r: any) => 
       r.date?.startsWith(monthPrefix) && 
       r.status === 'approved' &&
-      !String(r.id || '').startsWith('af') &&
-      !String(r.id || '').startsWith('ah') &&
-      !String(r.id || '').startsWith('aw')
+      !String(r.id || '').startsWith('auto-')
     );
 
-    const prevMonthDate = new Date(year, month - 1, 1);
+    const prevMonthDate = new Date(year, jsMonth - 1, 1);
     const prevMonthPrefix = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
     const prevRequests = (requests || []).filter((r: any) => 
       r.date?.startsWith(prevMonthPrefix) && 
@@ -74,13 +74,14 @@ export default async function handler(req: any, res: any) {
       return dObj.getDay() === 0 || dObj.getDay() === 6;
     };
 
-    const lastDay = new Date(year, month + 1, 0).getDate();
+    const lastDay = new Date(year, jsMonth + 1, 0).getDate();
     const schedule: { [date: string]: { type: string, limit: number } } = {};
     const weekdays: string[] = [];
     const holidays: string[] = [];
 
     for (let i = 1; i <= lastDay; i++) {
-      const d = new Date(year, month, i);
+      // タイムゾーンの揺れを防ぐため YYYY/MM/DD 形式で生成
+      const d = new Date(`${year}/${String(jsMonth + 1).padStart(2, '0')}/${String(i).padStart(2, '0')}`);
       const dateStr = toDateStr(d);
       const dow = d.getDay();
       const isPub = JAPAN_HOLIDAYS_SET.has(dateStr);
@@ -97,7 +98,7 @@ export default async function handler(req: any, res: any) {
         lim = lims.pub; 
       }
 
-      schedule[dateStr] = { type, limit: lim };
+      schedule[dateStr] = { type, limit: Number(lim) };
       if (type === 'weekday') weekdays.push(dateStr);
       else holidays.push(dateStr);
     }
@@ -163,7 +164,8 @@ export default async function handler(req: any, res: any) {
             const isAssistant = s.profession === '助手' || s.placement === '助手';
             const isUnavailable = s.status === '長期休暇' || s.status === '入職前';
             const isNotApproved = s.isApproved === false; // 明示的に false の場合のみ除外
-            const isNoHoliday = s.noHoliday === true;
+            const isNoHolidayValue = s.noHoliday ?? s.no_holiday;
+            const isNoHoliday = isNoHolidayValue === true || isNoHolidayValue === 'true' || isNoHolidayValue === 1 || isNoHolidayValue === '1';
             
             // 助手、長期休暇、未承認、休日出勤不可設定のスタッフを除外
             if (isAssistant || isUnavailable || isNotApproved || isNoHoliday) return false;

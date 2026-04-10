@@ -69,7 +69,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   const requestMap = React.useMemo(() => {
     const map = new Map<string, Map<string, any[]>>();
     requests.forEach((r: any) => {
-      if (!r.date || !r.staffName) return;
+      if (!r || !r.date || !r.staffName || typeof r.staffName !== 'string') return;
       const sT = r.staffName.trim();
       if (!map.has(r.date)) map.set(r.date, new Map<string, any[]>());
       if (!map.get(r.date)!.has(sT)) map.get(r.date)!.set(sT, []);
@@ -88,7 +88,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     const working: any[] = [];
     const off: any[] = [];
 
-    staffList.forEach(staff => {
+    (staffList || []).forEach(staff => {
+      if (!staff || !staff.name) return;
+      
       const isOut = staff.status?.trim() === '長期休暇' || staff.placement?.trim() === '長期休暇' || staff.position?.trim() === '長期休暇' || staff.status?.trim() === '入職前';
       const isHomeVisit = staff.placement === '訪問';
       const isAssistant = staff.profession === '助手' || staff.placement === '助手';
@@ -96,7 +98,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       // 除外条件: 長期休暇、入職前、訪問担当
       if (isOut || isHomeVisit) return;
 
-      const userRequests = requestMap.get(dateStr)?.get(staff.name?.trim()) || [];
+      const userRequests = requestMap.get(dateStr)?.get(staff.name.trim()) || [];
       const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
       
       // 休暇申請（公休含む）を優先的に探す

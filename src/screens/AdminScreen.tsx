@@ -26,6 +26,8 @@ interface AdminScreenProps {
   onLogout: () => void;
   currentDate: Date;
   onAutoAssign: (year: number, month: number, limits: any) => Promise<void>;
+  onUndoAutoAssign: () => Promise<void>;
+  canUndoAutoAssign: boolean;
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
 }
@@ -33,7 +35,7 @@ interface AdminScreenProps {
 export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
-  currentDate = new Date(), onAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests
+  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests
 }) => {
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
   const [adminAuthInput, setAdminAuthInput] = useState('');
@@ -337,6 +339,15 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                     </>
                   )}
                 </TouchableOpacity>
+
+                {canUndoAutoAssign && !isAssigning && (
+                  <TouchableOpacity 
+                    style={[styles.inlineBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)', marginLeft: 8 }]} 
+                    onPress={onUndoAutoAssign}
+                  >
+                    <ThemeText bold color="#ef4444">1つ戻す</ThemeText>
+                  </TouchableOpacity>
+                )}
               </ThemeCard>
 
 

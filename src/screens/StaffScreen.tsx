@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, Calendar, User, 
   Check, X, Clock, MapPin, Briefcase, Trash2, Settings, Shield, Printer
 } from 'lucide-react-native';
-import { getMonthInfo, getDayType } from '../utils/dateUtils';
+import { getMonthInfo, getDayType, isHoliday, getDateStr } from '../utils/dateUtils';
 import { normalizeName } from '../utils/staffUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import * as Print from 'expo-print';
@@ -22,6 +22,8 @@ interface StaffScreenProps {
   isPrivileged?: boolean;
   onDeleteRequest?: (id: string) => void;
   initialWard?: string;
+  currentDate: Date;
+  setCurrentDate: (d: Date | ((prev: Date) => Date)) => void;
 }
 
 interface MonthDay {
@@ -32,12 +34,14 @@ interface MonthDay {
 }
 
 export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
-  const { staffList, requests, setRequests, onDeleteRequest, isPrivileged, profile } = props;
+  const { staffList, requests, setRequests, onDeleteRequest, isPrivileged, profile, currentDate, setCurrentDate } = props;
   const isAdminAuthenticated = props.isAdminAuthenticated || isPrivileged;
   
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
   const [isCalendarModalVisible, setIsCalendarModalVisible] = useState(false);
-  const [activeDate, setActiveDate] = useState(new Date());
+  const activeDate = currentDate || new Date();
+  const setActiveDate = setCurrentDate;
+  
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState('出勤');
   const [selectedHours, setSelectedHours] = useState(1.0);
@@ -136,7 +140,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         status: 'approved',
         createdAt: now,
         updatedAt: now,
-        isShift: true
+        isShift: true,
+        isManual: true // 強固に保持するための保護フラグ
       };
       
       const sT = normalize(selectedStaff.name);
@@ -289,6 +294,22 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
               displayLabel = req.type.slice(0, 2);
               if (['公休', '欠勤', '休暇', '全休'].includes(req.type)) labelColor = '#ef4444';
             }
+          } else {
+            // デフォルト表示ロジック（リクエストがない場合）
+            const dDate = new Date(d.dateStr);
+            const dtype = getDayType(dDate);
+            const monthStr = `${dDate.getFullYear()}-${String(dDate.getMonth() + 1).padStart(2, '0')}`;
+            const isNoHoliday = (dtype !== 'weekday') && (selectedStaff?.monthlyNoHoliday?.[monthStr] ?? selectedStaff?.noHoliday);
+            
+            if (dtype === 'weekday') {
+              displayLabel = '出勤'; labelColor = '#38bdf8';
+            } else {
+              if (isNoHoliday) {
+                displayLabel = '日勤'; labelColor = '#38bdf8';
+              } else {
+                displayLabel = '公休'; labelColor = '#ef4444';
+              }
+            }
           }
 
           return (
@@ -307,34 +328,48 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const calculateStats = (staff: any) => {
     if (!staff) return { workDays: 0, holidayWorkDays: 0, leaveHours: '0.00' };
     const sName = normalize(staff.name);
-    const targetMonth = activeDate.getFullYear() + '-' + String(activeDate.getMonth() + 1).padStart(2, '0');
-    const staffReqs = requests.filter(r => r && normalize(r.staffName) === sName && r.date.startsWith(targetMonth) && r.status !== 'deleted');
+    const year = activeDate.getFullYear();
+    const month = activeDate.getMonth();
+    const targetMonth = year + '-' + String(month + 1).padStart(2, '0');
+    
+    // 月の日数を取得
+    const daysInMonthCount = new Date(year, month + 1, 0).getDate();
     
     let workDays = 0, holidayWorkDays = 0, leaveHours = 0;
     
-    const countedDates = new Set();
-    staffReqs.forEach(r => {
-      if (countedDates.has(r.date)) return;
-      countedDates.add(r.date);
+    for (let day = 1; day <= daysInMonthCount; day++) {
+      const date = new Date(year, month, day);
+      const dateStr = getDateStr(date);
+      const sT = normalize(staff.name);
       
-      const isWeekend = (d: string) => { const dayIdx = new Date(d).getDay(); return dayIdx === 0 || dayIdx === 6; };
-      const dayInfo = monthInfo.find(m => m.dateStr === r.date);
-      const isPub = dayInfo?.isH;
+      // requestMapを直接引くか、requestsをフィルタリングする（ここでは正確な算出のためrequestsを使用）
+      const req = requests.find(r => r && normalize(r.staffName) === sT && r.date === dateStr && r.status !== 'deleted');
+      
+      if (req) {
+        if (['出勤', '日勤'].includes(req.type)) {
+          if (getDayType(date) === 'weekday' && !isHoliday(date)) workDays++; else holidayWorkDays++;
+        } else {
+          // 振替は統計から除外、時間休などは加算
+          if (['振替', '1日振替', '半日振替', '振替休日'].includes(req.type)) continue;
 
-      if (['出勤', '日勤'].includes(r.type)) {
-        if (isWeekend(r.date) || isPub) holidayWorkDays++; else workDays++;
+          const h = getReqHours(req);
+          if (h > 0) {
+            leaveHours += h;
+          } else if (['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤'].includes(req.type)) {
+            leaveHours += 7.75;
+          }
+        }
       } else {
-        // Exclude pure transfers but include "Transfer + Hourly Leave"
-        if (['振替', '1日振替', '半日振替', '振替休日'].includes(r.type)) return;
-
-        const h = getReqHours(r);
-        if (h > 0) {
-          leaveHours += h;
-        } else if (['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤'].includes(r.type)) {
-          leaveHours += 7.75;
+        // デフォルトロジック
+        const dtype = getDayType(date);
+        const isNoHoliday = (dtype !== 'weekday') && (staff.monthlyNoHoliday?.[targetMonth] ?? staff.noHoliday);
+        if (dtype === 'weekday') {
+          workDays++;
+        } else if (isNoHoliday) {
+          holidayWorkDays++;
         }
       }
-    });
+    }
     return { workDays, holidayWorkDays, leaveHours: leaveHours.toFixed(2) };
   };
 
@@ -380,9 +415,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             </View>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
               <View style={styles.calendarNav}>
-                <TouchableOpacity onPress={() => setActiveDate(new Date(activeDate.getFullYear(), activeDate.getMonth() - 1, 1))}><ChevronLeft color="white" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => { setActiveDate(new Date(activeDate.getFullYear(), activeDate.getMonth() - 1, 1)); setSelectedDay(null); }}><ChevronLeft color="white" /></TouchableOpacity>
                 <ThemeText bold>{activeDate.getMonth() + 1}月</ThemeText>
-                <TouchableOpacity onPress={() => setActiveDate(new Date(activeDate.getFullYear(), activeDate.getMonth() + 1, 1))}><ChevronRight color="white" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => { setActiveDate(new Date(activeDate.getFullYear(), activeDate.getMonth() + 1, 1)); setSelectedDay(null); }}><ChevronRight color="white" /></TouchableOpacity>
               </View>
               {renderCalendar()}
               {selectedDay ? (
