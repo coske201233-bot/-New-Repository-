@@ -5,20 +5,34 @@ const toDateStr = (d: Date): string =>
 
 const normalize = (name: string) => {
   if (!name || typeof name !== 'string') return '';
-  return name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/條/g, '条');
+  let n = name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/條/g, '条');
+  // 特定の短縮名や表記ゆれを正規化
+  if (n === '佐藤公') return '佐藤公貴';
+  if (n === '藤森') return '藤森渓';
+  if (n === '三井') return '三井諒';
+  return n;
 };
 
 const isWorkingType = (type: string) => {
   if (!type) return false;
   const t = String(type);
-  // 全ての「出勤」および「勤務」を含むタイプ、および午前休・午後休を出勤日としてカウント
-  return t.includes('出勤') || t.includes('勤務') || t.includes('通常') || t.includes('午前休') || t.includes('午後休');
+  const workingTerms = ['出勤', '日勤', '勤務', '通常', '午前休', '午後休', '午前振替', '午後振替', '時間給', '時間休', '特休', '看護休暇'];
+  return workingTerms.some(term => t.includes(term));
+};
+
+const isManualId = (id: string) => {
+  const s = String(id || '');
+  return s.startsWith('m-') || s.startsWith('manual-');
+};
+
+const isAutoId = (id: string) => {
+  const s = String(id || '');
+  return s.startsWith('auto-') || s.startsWith('af-') || s.startsWith('aw-') || s.startsWith('plan-');
 };
 
 const wouldExceedConsecutive = (date: string, workDays: Set<string>, max = 5): boolean => {
   const [y, m, d] = date.split('-').map(Number);
   const target = new Date(y, m - 1, d);
-  
   let before = 0;
   for (let i = 1; i <= max; i++) {
     const prev = new Date(target);
@@ -32,13 +46,12 @@ const wouldExceedConsecutive = (date: string, workDays: Set<string>, max = 5): b
     if (workDays.has(toDateStr(next))) after++; else break;
   }
   return (before + after + 1) > max;
-}
+};
 
 const JAPAN_HOLIDAYS_SET = new Set([
   '2026-01-01', '2026-01-12', '2026-02-11', '2026-02-23', '2026-03-20', '2026-04-29',
   '2026-05-03', '2026-05-04', '2026-05-05', '2026-05-06', '2026-07-20', '2026-08-11',
   '2026-09-21', '2026-09-22', '2026-09-23', '2026-10-12', '2026-11-03', '2026-11-23',
-  // --- 2027年 ---
   '2027-01-01', '2027-01-11', '2027-02-11', '2027-02-23', '2027-03-21', '2027-03-22',
   '2027-04-29', '2027-05-03', '2027-05-04', '2027-05-05', '2027-07-19',
   '2027-08-11', '2027-09-20', '2027-09-23', '2027-10-11', '2027-11-03', '2027-11-23'
@@ -47,12 +60,12 @@ const JAPAN_HOLIDAYS_SET = new Set([
 // ユーザー指定の優先順位リスト（同条件の場合のタイブレーカー）
 const PREFERRED_ORDER = [
   '藤森渓',
+  '佐藤晃',
   '久保田',
   '大沼',
   '辻',
   '南条',
   '小笠原',
-  '佐藤晃',
   '坂下',
   '中野',
   '山川',
@@ -62,6 +75,11 @@ const PREFERRED_ORDER = [
   '吉田',
   '三井',
   '阿部'
+];
+
+// 特定のスタッフペア（例：久保田と佐久間）が同じ日に公休（休み）にならないように制限するためのグループ定義
+const CONFLICT_GROUPS = [
+  ['久保田', '佐久間']
 ];
 
 export default async function handler(req: any, res: any) {
@@ -78,20 +96,23 @@ export default async function handler(req: any, res: any) {
       pub: Number(limits?.publicHoliday ?? limits?.public ?? limits?.pub ?? 2),
     };
 
-    // JSの月は0始まりのため、送られてきた1始まりの月を-1する
     const jsMonth = Number(month) - 1;
     const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
-    const currentRequests = (requests || []).filter((r: any) => 
-      r.date?.startsWith(monthPrefix) && 
+
+    // 手動データのみ（isAutoId を除外）
+    const currentRequests = (requests || []).filter((r: any) =>
+      r.date?.startsWith(monthPrefix) &&
       r.status === 'approved' &&
-      !String(r.id || '').startsWith('auto-')
+      !isAutoId(r.id)
     );
 
     const prevMonthDate = new Date(year, jsMonth - 1, 1);
     const prevMonthPrefix = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
-    const prevRequests = (requests || []).filter((r: any) => 
-      r.date?.startsWith(prevMonthPrefix) && 
-      r.status === 'approved'
+    // 前月データも手動データのみ
+    const prevRequests = (requests || []).filter((r: any) =>
+      r.date?.startsWith(prevMonthPrefix) &&
+      r.status === 'approved' &&
+      !isAutoId(r.id)
     );
 
     const isHolidayDate = (dateStr: string) => {
@@ -106,22 +127,21 @@ export default async function handler(req: any, res: any) {
     const holidays: string[] = [];
 
     for (let i = 1; i <= lastDay; i++) {
-      // タイムゾーンの揺れを防ぐため YYYY/MM/DD 形式で生成
       const d = new Date(`${year}/${String(jsMonth + 1).padStart(2, '0')}/${String(i).padStart(2, '0')}`);
       const dateStr = toDateStr(d);
       const dow = d.getDay();
       const isPub = JAPAN_HOLIDAYS_SET.has(dateStr);
       let type = 'weekday', lim = lims.weekday;
 
-      if (dow === 0) { 
-        type = 'sun'; 
+      if (dow === 0) {
+        type = 'sun';
         lim = isPub ? Math.min(lims.sun, lims.pub) : lims.sun;
-      } else if (dow === 6) { 
-        type = 'sat'; 
+      } else if (dow === 6) {
+        type = 'sat';
         lim = isPub ? Math.min(lims.sat, lims.pub) : lims.sat;
-      } else if (isPub) { 
-        type = 'pub'; 
-        lim = lims.pub; 
+      } else if (isPub) {
+        type = 'pub';
+        lim = lims.pub;
       }
 
       schedule[dateStr] = { type, limit: Number(lim) };
@@ -134,9 +154,8 @@ export default async function handler(req: any, res: any) {
     const staffCurrentWorkCount: { [id: string]: number } = {};
     const staffHolidayWorkCount: { [id: string]: number } = {};
 
-    // 高速ルックアップ用のスタッフマップを作成
     const staffMap = new Map();
-    (staffList || []).forEach(s => {
+    (staffList || []).forEach((s: any) => {
       const sId = String(s.id || s.name);
       staffMap.set(sId, s);
       staffMap.set(normalize(s.name), s);
@@ -145,38 +164,38 @@ export default async function handler(req: any, res: any) {
     (staffList || []).forEach((s: any) => {
       const sId = String(s.id || s.name);
       const sName = normalize(s.name);
-      
+
       const works = currentRequests.filter((r: any) => {
-         const match = String(r.staffId) === sId || normalize(r.staffName) === sName;
-         return match && isWorkingType(r.type);
+        const match = String(r.staffId) === sId || normalize(r.staffName) === sName;
+        return match && isWorkingType(r.type);
       }).map((r: any) => r.date);
-      
+
       const prevWorks = prevRequests.filter((r: any) => {
-         const match = String(r.staffId) === sId || normalize(r.staffName) === sName;
-         return match && isWorkingType(r.type);
+        const match = String(r.staffId) === sId || normalize(r.staffName) === sName;
+        return match && isWorkingType(r.type);
       }).map((r: any) => r.date);
-      
+
       staffWorkDays[sId] = new Set([...works, ...prevWorks]);
       staffCurrentWorkCount[sId] = works.length;
       const currentHolidays = works.filter((dStr: string) => holidays.includes(dStr)).length;
       staffHolidayWorkCount[sId] = currentHolidays;
     });
 
-    // 各日の出勤者数を事前計算（全スタッフをカウント）
     const dailyOccupants = new Map();
     const allDays = [...holidays, ...weekdays];
     allDays.forEach(dStr => {
-      const count = currentRequests.filter(r => {
+      const count = currentRequests.filter((r: any) => {
         if (r.date !== dStr || !isWorkingType(r.type)) return false;
-        return true; // 全員カウント
+        return true;
       }).length;
       dailyOccupants.set(dStr, count);
     });
 
-    // 休日連続チェック関数
+    // 休日ペナルティ情報（同週連続 + 2週連続チェック）
     const getHolidayPenaltyInfo = (sId: string, sName: string, dateStr: string) => {
       const dObj = new Date(dateStr.replace(/-/g, '/'));
       const dow = dObj.getDay();
+
       let adjacentStr = '';
       if (dow === 0) {
         const sat = new Date(dObj); sat.setDate(sat.getDate() - 1);
@@ -184,13 +203,20 @@ export default async function handler(req: any, res: any) {
       } else if (dow === 6) {
         const sun = new Date(dObj); sun.setDate(sun.getDate() + 1);
         adjacentStr = toDateStr(sun);
-      } 
+      }
 
-      const hasAdjacent = adjacentStr ? (staffWorkDays[sId]?.has(adjacentStr) || 
-                       autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === adjacentStr)) : false;
-      
+      const hasAdjacent = adjacentStr ? (staffWorkDays[sId]?.has(adjacentStr) ||
+        autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === adjacentStr)) : false;
+
+      // 2週連続の同じ曜日チェック
+      const lastWeek = new Date(dObj);
+      lastWeek.setDate(lastWeek.getDate() - 7);
+      const lastWeekStr = toDateStr(lastWeek);
+      const workedSameDayLastWeek = staffWorkDays[sId]?.has(lastWeekStr) ||
+        autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === lastWeekStr);
+
       const alreadyWorkedHoliday = (staffHolidayWorkCount[sId] || 0) > 0;
-      return { hasAdjacent, alreadyWorkedHoliday };
+      return { hasAdjacent, workedSameDayLastWeek, alreadyWorkedHoliday };
     };
 
     const holidayQueue: any[] = [];
@@ -208,51 +234,104 @@ export default async function handler(req: any, res: any) {
       if (!config || config.limit <= 0) continue;
 
       const occupants = dailyOccupants.get(dStr) || 0;
-      let remaining = config.limit - occupants;
+      const remaining = config.limit - occupants;
+
+      // Conflict Group メンバがいずれも出勤していない場合は優先的に割り当てる
+      const currentWorkers = new Set(
+        currentRequests
+          .filter((r: any) => r.date === dStr && isWorkingType(r.type))
+          .map(r => normalize(r.staffName))
+      );
+      autoAssigned.forEach(a => {
+        if (a.date === dStr && isWorkingType(a.type)) {
+          currentWorkers.add(normalize(a.staffName));
+        }
+      });
 
       for (let i = 0; i < remaining; i++) {
         let chosenIdx = -1;
-        for (let q = 0; q < holidayQueue.length; q++) {
+
+        // 0次検索: 特定の組合せ（久保田・佐久間など）が全員休みにならないように優先割り当て
+        for (const group of CONFLICT_GROUPS) {
+          const normalizedGroup = group.map(normalize);
+          const anyoneWorking = normalizedGroup.some(name => currentWorkers.has(name));
+          
+          if (!anyoneWorking) {
+            // このグループの誰かを出勤させたい
+            for (let q = 0; q < holidayQueue.length; q++) {
+              const s = holidayQueue[q];
+              const sName = normalize(s.name);
+              if (!normalizedGroup.includes(sName)) continue;
+
+              const sId = String(s.id || s.name);
+              const isAssistant = s.profession === '助手' || s.placement === '助手';
+              const isHomeVisit = s.placement === '訪問';
+              const isUnavailable = s.status === '長期休暇' || s.status === '入職前';
+              const isNoHolidayValue = s.noHoliday ?? s.no_holiday;
+              const isNoHoliday = isNoHolidayValue === true || isNoHolidayValue === 'true' || isNoHolidayValue === 1 || isNoHolidayValue === '1';
+
+              if (isAssistant || isHomeVisit || isUnavailable || isNoHoliday) continue;
+
+              const alreadyAssigned = staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
+              const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type));
+
+              if (alreadyAssigned || isOff) continue;
+              if (wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5)) continue;
+
+              chosenIdx = q;
+              break;
+            }
+          }
+          if (chosenIdx !== -1) break;
+        }
+
+        // 1次検索: 同週連続・2週連続ともに避ける
+        if (chosenIdx === -1) {
+          for (let q = 0; q < holidayQueue.length; q++) {
           const s = holidayQueue[q];
           const sId = String(s.id || s.name);
           const sName = normalize(s.name);
-          
+
           const isAssistant = s.profession === '助手' || s.placement === '助手';
           const isHomeVisit = s.placement === '訪問';
           const isUnavailable = s.status === '長期休暇' || s.status === '入職前';
           const isNoHolidayValue = s.noHoliday ?? s.no_holiday;
           const isNoHoliday = isNoHolidayValue === true || isNoHolidayValue === 'true' || isNoHolidayValue === 1 || isNoHolidayValue === '1';
-          
+
           if (isAssistant || isHomeVisit || isUnavailable || isNoHoliday) continue;
 
           const alreadyAssigned = staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
           const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type));
-          
+
           if (alreadyAssigned || isOff) continue;
           if (wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5)) continue;
-          
-          // 前日・翌日に休日出勤がある場合は避ける（ただしどうしてもいない場合は無視するロジックだが、一旦厳格に避ける）
-          const { hasAdjacent } = getHolidayPenaltyInfo(sId, sName, dStr);
-          if (hasAdjacent) continue;
-          
+
+          const { hasAdjacent, workedSameDayLastWeek } = getHolidayPenaltyInfo(sId, sName, dStr);
+          if (hasAdjacent || workedSameDayLastWeek) continue;
+
           chosenIdx = q;
           break;
         }
+      }
 
-        // もし hasAdjacent の条件で全員弾かれて誰も見つからなかった場合、hasAdjacent を無視して再検索
-        if (chosenIdx === -1) {
-          for (let q = 0; q < holidayQueue.length; q++) {
+      // 2次検索: 2週連続は許容するが同週連続は避ける
+      if (chosenIdx === -1) {
+        for (let q = 0; q < holidayQueue.length; q++) {
             const s = holidayQueue[q];
             const sId = String(s.id || s.name);
             const sName = normalize(s.name);
             if (s.profession === '助手' || s.placement === '助手' || s.placement === '訪問' || s.status === '長期休暇' || s.status === '入職前') continue;
             const isNoHol = s.noHoliday ?? s.no_holiday;
             if (isNoHol === true || isNoHol === 'true' || isNoHol === 1 || isNoHol === '1') continue;
-            
+
             if (staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr)) continue;
             if (currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type))) continue;
             if (wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5)) continue;
-            
+
+            const { hasAdjacent, workedSameDayLastWeek } = getHolidayPenaltyInfo(sId, sName, dStr);
+            if (hasAdjacent && holidayQueue.length > 5) continue;
+            if (workedSameDayLastWeek && holidayQueue.length > 8) continue;
+
             chosenIdx = q;
             break;
           }
@@ -260,28 +339,78 @@ export default async function handler(req: any, res: any) {
 
         if (chosenIdx !== -1) {
           const chosen = holidayQueue[chosenIdx];
-          
-          // 選ばれたスタッフをキューの最後尾に移動（順番・均等化を完全保証するラウンドロビン）
           holidayQueue.splice(chosenIdx, 1);
           holidayQueue.push(chosen);
 
           const cId = String(chosen.id || chosen.name);
           const cKey = normalize(chosen.name);
           autoAssigned.push({ staffId: cId, staffName: chosen.name, date: dStr, type: '出勤', details: { note: '自動割当(休日)' } });
+          currentWorkers.add(cKey);
           if (!staffWorkDays[cId]) staffWorkDays[cId] = new Set();
           staffWorkDays[cId].add(dStr);
           staffCurrentWorkCount[cId] = (staffCurrentWorkCount[cId] || 0) + 1;
           staffHolidayWorkCount[cId] = (staffHolidayWorkCount[cId] || 0) + 1;
 
-          // 2. 振替公休（平日）の付与
+          // 2. 振替公休（平日）の付与 - 同週優先、公休が重複しないよう分散
           const bestWkday = [...weekdays].filter(wd => {
-            const hasJob = staffWorkDays[cId].has(wd) || currentRequests.some(r => r.date === wd && (String(r.staffId) === cId || normalize(r.staffName) === cKey));
+            const hasJob = staffWorkDays[cId].has(wd) || currentRequests.some((r: any) => r.date === wd && (String(r.staffId) === cId || normalize(r.staffName) === cKey));
             const hasAutoOff = autoAssigned.some(a => (String(a.staffId) === cId || normalize(a.staffName) === cKey) && a.date === wd && a.type === '公休');
             return !hasJob && !hasAutoOff;
           }).sort((a, b) => {
-            const aOffs = autoAssigned.filter(x => x.date === a && x.type === '公休').length;
-            const bOffs = autoAssigned.filter(x => x.date === b && x.type === '公休').length;
-            return aOffs - bOffs;
+            const dateA = new Date(a.replace(/-/g, '/'));
+            const dateB = new Date(b.replace(/-/g, '/'));
+            const targetD = new Date(dStr.replace(/-/g, '/'));
+
+            const getWeek = (d: Date) => {
+              const date = new Date(d.getTime());
+              const day = date.getDay();
+              const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+              return new Date(date.setDate(diff)).toDateString();
+            };
+
+            const isSameWeekA = getWeek(dateA) === getWeek(targetD);
+            const isSameWeekB = getWeek(dateB) === getWeek(targetD);
+            if (isSameWeekA && !isSameWeekB) return -1;
+            if (!isSameWeekA && isSameWeekB) return 1;
+
+            // 公休が被らないよう、その日の公休数が少ない日を優先
+            const aOffs = autoAssigned.filter(x => x.date === a && x.type === '公休');
+            const bOffs = autoAssigned.filter(x => x.date === b && x.type === '公休');
+            
+            // CONFLICT_GROUPSのチェック: 同じグループの人が既にその日に公休になっている場合は避ける
+            const getConflictScore = (dateStr: string) => {
+              let score = 0;
+              const offStaffNames = new Set(autoAssigned.filter(x => x.date === dateStr && x.type === '公休').map(x => normalize(x.staffName)));
+              // 手動の公休も考慮
+              currentRequests.forEach((r: any) => {
+                if (r.date === dateStr && !isWorkingType(r.type)) {
+                  offStaffNames.add(normalize(r.staffName));
+                }
+              });
+
+              for (const group of CONFLICT_GROUPS) {
+                const normalizedGroup = group.map(normalize);
+                if (normalizedGroup.includes(cKey)) {
+                  const others = normalizedGroup.filter(name => name !== cKey);
+                  if (others.some(other => offStaffNames.has(other))) {
+                    score += 100; // 強いペナルティ
+                  }
+                }
+              }
+              return score;
+            };
+
+            const scoreA = aOffs.length + getConflictScore(a);
+            const scoreB = bOffs.length + getConflictScore(b);
+            if (scoreA !== scoreB) return scoreA - scoreB;
+
+            // 週の中間を優先して連勤を分断
+            const dowA = dateA.getDay();
+            const dowB = dateB.getDay();
+            const priority = [3, 4, 2, 1, 5]; // 水, 木, 火, 月, 金
+            const dowScoreA = priority.indexOf(dowA);
+            const dowScoreB = priority.indexOf(dowB);
+            return dowScoreA - dowScoreB;
           })[0];
 
           if (bestWkday) {
@@ -291,11 +420,9 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    // 3. 平日の割り当て: 出勤数は「平日日数」まで、人数を平均化、5連勤を厳守
+    // 3. 平日の割り当て
     const targetWorkDays = weekdays.length;
     let keepAssigning = true;
-    
-    // 安全装置: 無限ループ防止のため最大試行回数を設定
     let iterations = 0;
     const maxIterations = weekdays.length * staffList.length * 2;
 
@@ -303,46 +430,42 @@ export default async function handler(req: any, res: any) {
       keepAssigning = false;
       iterations++;
 
-      // その時点での「平日」の出勤人数をカウントし、少ない日順にソートする（平均化するため）
       const sortedWeekdays = [...weekdays].sort((a, b) => {
         const aOcc = (dailyOccupants.get(a) || 0) + autoAssigned.filter(x => x.date === a && isWorkingType(x.type)).length;
         const bOcc = (dailyOccupants.get(b) || 0) + autoAssigned.filter(x => x.date === b && isWorkingType(x.type)).length;
-        return aOcc - bOcc; // 人数が少ない日を優先
+        return aOcc - bOcc;
       });
 
       for (const dStr of sortedWeekdays) {
-        // 現在のこの日の出勤人数
-        const currentOccupants = (dailyOccupants.get(dStr) || 0) + autoAssigned.filter(x => x.date === dStr && isWorkingType(x.type)).length;
         const config = schedule[dStr];
-        
-        // （必須ではないが）もし管理画面の制限数を優に超えている場合は、無理に割り当てない
-        // ※「基本的な出勤数は平日日数」を優先するため、limitは参考としつつ、必要なら超えてもよい…が、一応limit未満かチェック
-        // ただし、今回は「上限人数の平均化・平日日数を満たす」ことが目的なので、limit制限は敢えて外すか緩和する。
-        // （ユーザー指示：「平日は人数にかたよりが無いように平均してください。基本的な出勤数は平日日数」）
-        
+
         let candidates = (staffList || [])
           .filter((s: any) => {
             const sId = String(s.id || s.name);
             const sName = normalize(s.name);
             if (s.status === '長期休暇' || s.status === '入職前') return false;
 
-            // 既にこの日に仕事が割り当てられているか？
             const alreadyAssigned = (staffWorkDays[sId]?.has(dStr)) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr && isWorkingType(a.type));
             if (alreadyAssigned) return false;
 
-            // この日に休み（公休・年休など）が入っているか？
             const isOff = currentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type)) ||
-                          autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr && a.type === '公休');
+              autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr && a.type === '公休');
             if (isOff) return false;
 
-            // 目標日数（平日日数）に到達しているか？
             if ((staffCurrentWorkCount[sId] || 0) >= targetWorkDays) return false;
 
-            // 厳守：5連勤以上にならないかチェック
-            return !wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5);
+            // 公休日を考慮した実効出勤日セットで5連勤チェック
+            const holidayDaysForStaff = new Set(
+              autoAssigned
+                .filter(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.type === '公休')
+                .map(a => a.date)
+            );
+            const effectiveWorkDays = new Set(
+              [...(staffWorkDays[sId] || new Set())].filter(day => !holidayDaysForStaff.has(day))
+            );
+            return !wouldExceedConsecutive(dStr, effectiveWorkDays, 5);
           })
           .sort((a: any, b: any) => {
-            // 出勤日数が最も少ない人を優先してアサイン
             const aId = String(a.id || a.name);
             const bId = String(b.id || b.name);
             return (staffCurrentWorkCount[aId] || 0) - (staffCurrentWorkCount[bId] || 0);
@@ -356,17 +479,174 @@ export default async function handler(req: any, res: any) {
           staffWorkDays[cId].add(dStr);
           staffCurrentWorkCount[cId] = (staffCurrentWorkCount[cId] || 0) + 1;
           keepAssigning = true;
-          break; // 人数カウントが変わるので、日付ソートをやり直すためにループを抜ける
+          break;
         }
       }
     }
 
+    // ─────────────────────────────────────────────────
+    // 4. ポストプロセス: 全スタッフの連勤を検査し、5連勤超を強制的に公休で分断
+    // ─────────────────────────────────────────────────
+    for (const staff of (staffList || [])) {
+      const sId = String(staff.id || staff.name);
+      const sName = normalize(staff.name);
 
-    return res.status(200).json({ newRequests: autoAssigned });
+      const buildWorkAndOffSets = () => {
+        const workSet = new Set<string>();
+        const offSet = new Set<string>();
+
+        // 前月のデータを追加（月跨ぎの連勤チェック用）
+        prevRequests.forEach((r: any) => {
+          if ((String(r.staffId) === sId || normalize(r.staffName) === sName)) {
+            if (isWorkingType(r.type)) workSet.add(r.date);
+            else offSet.add(r.date);
+          }
+        });
+
+        currentRequests.forEach((r: any) => {
+          if ((String(r.staffId) === sId || normalize(r.staffName) === sName)) {
+            if (isWorkingType(r.type)) workSet.add(r.date);
+            else offSet.add(r.date);
+          }
+        });
+        autoAssigned.forEach((a: any) => {
+          if ((String(a.staffId) === sId || normalize(a.staffName) === sName)) {
+            if (isWorkingType(a.type)) workSet.add(a.date);
+            else if (a.type === '公休') offSet.add(a.date);
+          }
+        });
+        return { workSet, offSet };
+      };
+
+      // 最大5回まで反復して全ての6連勤を解消する
+      for (let pass = 0; pass < 5; pass++) {
+        const { workSet, offSet } = buildWorkAndOffSets();
+        const sortedWorkDates = [...workSet].filter(d => !offSet.has(d)).sort();
+
+        let fixApplied = false;
+        let streak: string[] = [];
+
+        const tryFixStreak = (s: string[]) => {
+          if (s.length <= 5) return;
+          const midIdx = Math.floor(s.length / 2);
+
+          // 手動出勤がある日付のセット（currentRequests から）
+          const manualWorkDates = new Set(
+            currentRequests
+              .filter((r: any) =>
+                (String(r.staffId) === sId || normalize(r.staffName) === sName) &&
+                isWorkingType(r.type)
+              )
+              .map((r: any) => r.date)
+          );
+
+          // 自動割当で出勤になっている日付のセット
+          const autoWorkDates = new Set(
+            autoAssigned
+              .filter((a: any) =>
+                (String(a.staffId) === sId || normalize(a.staffName) === sName) &&
+                isWorkingType(a.type)
+              )
+              .map((a: any) => a.date)
+          );
+
+          // 候補選定：①auto出勤かつ平日 > ②auto出勤かつ土日 > ③手動出勤平日 > ④手動出勤土日
+          let insertDate: string | null = null;
+          let insertDateScore = -1; // 高いほど優先
+
+          for (let offset = 0; offset < s.length; offset++) {
+            for (const candidate of [s[midIdx + offset], s[midIdx - offset]]) {
+              if (!candidate || offSet.has(candidate)) continue;
+              const dow = new Date(candidate.replace(/-/g, '/')).getDay();
+              const isWeekday = dow >= 1 && dow <= 5;
+              const isAuto = autoWorkDates.has(candidate);
+              const isManual = manualWorkDates.has(candidate);
+              // スコア: auto+平日=4, auto+土日=3, manual+平日=2, manual+土日=1, 不明=0
+              let score = 0;
+              if (isAuto && isWeekday) score = 4;
+              else if (isAuto && !isWeekday) score = 3;
+              else if (isManual && isWeekday) score = 2;
+              else if (isManual && !isWeekday) score = 1;
+              else if (isWeekday) score = 2; // 手動でも自動でもない平日
+              else score = 0;
+
+              if (score > insertDateScore) {
+                insertDate = candidate;
+                insertDateScore = score;
+                if (score === 4) break; // 最高スコアなら即確定
+              }
+            }
+            if (insertDateScore === 4) break;
+          }
+
+        if (insertDate) {
+          // autoAssigned から該当スタッフの該当日の出勤レコードをすべて削除（重複除去を兼ねる）
+          const beforeCount = autoAssigned.length;
+          autoAssigned = autoAssigned.filter(
+            (a: any) => !( (String(a.staffId) === sId || normalize(a.staffName) === sName)
+              && a.date === insertDate
+              && isWorkingType(a.type) )
+          );
+          
+          if (autoAssigned.length < beforeCount) {
+            console.log(`POST-PROCESS: remove auto work record(s) for ${staff.name} on ${insertDate}`);
+          }
+
+          // 手動出勤のある日に公休を挿入する場合は overrideManual フラグを立てる
+          const hasManualWork = manualWorkDates.has(insertDate);
+          console.log(`POST-PROCESS: insert 公休 for ${staff.name} on ${insertDate} (streak=${s.length}, overrideManual=${hasManualWork})`);
+          autoAssigned.push({
+            staffId: sId,
+            staffName: staff.name,
+            date: insertDate,
+            type: '公休',
+            details: {
+              note: '連勤調整(自動挿入)',
+              locked: true,
+              isManual: true,
+              overrideManual: hasManualWork,
+              priority: 99
+            }
+          });
+          fixApplied = true;
+        }
+        };
+
+        for (let i = 0; i < sortedWorkDates.length; i++) {
+          const d = sortedWorkDates[i];
+          if (streak.length === 0) {
+            streak = [d];
+          } else {
+            const prev = new Date(streak[streak.length - 1].replace(/-/g, '/'));
+            const curr = new Date(d.replace(/-/g, '/'));
+            const diffDays = Math.round((curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24));
+            if (diffDays === 1) {
+              streak.push(d);
+            } else {
+              tryFixStreak(streak);
+              streak = [d];
+            }
+          }
+        }
+        tryFixStreak(streak);
+
+        if (!fixApplied) break; // 修正不要ならループ終了
+      }
+    }
+
+    // ─────────────────────────────────────────────────
+    // 5. 最終的な重複排除
+    // ─────────────────────────────────────────────────
+    const finalMap = new Map();
+    autoAssigned.forEach(r => {
+      const key = `${normalize(r.staffName)}-${r.date}-${r.type}`;
+      finalMap.set(key, r);
+    });
+
+    return res.status(200).json({ newRequests: Array.from(finalMap.values()) });
+
   } catch (e: any) {
     console.error('AI Shift Error:', e);
     return res.status(500).json({ error: e.message });
   }
 }
-
-

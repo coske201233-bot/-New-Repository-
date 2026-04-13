@@ -9,6 +9,10 @@ export const normalizeName = (name: string) => {
   let n = name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '');
   // 2. 漢字の表記ゆれ吸収
   n = n.replace(/條/g, '条');
+  // 3. 特定の短縮名などを正規化（API/AutoAssignとの一貫性のため）
+  if (n === '佐藤公') return '佐藤公貴';
+  if (n === '藤森') return '藤森渓';
+  if (n === '三井') return '三井諒';
   return n;
 };
 
