@@ -32,6 +32,8 @@ const deduplicateRequests = (list: any[]) => {
     return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
   };
 
+  const isLocked = (i: any) => i?.details?.locked === true || i?.locked === true;
+
   const isManual = (i: any) => {
     if (!i) return false;
     const idStr = String(i.id || '');
@@ -72,11 +74,14 @@ const deduplicateRequests = (list: any[]) => {
     if (!item || !item.staffName || !item.date) return;
     if (!item.id) item.id = `temp-${item.staffName}-${item.date}-${Date.now()}`;
     
-    // キーには「タイプ」を含めず、「人-日」で一意にする（1日1件が基本だが、時間給などの併記は表示側でこなす）
-    // ※ここを人-日-タイプにすると、同じ日に別タイプの「自動」が残ってしまうため。
+    // キーには「人-日」で一意にする（1日1件が基本だが、時間給などの併記は表示側でこなす）
+    // ※ここをタイプまで含めると、同じ日に別タイプの「自動」と「手動」が両方残ってしまうため。
     // 手動と自動の競合をここで確実に解決する。
-    const key = `${normalizeName(item.staffName)}-${item.date}-${item.type}`;
+    const key = `${normalizeName(item.staffName)}-${item.date}`;
     const existing = map.get(key);
+
+    const isLockNew = isLocked(item);
+    const wasLockOld = existing ? isLocked(existing) : false;
 
     const isManNew = isManual(item);
     const wasManOld = existing ? isManual(existing) : false;
@@ -84,6 +89,10 @@ const deduplicateRequests = (list: any[]) => {
     let isPriority = false;
     if (!existing) {
       isPriority = true;
+    } else if (isLockNew && !wasLockOld) {
+      isPriority = true;
+    } else if (!isLockNew && wasLockOld) {
+      isPriority = false;
     } else if (isManNew && !wasManOld) {
       isPriority = true;
     } else if (!isManNew && wasManOld) {
@@ -390,8 +399,9 @@ export default function App() {
       // 1. スタッフ情報の取得とマージ
       const cloudStaff = await cloudStorage.fetchStaff();
       if (cloudStaff && cloudStaff.length > 0) {
+        const currentLocalStaff = await loadData(STORAGE_KEYS.STAFF_LIST) || [];
         const merged = cloudStaff.map((cs: any) => {
-          const localMatch = staffList.find((ls: any) => String(ls.id) === String(cs.id));
+          const localMatch = currentLocalStaff.find((ls: any) => String(ls.id) === String(cs.id));
           const n = { ...cs, name: normalizeName(cs.name) };
           n.lockedMonths = { ...(cs.lockedMonths || {}), ...(localMatch?.lockedMonths || {}) };
           return n;
@@ -408,7 +418,8 @@ export default function App() {
 
       // 2. リクエスト情報の取得・マージ・双方向同期
       const cloudRequests = await cloudStorage.fetchRequests();
-      const localRequests = requests.length > 0 ? requests : (await loadData(STORAGE_KEYS.REQUESTS) || []);
+      // クロージャの古いstateを参照しないよう、常に最新のローカルデータを取得する
+      const localRequests = await loadData(STORAGE_KEYS.REQUESTS) || [];
       
       const { cleanList, discardedIds } = deduplicateRequests([...localRequests, ...(cloudRequests || [])]);
       
@@ -574,7 +585,7 @@ export default function App() {
         return !(staff?.lockedMonths?.[monthPrefix]);
       });
 
-      const filteredRequests = requests.filter(r => {
+      const oldAutoRequests = requests.filter(r => {
         const idStr = String(r.id || '');
         const isAuto = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-');
         const isTargetMonth = r.date && r.date.startsWith(monthPrefix);
@@ -583,13 +594,22 @@ export default function App() {
         const staff = staffList.find(s => String(s.id) === String(r.staffId));
         const isLocked = staff?.lockedMonths?.[monthPrefix] === true;
         
-        // 「自動割当ID」かつ「対象月」かつ「ロックされていない」場合のみ削除（それ以外は残す）
-        return !(isAuto && isTargetMonth && !isLocked);
+        // 「自動割当ID」かつ「対象月」かつ「ロックされていない」場合のみ削除対象
+        return isAuto && isTargetMonth && !isLocked;
       });
+
+      const oldAutoIds = oldAutoRequests.map((r: any) => String(r.id));
+      const filteredRequests = requests.filter((r: any) => !oldAutoIds.includes(String(r.id)));
+
       const updated = [...filteredRequests, ...newWithIds];
       setRequests(updated);
       await saveData(STORAGE_KEYS.REQUESTS, updated);
       
+      // クラウド側の古い自動割り当てデータを削除
+      if (oldAutoIds.length > 0) {
+        await cloudStorage.deleteRequests(oldAutoIds).catch(console.error);
+      }
+
       if (newWithIds.length > 0) {
         await cloudStorage.upsertRequests(newWithIds);
       }
@@ -657,6 +677,7 @@ export default function App() {
       setSessionDuration: async (val: number) => { setSessionDuration(val); await saveData(STORAGE_KEYS.SESSION_DURATION, val); },
       onForceCloudSync: handleForceCloudSync,
       currentDate: activeDate, setCurrentDate: setActiveDate,
+      onAutoAssign: handleAutoAssign,
       onUndoAutoAssign: handleUndoAutoAssign,
       canUndoAutoAssign: requestsHistory.length > 0,
       staffLocks,

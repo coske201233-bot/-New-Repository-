@@ -4,7 +4,7 @@ import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { Users, Coffee, Briefcase, Building2, MapPin, X, RefreshCw, AlertCircle, ChevronRight } from 'lucide-react-native';
-import { getDayType, getDateStr } from '../utils/dateUtils';
+import { getDayType, getDateStr, normalizeName } from '../utils/dateUtils';
 import { sortStaffByName } from '../utils/staffUtils';
 import { getCurrentLimit } from '../utils/limitUtils';
 
@@ -38,24 +38,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return {
       label,
       count: staffList.filter(s => {
-        const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
+        const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
         return s.placement === label && s.profession !== '助手' && !isOut;
       }).length
     };
   });
 
-  const outStaffCount = staffList.filter(s => s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前').length;
+  const outStaffCount = staffList.filter(s => normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前').length;
   const assistantCount = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
+    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
     return (s.profession === '助手' || s.placement === '助手') && !isOut;
   }).length;
   const totalVisits = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
+    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
     return s.placement === '訪問' && !isOut;
   }).length;
 
   const hospitalEligible = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
+    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
     return hospitalPlacements.includes(s.placement) && !isOut && s.profession !== '助手';
   });
   
@@ -63,11 +63,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const otCount = hospitalEligible.filter(s => s.profession === 'OT').length;
   const stCount = hospitalEligible.filter(s => s.profession === 'ST').length;
   const hokatsuCount = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
+    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
     return s.placement === '包括' && !isOut;
   }).length;
   const hainyoCount = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
+    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
     return s.placement === '排尿支援' && !isOut;
   }).length;
 
@@ -79,7 +79,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   // Helper to determine if a staff member is working today based on shift requests
   const isWorkingToday = (staffName: string) => {
     const todayStr = getDateStr(new Date());
-    const shift = requests.find(r => r.staffName?.trim() === staffName.trim() && r.date === todayStr && r.status === 'approved');
+    const shift = requests.find(r => normalizeName(r.staffName) === normalizeName(staffName) && r.date === todayStr && r.status === 'approved');
     if (shift) {
       return shift.type === '出勤';
     }
@@ -91,7 +91,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   // Today's attendance counts based on shifts
   const hospitalAttending = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
+    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
     return isWorkingToday(s.name) && 
            (hospitalPlacements.includes(s.placement) || ['包括', '排尿支援'].includes(s.placement)) &&
            s.profession !== '助手' &&

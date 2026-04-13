@@ -107,7 +107,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
       
       // ヘッダー
-      let headerHtml = '<th style="width: 80px;">氏名</th><th style="width: 40px;">職種</th>';
       monthInfoArr.forEach((d: any) => {
         if (!d.empty) {
           const dDate = new Date(d.dateStr);
@@ -319,11 +318,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                     if (isAssigning) return;
                     setIsAssigning(true);
                     try {
+                      console.log('Starting Auto Assign for:', currentYear, currentMonth + 1);
                       await onAutoAssign(currentYear, currentMonth + 1, limits);
                       Alert.alert('完了', 'シフトの自動割り当てが完了しました。');
-                    } catch (e) {
-                      console.error('Auto assign error:', e);
-                      Alert.alert('エラー', '自動割り当て中にエラーが発生しました。');
+                    } catch (e: any) {
+                      console.error('Auto assign error UI:', e);
+                      Alert.alert('エラー', '自動割り当て中にエラーが発生しました。\n' + (e.message || String(e)));
                     } finally {
                       setIsAssigning(false);
                     }

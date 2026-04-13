@@ -109,9 +109,13 @@ export const getMonthInfo = (year: number, month: number) => {
 };
 
 /**
- * 氏名の表記を正規化します（前後の空白削除など）
+ * 氏名の表記を正規化します（前後の空白削除、全角スペース除去、常用漢字への統一など）
  */
 export const normalizeName = (name: string): string => {
-  if (!name) return '';
-  return name.trim();
+  if (!name || typeof name !== 'string') return '';
+  // 1. 空白、タブ、改行、および一般的な記号（カッコ等）の除去
+  let n = name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '');
+  // 2. 漢字の表記ゆれ吸収
+  n = n.replace(/條/g, '条');
+  return n;
 };

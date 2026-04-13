@@ -51,7 +51,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,
   currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest
 }) => {
-  const [selectedDate, setSelectedDate] = useState(currentDate);
+  const [selectedDate, setSelectedDate] = useState(currentDate || new Date());
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
   const [selectedStaffToAdd, setSelectedStaffToAdd] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState('出勤');
@@ -59,6 +59,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   const [isTypeModalVisible, setIsTypeModalVisible] = useState(false);
 
   React.useEffect(() => {
+    // Safety check for currentDate
+    if (!currentDate || !(currentDate instanceof Date)) return;
+    
     // If current selected date is not in the active month, reset it to the 1st of that month
     if (selectedDate.getMonth() !== currentDate.getMonth() || selectedDate.getFullYear() !== currentDate.getFullYear()) {
       setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
@@ -68,12 +71,17 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   // Optimization: Index requests to avoid O(N^2) scans in getDetailedDayInfo
   const requestMap = React.useMemo(() => {
     const map = new Map<string, Map<string, any[]>>();
+    if (!Array.isArray(requests)) return map;
+    
     requests.forEach((r: any) => {
       if (!r || !r.date || !r.staffName || typeof r.staffName !== 'string') return;
-      const sT = r.staffName.trim();
+      const sT = normalizeName(r.staffName);
       if (!map.has(r.date)) map.set(r.date, new Map<string, any[]>());
-      if (!map.get(r.date)!.has(sT)) map.get(r.date)!.set(sT, []);
-      map.get(r.date)!.get(sT)!.push(r);
+      const dateMap = map.get(r.date);
+      if (dateMap) {
+        if (!dateMap.has(sT)) dateMap.set(sT, []);
+        dateMap.get(sT)!.push(r);
+      }
     });
     return map;
   }, [requests]);
@@ -91,13 +99,13 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     (staffList || []).forEach(staff => {
       if (!staff || !staff.name) return;
       
-      const isOut = staff.status?.trim() === '長期休暇' || staff.placement?.trim() === '長期休暇' || staff.position?.trim() === '長期休暇' || staff.status?.trim() === '入職前';
+      const isOut = normalizeName(staff.status) === '長期休暇' || normalizeName(staff.placement) === '長期休暇' || normalizeName(staff.position) === '長期休暇' || normalizeName(staff.status) === '入職前';
       const isHomeVisit = staff.placement === '訪問';
       const isAssistant = staff.profession === '助手' || staff.placement === '助手';
       
       if (isOut) return;
 
-      const userRequests = requestMap.get(dateStr)?.get(staff.name.trim()) || [];
+      const userRequests = requestMap.get(dateStr)?.get(normalizeName(staff.name)) || [];
       const approvedReqs = userRequests.filter(r => r.status === 'approved');
       const pendingReqs = userRequests.filter(r => r.status === 'pending');
       const isNoHoliday = (dayType !== 'weekday') && (staff.monthlyNoHoliday?.[monthStr] ?? staff.noHoliday);
@@ -140,10 +148,11 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   // その月の全日分の情報を事前計算する（描画高速化のため）
   const monthDataMap = React.useMemo(() => {
     const dataMap = new Map();
-    const daysInMonthCnt = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+    const safeDate = currentDate || new Date();
+    const daysInMonthCnt = new Date(safeDate.getFullYear(), safeDate.getMonth() + 1, 0).getDate();
     
     for (let day = 1; day <= daysInMonthCnt; day++) {
-      const d = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+      const d = new Date(safeDate.getFullYear(), safeDate.getMonth(), day);
       const info = getDetailedDayInfo(d);
       const dayType = getDayType(d);
       
@@ -156,10 +165,11 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     return dataMap;
   }, [currentDate, staffList, requestMap, monthlyLimits, weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit]);
 
-  const { working: workingStaff, off: offStaff } = getDetailedDayInfo(selectedDate);
-  const currentDayType = getDayType(selectedDate);
-  const monthStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`;
-  const currentMonthly = monthlyLimits[monthStr] || { weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit };
+  const { working: workingStaff, off: offStaff } = getDetailedDayInfo(selectedDate || new Date());
+  const currentDayType = getDayType(selectedDate || new Date());
+  const safeSelectedDate = selectedDate || new Date();
+  const monthStr = `${safeSelectedDate.getFullYear()}-${String(safeSelectedDate.getMonth() + 1).padStart(2, '0')}`;
+  const currentMonthly = (monthlyLimits && monthlyLimits[monthStr]) || { weekday: weekdayLimit || 0, sat: saturdayLimit || 0, sun: sundayLimit || 0, pub: publicHolidayLimit || 0 };
   const currentLimit = currentDayType === 'weekday' ? currentMonthly.weekday : 
                        currentDayType === 'sat' ? currentMonthly.sat :
                        currentDayType === 'sun' ? currentMonthly.sun :
@@ -178,9 +188,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             const dateStr = getDateStr(selectedDate);
             const dayType = getDayType(selectedDate);
             
-            // 1. 対象スタッフ・対象日の「手動リクエスト」をすべて特定
+            // 1. 対象スタッフ・対象日のリクエストをすべて特定 (手動/自動問わず削除対象とする)
             const manualRequestIds = requests
-              .filter(r => r.staffName?.trim() === staffName.trim() && r.date === dateStr && !String(r.id).startsWith('auto-'))
+              .filter(r => normalizeName(r.staffName) === normalizeName(staffName) && r.date === dateStr)
               .map(r => r.id);
 
             // 2. クラウド/グローバルステートから一括削除
@@ -197,7 +207,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             // 3. ローカルステートの更新と「状態保持（公休化）」
             setRequests((prev: any[]) => {
               // まず対象の全リクエストをフィルタリング
-              const filtered = prev.filter(r => !(r.staffName?.trim() === staffName.trim() && r.date === dateStr));
+              const filtered = prev.filter(r => !(normalizeName(r.staffName) === normalizeName(staffName) && r.date === dateStr));
               
               // 平日で「出勤」を削除した場合のみ、「公休（休み）」として状態を上書き保持する
               if (wasWorking && dayType === 'weekday') {
@@ -228,7 +238,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
 
     if (selectedType === '空欄') {
       const idsToDelete = requests
-        .filter(r => r.date === dateStr && staffNames.includes(r.staffName?.trim()) && !String(r.id).startsWith('auto-'))
+        .filter(r => r.date === dateStr && staffNames.map(n => normalizeName(n)).includes(normalizeName(r.staffName)))
         .map(r => r.id);
       
       if (idsToDelete.length > 0) {
@@ -272,8 +282,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
   const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
 
-  const daysInMonth = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
-  const firstDayOfMonth = getFirstDayOfMonth(currentDate.getFullYear(), currentDate.getMonth());
+  const safeCurrentDate = currentDate || new Date();
+  const daysInMonth = getDaysInMonth(safeCurrentDate.getFullYear(), safeCurrentDate.getMonth());
+  const firstDayOfMonth = getFirstDayOfMonth(safeCurrentDate.getFullYear(), safeCurrentDate.getMonth());
 
   const days: (number | null)[] = [];
   for (let i = 0; i < firstDayOfMonth; i++) days.push(null);
@@ -289,14 +300,14 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
         cells = [];
       }
 
-      const isSelected = day === selectedDate.getDate() && currentDate.getMonth() === selectedDate.getMonth() && currentDate.getFullYear() === selectedDate.getFullYear();
+      const isSelected = day === safeSelectedDate.getDate() && safeCurrentDate.getMonth() === safeSelectedDate.getMonth() && safeCurrentDate.getFullYear() === safeSelectedDate.getFullYear();
       const isToday = day === new Date().getDate() && 
-                      currentDate.getMonth() === new Date().getMonth() && 
-                      currentDate.getFullYear() === new Date().getFullYear();
+                      safeCurrentDate.getMonth() === new Date().getMonth() && 
+                      safeCurrentDate.getFullYear() === new Date().getFullYear();
       
       const dayData = day ? monthDataMap.get(day) : null;
-      const dayType = dayData ? dayData.dayType : 'weekday';
-      const monthly = monthlyLimits[monthStr] || { weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit };
+      const dayType = dayData?.dayType || getDayType(new Date(safeCurrentDate.getFullYear(), safeCurrentDate.getMonth(), day || 1));
+      const monthly = (monthlyLimits && monthlyLimits[monthStr]) || { weekday: weekdayLimit || 0, sat: saturdayLimit || 0, sun: sundayLimit || 0, pub: publicHolidayLimit || 0 };
       const limit = dayType === 'weekday' ? monthly.weekday : 
                     dayType === 'sat' ? monthly.sat :
                     dayType === 'sun' ? monthly.sun :
@@ -319,7 +330,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             isToday && !isSelected && styles.todayCell,
             (!isSelected && !!day && isUnderLimit) ? { backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: BORDER_RADIUS.sm } : null
           ]}
-          onPress={() => day && setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), day))}
+          onPress={() => day && setSelectedDate(new Date(safeCurrentDate.getFullYear(), safeCurrentDate.getMonth(), day))}
           disabled={!day}
         >
           {day && (
@@ -381,14 +392,14 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
 
       <ThemeCard style={styles.calendarContainer}>
         <View style={styles.monthHeader}>
-          <TouchableOpacity onPress={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}>
+          <TouchableOpacity onPress={() => currentDate && setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}>
             <ChevronLeft color={COLORS.text} size={24} />
           </TouchableOpacity>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <ThemeText style={{ fontSize: 24 }}>{getSeasonalTheme(currentDate.getMonth()).icon}</ThemeText>
-            <ThemeText variant="h2">{currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月</ThemeText>
+            <ThemeText style={{ fontSize: 24 }}>{getSeasonalTheme(currentDate?.getMonth() || 0).icon}</ThemeText>
+            <ThemeText variant="h2">{currentDate?.getFullYear() || 2026}年 {(currentDate?.getMonth() || 0) + 1}月</ThemeText>
           </View>
-          <TouchableOpacity onPress={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}>
+          <TouchableOpacity onPress={() => currentDate && setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}>
             <ChevronRight color={COLORS.text} size={24} />
           </TouchableOpacity>
         </View>
@@ -407,7 +418,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       <View style={styles.detailScroll}>
         <ThemeCard style={styles.detailCard}>
           <View style={styles.detailHeader}>
-            <ThemeText variant="h2">{selectedDate.getMonth() + 1}月{selectedDate.getDate()}日の詳細</ThemeText>
+            <ThemeText variant="h2">{safeSelectedDate.getMonth() + 1}月{safeSelectedDate.getDate()}日の詳細</ThemeText>
             {isPrivileged && (
               <TouchableOpacity 
                 style={styles.addStaffBtn} 
@@ -513,7 +524,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             <View style={styles.modalHeader}>
               <View>
                 <ThemeText variant="h2">スタッフを出勤に割り当て</ThemeText>
-                <ThemeText variant="caption">{formatDate(selectedDate)}</ThemeText>
+                <ThemeText variant="caption">{formatDate(safeSelectedDate)}</ThemeText>
               </View>
               <TouchableOpacity onPress={() => setIsAddStaffModalVisible(false)}>
                 <XCircle color={COLORS.textSecondary} size={24} />
@@ -521,12 +532,13 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             </View>
 
             <ScrollView style={{ maxHeight: 400 }}>
-              {staffList
+              {(staffList || [])
                 .filter(s => {
-                  const mStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-                  const isLongTerm = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
-                  const isNoHoliday = (getDayType(selectedDate) !== 'weekday') && (s.monthlyNoHoliday?.[mStr] ?? s.noHoliday);
-                  const alreadyHasRequest = requests.some(r => r.staffName.trim() === s.name.trim() && r.date === getDateStr(selectedDate) && r.status === 'approved');
+                  const safeDateForModal = currentDate || new Date();
+                  const mStr = `${safeDateForModal.getFullYear()}-${String(safeDateForModal.getMonth() + 1).padStart(2, '0')}`;
+                  const isLongTerm = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
+                  const isNoHoliday = (getDayType(safeSelectedDate) !== 'weekday') && (s.monthlyNoHoliday?.[mStr] ?? s.noHoliday);
+                  const alreadyHasRequest = requests && Array.isArray(requests) && requests.some(r => normalizeName(r.staffName) === normalizeName(s.name) && r.date === getDateStr(safeSelectedDate) && r.status === 'approved');
                   
                   return !isLongTerm && !isNoHoliday && !alreadyHasRequest;
                 })
