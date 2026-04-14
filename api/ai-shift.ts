@@ -10,6 +10,7 @@ const normalize = (name: string) => {
   if (n === '佐藤公') return '佐藤公貴';
   if (n === '藤森') return '藤森渓';
   if (n === '三井') return '三井諒';
+  if (n === '佐藤') return '佐藤晃'; // 佐藤晃氏をデフォルトの佐藤として扱う
   return n;
 };
 
@@ -197,13 +198,10 @@ export default async function handler(req: any, res: any) {
         return match && isWorkingType(r.type);
       }).map((r: any) => r.date);
 
-      const prevWorks = allPrevRequests.filter((r: any) => {
-        const match = String(r.staffId) === sId || normalize(r.staffName) === sName;
-        return match && isWorkingType(r.type);
-      }).map((r: any) => r.date);
-
-      staffWorkDays[sId] = new Set([...works, ...prevWorks]);
+      // 6月から開始するため過去分(allPrevRequests)は考慮せず、当月内の件数のみをベースにする
+      staffWorkDays[sId] = new Set(works);
       staffCurrentWorkCount[sId] = works.length;
+      
       const currentHolidays = works.filter((dStr: string) => holidays.includes(dStr)).length;
       staffHolidayWorkCount[sId] = currentHolidays;
     });
@@ -249,23 +247,18 @@ export default async function handler(req: any, res: any) {
     const holidayQueue = (staffList || [])
       .filter((s: any) => {
         const isAssistant = s.profession === '助手' || s.placement === '助手';
-        const isHomeVisit = s.placement === '訪問';
         const isUnavailable = s.status === '長期休暇' || s.status === '入職前';
         const isNoHolidayValue = s.noHoliday ?? s.no_holiday;
         const isNoHoliday = isNoHolidayValue === true || isNoHolidayValue === 'true' || isNoHolidayValue === 1 || isNoHolidayValue === '1';
-        return !isAssistant && !isHomeVisit && !isUnavailable && !isNoHoliday;
+        return !isAssistant && !isUnavailable && !isNoHoliday;
       })
       .sort((a: any, b: any) => {
-        const aId = String(a.id || a.name);
-        const bId = String(b.id || b.name);
-        // 休日出勤数が少ないスタッフを優先
-        const diff = (staffHolidayWorkCount[aId] || 0) - (staffHolidayWorkCount[bId] || 0);
-        if (diff !== 0) return diff;
-        // 同数の場合はランダム性を持たせる（または優先順位リスト）
         const pA = PREFERRED_ORDER.indexOf(normalize(a.name));
         const pB = PREFERRED_ORDER.indexOf(normalize(b.name));
-        return (pA === -1 ? 99 : pA) - (pB === -1 ? 99 : pB);
+        return (pA === -1 ? 999 : pA) - (pB === -1 ? 999 : pB);
       });
+
+    console.log(`DEBUG: Holiday candidate names: ${holidayQueue.map(s => s.name).join(', ')}`);
 
     // 1. 休日（土日祝）の割り当て
     for (const dStr of holidays) {
@@ -275,7 +268,6 @@ export default async function handler(req: any, res: any) {
       const occupants = dailyOccupants.get(dStr) || 0;
       const remaining = config.limit - occupants;
 
-      // Conflict Group メンバがいずれも出勤していない場合は優先的に割り当てる
       const currentWorkers = new Set(
         allCurrentRequests
           .filter((r: any) => r.date === dStr && isWorkingType(r.type))
@@ -288,73 +280,24 @@ export default async function handler(req: any, res: any) {
       });
 
       for (let i = 0; i < remaining; i++) {
-        // 動的に優先度を再計算（出勤数が少ないスタッフを前に）
-        holidayQueue.sort((a, b) => {
-          const aId = String(a.id || a.name);
-          const bId = String(b.id || b.name);
-          const diff = (staffHolidayWorkCount[aId] || 0) - (staffHolidayWorkCount[bId] || 0);
-          if (diff !== 0) return diff;
-          const pA = PREFERRED_ORDER.indexOf(normalize(a.name));
-          const pB = PREFERRED_ORDER.indexOf(normalize(b.name));
-          return (pA === -1 ? 99 : pA) - (pB === -1 ? 99 : pB);
-        });
-
         let chosenIdx = -1;
 
-        // 0次検索: 特定の組合せ（久保田・佐久間など）が全員休みにならないように優先割り当て
-        for (const group of CONFLICT_GROUPS) {
-          const normalizedGroup = group.map(normalize);
-          const anyoneWorking = normalizedGroup.some(name => currentWorkers.has(name));
-          
-          if (!anyoneWorking) {
-            // このグループの誰かを出勤させたい
-            for (let q = 0; q < holidayQueue.length; q++) {
-              const s = holidayQueue[q];
-              const sName = normalize(s.name);
-              if (!normalizedGroup.includes(sName)) continue;
-
-              const sId = String(s.id || s.name);
-              const isAssistant = s.profession === '助手' || s.placement === '助手';
-              const isHomeVisit = s.placement === '訪問';
-              const isUnavailable = s.status === '長期休暇' || s.status === '入職前';
-              const isNoHolidayValue = s.noHoliday ?? s.no_holiday;
-              const isNoHoliday = isNoHolidayValue === true || isNoHolidayValue === 'true' || isNoHolidayValue === 1 || isNoHolidayValue === '1';
-
-              if (isAssistant || isHomeVisit || isUnavailable || isNoHoliday) continue;
-
-              const alreadyAssigned = staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
-              const isOff = allCurrentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type));
-
-              if (alreadyAssigned || isOff) continue;
-              if (wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5)) continue;
-
-              chosenIdx = q;
-              break;
-            }
-          }
-          if (chosenIdx !== -1) break;
-        }
-
-        // 1次検索: 同週連続・2週連続ともに避ける
-        if (chosenIdx === -1) {
-          for (let q = 0; q < holidayQueue.length; q++) {
+        // 1次検索: 同週連続・2週連続・5日連続すべてを避ける (最優先の制約遵守)
+        for (let q = 0; q < holidayQueue.length; q++) {
           const s = holidayQueue[q];
           const sId = String(s.id || s.name);
           const sName = normalize(s.name);
-
-          const isAssistant = s.profession === '助手' || s.placement === '助手';
-          const isHomeVisit = s.placement === '訪問';
-          const isUnavailable = s.status === '長期休暇' || s.status === '入職前';
-          const isNoHolidayValue = s.noHoliday ?? s.no_holiday;
-          const isNoHoliday = isNoHolidayValue === true || isNoHolidayValue === 'true' || isNoHolidayValue === 1 || isNoHolidayValue === '1';
-
-          if (isAssistant || isHomeVisit || isUnavailable || isNoHoliday) continue;
-
           const alreadyAssigned = staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
           const isOff = allCurrentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type));
 
-          if (alreadyAssigned || isOff) continue;
-          if (wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5)) continue;
+          if (alreadyAssigned || isOff) {
+            console.log(`LOG [Skip 1]: ${s.name} is already ${alreadyAssigned ? 'assigned' : 'off'} on ${dStr}`);
+            continue;
+          }
+          if (wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5)) {
+            console.log(`LOG [Skip 1]: ${s.name} would exceed consecutive limit on ${dStr}`);
+            continue;
+          }
 
           const { hasAdjacent, workedSameDayLastWeek } = getHolidayPenaltyInfo(sId, sName, dStr);
           if (hasAdjacent || workedSameDayLastWeek) continue;
@@ -362,27 +305,52 @@ export default async function handler(req: any, res: any) {
           chosenIdx = q;
           break;
         }
-      }
 
-      // 2次検索: 2週連続は許容するが同週連続は避ける
-      if (chosenIdx === -1) {
-        for (let q = 0; q < holidayQueue.length; q++) {
+        // 2次検索: 2週連続は許容するが、同週連続と5日連続は避ける
+        if (chosenIdx === -1) {
+          for (let q = 0; q < holidayQueue.length; q++) {
             const s = holidayQueue[q];
             const sId = String(s.id || s.name);
             const sName = normalize(s.name);
-            if (s.profession === '助手' || s.placement === '助手' || s.placement === '訪問' || s.status === '長期休暇' || s.status === '入職前') continue;
-            const isNoHolidayValue = s.noHoliday ?? s.no_holiday;
-            const isNoHoliday = isNoHolidayValue === true || isNoHolidayValue === 'true' || isNoHolidayValue === 1 || isNoHolidayValue === '1';
-            if (isNoHoliday) continue;
+            const alreadyAssigned = staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
+            const isOff = allCurrentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type));
 
-            if (staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr)) continue;
-            if (allCurrentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type))) continue;
+            if (alreadyAssigned || isOff) continue;
             if (wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5)) continue;
 
-            const { hasAdjacent, workedSameDayLastWeek } = getHolidayPenaltyInfo(sId, sName, dStr);
+            const { hasAdjacent } = getHolidayPenaltyInfo(sId, sName, dStr);
             if (hasAdjacent && holidayQueue.length > 5) continue;
-            if (workedSameDayLastWeek && holidayQueue.length > 8) continue;
 
+            chosenIdx = q;
+            break;
+          }
+        }
+
+        // 3次検索: 5日連続を避けつつ、他の制約は無視して順番を優先
+        if (chosenIdx === -1) {
+          for (let q = 0; q < holidayQueue.length; q++) {
+            const s = holidayQueue[q];
+            const sId = String(s.id || s.name);
+            const sName = normalize(s.name);
+            const alreadyAssigned = staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr);
+            const isOff = allCurrentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type));
+            
+            if (alreadyAssigned || isOff) continue;
+            if (wouldExceedConsecutive(dStr, staffWorkDays[sId] || new Set(), 5)) continue;
+
+            chosenIdx = q;
+            break;
+          }
+        }
+
+        // 最終手段: 5日連続すら無視して、休みでない人を順番に割り当て
+        if (chosenIdx === -1) {
+          for (let q = 0; q < holidayQueue.length; q++) {
+            const s = holidayQueue[q];
+            const sId = String(s.id || s.name);
+            const sName = normalize(s.name);
+            if (staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => (String(a.staffId) === sId || normalize(a.staffName) === sName) && a.date === dStr)) continue;
+            if (allCurrentRequests.some((r: any) => (String(r.staffId) === sId || normalize(r.staffName) === sName) && r.date === dStr && !isWorkingType(r.type))) continue;
             chosenIdx = q;
             break;
           }
@@ -390,12 +358,12 @@ export default async function handler(req: any, res: any) {
 
         if (chosenIdx !== -1) {
           const chosen = holidayQueue[chosenIdx];
-          // Round-robinのローテーション（同数の場合のタイブレーカーとして機能）
           holidayQueue.splice(chosenIdx, 1);
           holidayQueue.push(chosen);
 
           const cId = String(chosen.id || chosen.name);
           const cKey = normalize(chosen.name);
+          console.log(`DEBUG: Assigning ${chosen.name} to ${dStr}`);
           autoAssigned.push({ staffId: cId, staffName: chosen.name, date: dStr, type: '出勤', details: { note: '自動割当(休日)' } });
           currentWorkers.add(cKey);
           if (!staffWorkDays[cId]) staffWorkDays[cId] = new Set();
