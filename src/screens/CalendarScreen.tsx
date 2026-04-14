@@ -43,13 +43,17 @@ interface CalendarScreenProps {
   onDeleteRequest: (id: string) => void;
   onDeleteRequests?: (ids: string[]) => void;
   approveRequest?: (id: string, status: string) => void;
+  onForceSave?: () => Promise<void>;
+  onForceFetch?: () => Promise<void>;
+  isSyncing?: boolean;
 }
 
 export const CalendarScreen: React.FC<CalendarScreenProps> = ({ 
   requests, setRequests, weekdayLimit, holidayLimit, 
   saturdayLimit, sundayLimit, publicHolidayLimit,
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,
-  currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest
+  currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest,
+  onForceSave, onForceFetch, isSyncing = false
 }) => {
   const [selectedDate, setSelectedDate] = useState(currentDate || new Date());
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
@@ -386,23 +390,71 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     <SafeAreaView style={styles.container}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 160 }} showsVerticalScrollIndicator={true}>
         <View style={styles.header}>
-        <ThemeText variant="h1">カレンダー</ThemeText>
-        <ThemeText variant="caption">シフト・稼働予定の確認</ThemeText>
-      </View>
-
-      <ThemeCard style={styles.calendarContainer}>
-        <View style={styles.monthHeader}>
-          <TouchableOpacity onPress={() => currentDate && setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}>
-            <ChevronLeft color={COLORS.text} size={24} />
-          </TouchableOpacity>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <ThemeText style={{ fontSize: 24 }}>{getSeasonalTheme(currentDate?.getMonth() || 0).icon}</ThemeText>
-            <ThemeText variant="h2">{currentDate?.getFullYear() || 2026}年 {(currentDate?.getMonth() || 0) + 1}月</ThemeText>
-          </View>
-          <TouchableOpacity onPress={() => currentDate && setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}>
-            <ChevronRight color={COLORS.text} size={24} />
-          </TouchableOpacity>
+          <ThemeText variant="h1">カレンダー</ThemeText>
+          <ThemeText variant="caption">シフト・稼働予定の確認</ThemeText>
         </View>
+
+        <ThemeCard style={styles.calendarContainer}>
+          <View style={styles.monthHeader}>
+            <TouchableOpacity onPress={() => currentDate && setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}>
+              <ChevronLeft color={COLORS.text} size={24} />
+            </TouchableOpacity>
+            
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <ThemeText style={{ fontSize: 24 }}>{getSeasonalTheme(currentDate?.getMonth() || 0).icon}</ThemeText>
+                <ThemeText variant="h2">{currentDate?.getFullYear() || 2026}年 {(currentDate?.getMonth() || 0) + 1}月</ThemeText>
+              </View>
+
+              {/* シフト管理者向けの同期ボタン - スマホ・PC両対応レイアウト */}
+              {isPrivileged && (
+                <View style={[styles.syncContainer, { marginTop: 12 }]}>
+                  <TouchableOpacity 
+                    style={[
+                      styles.syncBtn, 
+                      { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 16 },
+                      isSyncing && { opacity: 0.5 }
+                    ]}
+                    disabled={isSyncing}
+                    onPress={() => {
+                      Alert.alert(
+                        'クラウドに保存',
+                        '現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？',
+                        [{ text: 'キャンセル', style: 'cancel' }, { text: '保存する', onPress: onForceSave }]
+                      );
+                    }}
+                  >
+                    <ThemeText variant="caption" color={COLORS.primary} bold>
+                      {isSyncing ? '保存中...' : 'クラウドに保存'}
+                    </ThemeText>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[
+                      styles.syncBtn, 
+                      { borderColor: COLORS.textSecondary, backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingHorizontal: 16 },
+                      isSyncing && { opacity: 0.5 }
+                    ]}
+                    disabled={isSyncing}
+                    onPress={() => {
+                      Alert.alert(
+                        'クラウドから更新',
+                        'クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？',
+                        [{ text: 'キャンセル', style: 'cancel' }, { text: '更新する', onPress: onForceFetch }]
+                      );
+                    }}
+                  >
+                    <ThemeText variant="caption" color={COLORS.textSecondary} bold>
+                      {isSyncing ? '読み込み中...' : 'クラウドから更新'}
+                    </ThemeText>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            <TouchableOpacity onPress={() => currentDate && setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}>
+              <ChevronRight color={COLORS.text} size={24} />
+            </TouchableOpacity>
+          </View>
 
         <View style={styles.weekDays}>
           {['日', '月', '火', '水', '木', '金', '土'].map((d, i) => (
@@ -643,7 +695,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: { padding: SPACING.md, marginTop: SPACING.md },
   calendarContainer: { margin: SPACING.md, padding: SPACING.md },
-  monthHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.lg },
+  monthHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.lg, flexWrap: 'wrap', gap: 10 },
+  syncContainer: { flexDirection: 'row', gap: 12, marginVertical: 4 },
   weekDays: { flexDirection: 'row', marginBottom: SPACING.sm },
   weekDayText: { flex: 1, textAlign: 'center', color: COLORS.textSecondary },
   calendarGrid: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)' },
@@ -680,4 +733,5 @@ const styles = StyleSheet.create({
   finishBtn: { backgroundColor: COLORS.primary, height: 54, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4, zIndex: 20 },
   badgeTiny: { paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 4, marginLeft: 6, marginBottom: 1 },
   badgeTinyText: { color: 'white', fontSize: 9.5, fontWeight: 'bold' },
+  syncBtn: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8, borderWidth: 1, backgroundColor: 'rgba(255,255,255,0.02)' },
 });

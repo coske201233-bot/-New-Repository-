@@ -408,6 +408,46 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               </View>
             </View>
           ) : null}
+          {isAdminAuthenticated && (
+            <View style={{ marginTop: 24, paddingBottom: 20 }}>
+              <ThemeText bold style={{ color: COLORS.primary, marginBottom: 12 }}>🔄 【管理者用】クラウド完全同期</ThemeText>
+              <ThemeCard style={{ padding: 16 }}>
+                <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginBottom: 16 }}>
+                  PCで修正したスケジュールを確実にスマホへ反映させるための機能です。
+                </ThemeText>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <TouchableOpacity 
+                    style={[styles.syncFullBtn, { backgroundColor: COLORS.primary }]}
+                    onPress={() => {
+                      Alert.alert(
+                        'クラウドに保存',
+                        '現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？',
+                        [{ text: 'キャンセル', style: 'cancel' }, { text: '保存する', onPress: onForceSave }]
+                      );
+                    }}
+                  >
+                    <Save size={18} color="white" />
+                    <ThemeText bold color="white" style={{ marginLeft: 8 }}>クラウドに保存</ThemeText>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={[styles.syncFullBtn, { backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: COLORS.border }]}
+                    onPress={() => {
+                      Alert.alert(
+                        'クラウドから更新',
+                        'クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？',
+                        [{ text: 'キャンセル', style: 'cancel' }, { text: '更新する', onPress: onForceFetch }]
+                      );
+                    }}
+                  >
+                    <Clock size={18} color={COLORS.text} />
+                    <ThemeText bold color={COLORS.text} style={{ marginLeft: 8 }}>クラウドから更新</ThemeText>
+                  </TouchableOpacity>
+                </View>
+              </ThemeCard>
+            </View>
+          )}
+
           <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}><LogOut size={20} color="#ef4444" /><ThemeText bold color="#ef4444" style={{ marginLeft: 10 }}>アプリからログアウト</ThemeText></TouchableOpacity>
         </View>
       </ScrollView>
@@ -442,6 +482,7 @@ const styles = StyleSheet.create({
   cancelBtn: { flex: 1, height: 52, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
   confirmBtn: { flex: 1, height: 52, borderRadius: 12, backgroundColor: '#38bdf8', justifyContent: 'center', alignItems: 'center' },
   pickerContainer: { width: '85%', maxHeight: '70%', backgroundColor: '#0f172a', borderRadius: 24, padding: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  syncFullBtn: { flex: 1, height: 52, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   pickerItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.02)' },
   pickerItemActive: { backgroundColor: 'rgba(56, 189, 248, 0.05)' }

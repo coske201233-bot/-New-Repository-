@@ -168,6 +168,50 @@ export const cloudStorage = {
     }
   },
 
+  /**
+   * 特定の月のリクエストを物理削除、またはステータス変更でクリアします
+   * ゾンビデータの完全排除のために物理削除を優先します
+   */
+  async clearRequestsForMonth(monthPrefix: string) {
+    console.log(`Clearing global requests for: ${monthPrefix}`);
+    const { error } = await supabase
+      .from('requests')
+      .delete()
+      .like('date', `${monthPrefix}%`);
+    
+    if (error) {
+      console.error('Clear requests error:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 現在の全リクエストをクラウドに強制保存します（Source of Truth の確立）
+   */
+  async forceStoreRequests(requests: any[]) {
+    // チャンクに分けてアップロード（大量データ対策）
+    const chunkSize = 100;
+    for (let i = 0; i < requests.length; i += chunkSize) {
+      const chunk = requests.slice(i, i + chunkSize).map(r => {
+        const obj: any = {};
+        const validKeys = ['id', 'staffName', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
+        const details = { ...(r.details || {}) };
+        if (r.updatedAt) details.updatedAt = r.updatedAt;
+        if (r.isManual !== undefined) details.isManual = r.isManual;
+        if (r.hours !== undefined) details.hours = r.hours;
+        if (r.locked !== undefined) details.locked = r.locked;
+        
+        const payload = { ...r, details };
+        validKeys.forEach(k => { if (payload[k] !== undefined) obj[k] = payload[k]; });
+        return mapToSql(obj, REQ_MAP);
+      });
+
+      const { error } = await supabase.from('requests').upsert(chunk, { onConflict: 'id' });
+      if (error) throw error;
+    }
+    console.log(`Force stored ${requests.length} requests to cloud.`);
+  },
+
   // --- Realtime ---
   subscribeToChanges(callback: () => void) {
     const channel = supabase

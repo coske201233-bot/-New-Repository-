@@ -63,7 +63,8 @@ const deduplicateRequests = (list: any[]) => {
     }
 
     // 休暇・振替系タイプ判定 (部分一致も許容)
-    const leaveTypes = ['年休', '有給', '時間', '振替', '公休', '夏季', '特休', '休暇', '欠勤', '休'];
+    // 「公休」は出勤枠に近い扱い（休日・休暇セクションに表示されるが、シフトと同様に管理される）のため、ここでは手動データとしてマークする
+    const leaveTypes = ['年休', '有給', '時間', '振替', '夏季', '特休', '休暇', '欠勤', '休'];
     if (leaveTypes.some(lt => type.includes(lt))) return true;
     
     const h = i.hours ?? i.details?.duration ?? i.duration;
@@ -194,7 +195,7 @@ export default function App() {
     const staffMap = new Map();
     staffs.forEach(s => staffMap.set(normalizeName(s.name), s));
 
-    const workingTerms = ['出勤', '日勤', '勤務', '通常', '午前休', '午後休', '午前振替', '午後振替', '時間休', '特休', '看護休暇'];
+    const workingTerms = ['出勤', '日勤', '勤務', '通常', '公休', '午前休', '午後休', '午前振替', '午後振替', '時間休', '特休', '看護休暇'];
     const isWorking = (type: string) => workingTerms.some(t => type?.includes(t));
 
     // 1. 休日リミットチェック
@@ -766,6 +767,44 @@ export default function App() {
     }
   };
 
+  const handleForceSave = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      const year = activeDate.getFullYear();
+      const month = activeDate.getMonth() + 1;
+      const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+      
+      await cloudStorage.clearRequestsForMonth(monthPrefix);
+      await cloudStorage.forceStoreRequests(requests);
+      
+      Alert.alert('✅ 完了', 'クラウドへの保存が完了しました。他の端末で「更新」するとこの内容が反映されます。');
+    } catch (e) {
+      console.error('Force save failed:', e);
+      Alert.alert('❌ 保存失敗', 'データの保存に失敗しました。通信環境をご確認ください。');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleForceFetch = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      const cloudRequests = await cloudStorage.fetchRequests();
+      if (cloudRequests) {
+        setRequests(cloudRequests);
+        await saveData(STORAGE_KEYS.REQUESTS, cloudRequests);
+        Alert.alert('✅ 完了', 'クラウドから最新のデータを読み込みました。');
+      }
+    } catch (e) {
+      console.error('Force fetch failed:', e);
+      Alert.alert('❌ 更新失敗', 'データの取得に失敗しました。');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const renderContent = () => {
     const commonProps = {
       staffList, setStaffList: handleUpdateStaffList,
@@ -790,6 +829,9 @@ export default function App() {
       onAutoAssign: handleAutoAssign,
       onUndoAutoAssign: handleUndoAutoAssign,
       canUndoAutoAssign: requestsHistory.length > 0,
+      onForceSave: handleForceSave,
+      onForceFetch: handleForceFetch,
+      isSyncing,
       staffLocks,
         setStaffLocks: async (newLocks: any) => {
           setStaffLocks(newLocks);
