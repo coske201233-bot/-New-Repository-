@@ -137,84 +137,20 @@ export default function App() {
   const [publicHolidayLimit, setPublicHolidayLimit] = useState(2);
   const [monthlyLimits, setMonthlyLimits] = useState<Record<string, { weekday: number, sat: number, sun: number, pub: number }>>({});
   const [adminPassword, setAdminPassword] = useState('1114');
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-  const [staffViewMode, setStaffViewMode] = useState(false);
-  const [sessionDuration, setSessionDuration] = useState(24); // Hours
-  const [isInitialized, setIsInitialized] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<any[]>([]);
+
 
   // スケジュール整合性チェック
   const validateSchedule = (reqs: any[], staffs: any[], lims: any) => {
     const errors: any[] = [];
-    const staffMap = new Map();
-    staffs.forEach(s => staffMap.set(normalizeName(s.name), s));
-
-    const workingTerms = ['出勤', '日勤', '勤務', '通常', '公休', '午前休', '午後休', '午前振替', '午後振替', '時間休', '特休', '看護休暇'];
-    const isWorking = (type: string) => workingTerms.some(t => type?.includes(t));
-
-    // 1. 休日リミットチェック
-    const holidayCounts: { [date: string]: string[] } = {};
-    reqs.forEach(r => {
-      if (r.status === 'deleted') return;
-      const d = new Date(r.date.replace(/-/g, '/'));
-      const isHol = d.getDay() === 0 || d.getDay() === 6; // 土日
-      // 祝日判定（本当はJAPAN_HOLIDAYSが必要だがアプリ全体の挙動に合わせる）
-      if (isHol && isWorking(r.type)) {
-        holidayCounts[r.date] = holidayCounts[r.date] || [];
-        holidayCounts[r.date].push(r.staffName);
-      }
-    });
-
-    Object.entries(holidayCounts).forEach(([date, names]) => {
-      const d = new Date(date.replace(/-/g, '/'));
-      const dow = d.getDay();
-      const limit = dow === 0 ? (lims.sun || 2) : (lims.sat || 2);
-      if (names.length > limit) {
-        errors.push({ type: 'limit', date, message: `${date} の出勤者が ${names.length}名 で上限(${limit}名)を超えています [${names.join(', ')}]` });
-      }
-    });
-
-    // 2. 連勤チェック (Max 5)
-    const staffHistory: { [name: string]: any[] } = {};
-    reqs.forEach(r => {
-      if (r.status === 'deleted') return;
-      const name = normalizeName(r.staffName);
-      staffHistory[name] = staffHistory[name] || [];
-      staffHistory[name].push({ date: r.date, working: isWorking(r.type) });
-    });
-
-    Object.entries(staffHistory).forEach(([name, history]) => {
-      history.sort((a, b) => a.date.localeCompare(b.date));
-      let streak = 0;
-      let lastDate: Date | null = null;
-      history.forEach(h => {
-        const currentDate = new Date(h.date.replace(/-/g, '/'));
-        if (h.working) {
-          if (lastDate && (currentDate.getTime() - lastDate.getTime()) / 86400000 === 1) streak++;
-          else streak = 1;
-          if (streak > 5) {
-            const staff = staffMap.get(name);
-            errors.push({ type: 'streak', staffName: staff?.name || name, date: h.date, streak, message: `${staff?.name || name} さんが ${h.date} 時点で ${streak}連勤 になっています` });
-          }
-          lastDate = currentDate;
-        } else {
-          streak = 0;
-          lastDate = currentDate;
-        }
-      });
-    });
-
-    setValidationErrors(errors);
-  };
   const [activeDate, setActiveDate] = useState(new Date());
   const [requestsHistory, setRequestsHistory] = useState<any[][]>([]);
   const [staffLocks, setStaffLocks] = useState<Record<string, Record<string, boolean>>>({});
 
-  // 変更があるたびにルール検証を実行
+  // 変更があるたびにルール検証を実行(機能削除により空とする)
   useEffect(() => {
-    validateSchedule(requests, staffList, { sat: saturdayLimit, sun: sundayLimit });
   }, [requests, staffList, saturdayLimit, sundayLimit]);
+
 
   // Initial Load (Cloud Sync Integrated)
   useEffect(() => {
@@ -717,7 +653,10 @@ export default function App() {
   };
 
   const handleForceSave = async () => {
-    if (isSyncing) return;
+    if (isSyncing) {
+      if (Platform.OS !== 'web') Alert.alert('同期中', 'バックグラウンドの通信が完了するまで数秒お待ちください。');
+      return;
+    }
     setIsSyncing(true);
     try {
       const year = activeDate.getFullYear();
@@ -727,32 +666,52 @@ export default function App() {
       await cloudStorage.clearRequestsForMonth(monthPrefix);
       await cloudStorage.forceStoreRequests(requests);
       
-      Alert.alert('✅ 完了', 'クラウドへの保存が完了しました。他の端末で「更新」するとこの内容が反映されます。');
+      if (Platform.OS === 'web') {
+        window.alert('クラウドへの保存が完了しました。他の端末で「更新」するとこの内容が反映されます。');
+      } else {
+        Alert.alert('✅ 完了', 'クラウドへの保存が完了しました。他の端末で「更新」するとこの内容が反映されます。');
+      }
     } catch (e) {
       console.error('Force save failed:', e);
-      Alert.alert('❌ 保存失敗', 'データの保存に失敗しました。通信環境をご確認ください。');
+      if (Platform.OS === 'web') {
+        window.alert('機能エラー: データの保存に失敗しました。');
+      } else {
+        Alert.alert('❌ 保存失敗', 'データの保存に失敗しました。通信環境をご確認ください。');
+      }
     } finally {
       setIsSyncing(false);
     }
   };
 
   const handleForceFetch = async () => {
-    if (isSyncing) return;
+    if (isSyncing) {
+      if (Platform.OS !== 'web') Alert.alert('同期中', 'バックグラウンドの通信が完了するまで数秒お待ちください。');
+      return;
+    }
     setIsSyncing(true);
     try {
       const cloudRequests = await cloudStorage.fetchRequests();
       if (cloudRequests) {
         setRequests(cloudRequests);
         await saveData(STORAGE_KEYS.REQUESTS, cloudRequests);
-        Alert.alert('✅ 完了', 'クラウドから最新のデータを読み込みました。');
+        if (Platform.OS === 'web') {
+          window.alert('クラウドから最新のデータを読み込みました。');
+        } else {
+          Alert.alert('✅ 完了', 'クラウドから最新のデータを読み込みました。');
+        }
       }
     } catch (e) {
       console.error('Force fetch failed:', e);
-      Alert.alert('❌ 更新失敗', 'データの取得に失敗しました。');
+      if (Platform.OS === 'web') {
+        window.alert('データの取得に失敗しました。');
+      } else {
+        Alert.alert('❌ 更新失敗', 'データの取得に失敗しました。');
+      }
     } finally {
       setIsSyncing(false);
     }
   };
+
 
   const renderContent = () => {
     const commonProps = {
@@ -781,12 +740,11 @@ export default function App() {
       onForceSave: handleForceSave,
       onForceFetch: handleForceFetch,
       isSyncing,
-      staffLocks,
+        staffLocks,
         setStaffLocks: async (newLocks: any) => {
           setStaffLocks(newLocks);
           await cloudStorage.saveConfig('staff_locks', newLocks).catch(console.error);
-        },
-        validationErrors
+        }
       };
 
     switch (currentTab) {

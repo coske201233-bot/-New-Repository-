@@ -30,14 +30,14 @@ interface AdminScreenProps {
   canUndoAutoAssign: boolean;
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
-  validationErrors?: any[];
+  requests: any[];
+  setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
-  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
-  validationErrors = []
+  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests
 }) => {
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
   const [adminAuthInput, setAdminAuthInput] = useState('');
@@ -264,19 +264,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 <TouchableOpacity onPress={() => setIsAdminAuthenticated(false)}><ThemeText color="#ef4444" style={{ fontSize: 12 }}>解除</ThemeText></TouchableOpacity>
               </View>
               
-              {validationErrors.length > 0 && (
-                <ThemeCard style={{ marginBottom: 16, borderLeftWidth: 4, borderLeftColor: '#ef4444', padding: 12 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                    <Shield size={18} color="#ef4444" style={{ marginRight: 6 }} />
-                    <ThemeText bold color="#ef4444">スケジュール警告 ({validationErrors.length}件)</ThemeText>
-                  </View>
-                  {validationErrors.map((err: any, idx: number) => (
-                    <View key={idx} style={{ marginBottom: 6 }}>
-                      <ThemeText variant="caption" color="#ef4444">• {err.message}</ThemeText>
-                    </View>
-                  ))}
-                </ThemeCard>
-              )}
+              {/* Removed validationErrors warning block per user request */}
 
               <ThemeText bold style={{ color: '#ef4444', marginBottom: 12, marginTop: 12 }}>🔔 承認が必要な申請</ThemeText>
               
@@ -419,11 +407,15 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   <TouchableOpacity 
                     style={[styles.syncFullBtn, { backgroundColor: COLORS.primary }]}
                     onPress={() => {
-                      Alert.alert(
-                        'クラウドに保存',
-                        '現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？',
-                        [{ text: 'キャンセル', style: 'cancel' }, { text: '保存する', onPress: onForceSave }]
-                      );
+                      if (Platform.OS === 'web') {
+                        if (window.confirm('現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？')) onForceSave();
+                      } else {
+                        Alert.alert(
+                          'クラウドに保存',
+                          '現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？',
+                          [{ text: 'キャンセル', style: 'cancel' }, { text: '保存する', onPress: onForceSave }]
+                        );
+                      }
                     }}
                   >
                     <Save size={18} color="white" />
@@ -433,11 +425,15 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   <TouchableOpacity 
                     style={[styles.syncFullBtn, { backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: COLORS.border }]}
                     onPress={() => {
-                      Alert.alert(
-                        'クラウドから更新',
-                        'クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？',
-                        [{ text: 'キャンセル', style: 'cancel' }, { text: '更新する', onPress: onForceFetch }]
-                      );
+                      if (Platform.OS === 'web') {
+                        if (window.confirm('クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？')) onForceFetch();
+                      } else {
+                        Alert.alert(
+                          'クラウドから更新',
+                          'クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？',
+                          [{ text: 'キャンセル', style: 'cancel' }, { text: '更新する', onPress: onForceFetch }]
+                        );
+                      }
                     }}
                   >
                     <Clock size={18} color={COLORS.text} />

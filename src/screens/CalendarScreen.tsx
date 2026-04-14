@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Alert } from 'react-native';
+import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Alert, Platform } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
@@ -8,6 +8,9 @@ import { getDayType, formatDate, getDateStr, normalizeName } from '../utils/date
 import { cloudStorage } from '../utils/cloudStorage';
 
 const getSeasonalTheme = (month: number) => {
+// ... preserving existing logic ...
+// (Wait, replace_file_content replaces lines. Let me just replace the exact imports and button blocks, or do it in multiple chunks).
+
   const themes: Record<number, { icon: string, color: string }> = {
     0: { icon: '🎍', color: '#be123c' }, // Jan
     1: { icon: '❄️', color: '#0ea5e9' }, // Feb
@@ -417,15 +420,19 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       ]}
                       disabled={isSyncing}
                       onPress={() => {
-                        Alert.alert(
-                          'クラウドに保存',
-                          '現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？',
-                          [{ text: 'キャンセル', style: 'cancel' }, { text: '保存する', onPress: onForceSave }]
-                        );
+                        if (Platform.OS === 'web') {
+                          if (window.confirm('現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？')) onForceSave();
+                        } else {
+                          Alert.alert(
+                            'クラウドに保存',
+                            '現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？',
+                            [{ text: 'キャンセル', style: 'cancel' }, { text: '保存する', onPress: onForceSave }]
+                          );
+                        }
                       }}
                     >
                       <ThemeText variant="caption" color={COLORS.primary} bold>
-                        {isSyncing ? '保存中...' : 'クラウドに保存'}
+                        {isSyncing ? '処理中...' : 'クラウドに保存'}
                       </ThemeText>
                     </TouchableOpacity>
                   )}
@@ -439,19 +446,24 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                       ]}
                       disabled={isSyncing}
                       onPress={() => {
-                        Alert.alert(
-                          'クラウドから更新',
-                          'クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？',
-                          [{ text: 'キャンセル', style: 'cancel' }, { text: '更新する', onPress: onForceFetch }]
-                        );
+                        if (Platform.OS === 'web') {
+                          if (window.confirm('クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？')) onForceFetch();
+                        } else {
+                          Alert.alert(
+                            'クラウドから更新',
+                            'クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？',
+                            [{ text: 'キャンセル', style: 'cancel' }, { text: '更新する', onPress: onForceFetch }]
+                          );
+                        }
                       }}
                     >
                       <ThemeText variant="caption" color={COLORS.textSecondary} bold>
-                        {isSyncing ? '読み込み中...' : 'クラウドから更新'}
+                        {isSyncing ? '処理中...' : 'クラウドから更新'}
                       </ThemeText>
                     </TouchableOpacity>
                   )}
                 </View>
+
             </View>
 
             <TouchableOpacity onPress={() => currentDate && setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}>
