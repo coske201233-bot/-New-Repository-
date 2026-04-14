@@ -406,49 +406,52 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                 <ThemeText variant="h2">{currentDate?.getFullYear() || 2026}年 {(currentDate?.getMonth() || 0) + 1}月</ThemeText>
               </View>
 
-              {/* シフト管理者向けの同期ボタン - スマホ・PC両対応レイアウト */}
-              {isPrivileged && (
+              {/* 同期・更新ボタン - 全ユーザーが見られるが保存は管理者のみ */}
                 <View style={[styles.syncContainer, { marginTop: 12 }]}>
-                  <TouchableOpacity 
-                    style={[
-                      styles.syncBtn, 
-                      { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 16 },
-                      isSyncing && { opacity: 0.5 }
-                    ]}
-                    disabled={isSyncing}
-                    onPress={() => {
-                      Alert.alert(
-                        'クラウドに保存',
-                        '現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？',
-                        [{ text: 'キャンセル', style: 'cancel' }, { text: '保存する', onPress: onForceSave }]
-                      );
-                    }}
-                  >
-                    <ThemeText variant="caption" color={COLORS.primary} bold>
-                      {isSyncing ? '保存中...' : 'クラウドに保存'}
-                    </ThemeText>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[
-                      styles.syncBtn, 
-                      { borderColor: COLORS.textSecondary, backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingHorizontal: 16 },
-                      isSyncing && { opacity: 0.5 }
-                    ]}
-                    disabled={isSyncing}
-                    onPress={() => {
-                      Alert.alert(
-                        'クラウドから更新',
-                        'クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？',
-                        [{ text: 'キャンセル', style: 'cancel' }, { text: '更新する', onPress: onForceFetch }]
-                      );
-                    }}
-                  >
-                    <ThemeText variant="caption" color={COLORS.textSecondary} bold>
-                      {isSyncing ? '読み込み中...' : 'クラウドから更新'}
-                    </ThemeText>
-                  </TouchableOpacity>
+                  {isPrivileged && (
+                    <TouchableOpacity 
+                      style={[
+                        styles.syncBtn, 
+                        { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 16 },
+                        isSyncing && { opacity: 0.5 }
+                      ]}
+                      disabled={isSyncing}
+                      onPress={() => {
+                        Alert.alert(
+                          'クラウドに保存',
+                          '現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？',
+                          [{ text: 'キャンセル', style: 'cancel' }, { text: '保存する', onPress: onForceSave }]
+                        );
+                      }}
+                    >
+                      <ThemeText variant="caption" color={COLORS.primary} bold>
+                        {isSyncing ? '保存中...' : 'クラウドに保存'}
+                      </ThemeText>
+                    </TouchableOpacity>
+                  )}
+                  {/* 「更新」ボタンは一般スタッフにも開放し、スマホでの同期を容易にする */}
+                  {(isPrivileged || profile) && (
+                    <TouchableOpacity 
+                      style={[
+                        styles.syncBtn, 
+                        { borderColor: COLORS.textSecondary, backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingHorizontal: 16 },
+                        isSyncing && { opacity: 0.5 }
+                      ]}
+                      disabled={isSyncing}
+                      onPress={() => {
+                        Alert.alert(
+                          'クラウドから更新',
+                          'クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？',
+                          [{ text: 'キャンセル', style: 'cancel' }, { text: '更新する', onPress: onForceFetch }]
+                        );
+                      }}
+                    >
+                      <ThemeText variant="caption" color={COLORS.textSecondary} bold>
+                        {isSyncing ? '読み込み中...' : 'クラウドから更新'}
+                      </ThemeText>
+                    </TouchableOpacity>
+                  )}
                 </View>
-              )}
             </View>
 
             <TouchableOpacity onPress={() => currentDate && setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}>

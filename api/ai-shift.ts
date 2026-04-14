@@ -27,24 +27,25 @@ const isManualRecord = (r: any) => {
   const reason = String(r.reason || '').trim();
   const staffName = normalize(r.staff_name || r.staffName || '');
 
-  // 1. ID接頭辞による判定 (m-, manual- は手動)
-  if (idStr.startsWith('m-') || idStr.startsWith('manual-')) return true;
+  // 1. ID接頭辞による判定 (m-, manual-, off- は手動)
+  if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('off-')) return true;
 
   // 2. isManual / locked フラグの確認 (最優先)
-  // details (JSONB) 内にある場合とトップレベルにある場合の両方を考慮
   const isManualFlag = r.isManual === true || r.details?.isManual === true || r.is_manual === true;
   const isLockedFlag = r.locked === true || r.details?.locked === true;
   if (isManualFlag || isLockedFlag) return true;
 
-  // 3. 有給などの特定の型は常に手動扱い（自動割当では生成されないため）
+  // 3. 有給などの特定の型は常に手動扱い
   const leaveTypes = ['年休', '有給', '夏季', '休暇', '欠勤', '休業'];
   if (leaveTypes.some(lt => type.includes(lt))) return true;
 
-  // 4. 自動生成系IDであっても、人間が編集した形跡があれば手動扱い
+  // 4. 自動生成系IDであっても、種別が極めて例外的な場合や人間が編集した形跡があれば手動扱い
   const isAutoId = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-');
   if (isAutoId) {
+    // 振替系は基本的に人間が指定するもの
+    if (type.includes('振替')) return true;
+    
     // 備考や理由に「自動」以外の文字列が含まれていれば手動編集とみなす
-    // (自動割当時は "自動割当(平日)" などの文字列が入る)
     const hasHumanNote = note !== '' && !note.includes('自動');
     const hasHumanReason = reason !== '' && !reason.includes('自動');
     if (hasHumanNote || hasHumanReason) return true;
@@ -56,7 +57,6 @@ const isManualRecord = (r: any) => {
   // 5. 振替や公休は、自動生成でない（上のisAutoIdを通過した）限り手動扱い
   if (type.includes('振替') || type.includes('公休')) return true;
 
-  // デフォルトは安全のため手動扱い
   return true;
 };
 

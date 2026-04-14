@@ -24,7 +24,6 @@ import { getDateStr, toDateStr } from './src/utils/dateUtils';
 // Helper to ensure only one request per person per day, prioritizing manual edits
 const deduplicateRequests = (list: any[]) => {
   if (!Array.isArray(list)) return { cleanList: [], discardedIds: [] };
-  const map = new Map();
   const discardedIds: string[] = [];
   
   const getTime = (i: any) => {
@@ -34,117 +33,73 @@ const deduplicateRequests = (list: any[]) => {
 
   const isLocked = (i: any) => i?.details?.locked === true || i?.locked === true;
 
-  const isManual = (i: any) => {
-    if (!i) return false;
-    // ステータスが削除済みのものは手動・自動問わず除外対象
-    if (i.status === 'deleted' || i.status === 'removed') return false;
+  const isManual = (item: any) => {
+    if (!item) return false;
+    const idStr = String(item.id || '');
+    const note = String(item.details?.note || '');
+    const reason = String(item.reason || '');
 
-    const idStr = String(i.id || '');
-    // タイプ名や理由、備考をトリム（空白除去）して取得
-    const type = String(i.type || '').trim();
-    const reason = String(i.reason || '').trim();
-    const note = String(i.details?.note || '').trim();
-    
-    // 【最優先】ID接頭辞判定 (m- または manual- は確実に手動)
+    // 【最優先】手動系ID接頭辞
     if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('off-')) return true;
 
-    // 振替系は手動
-    if (type.includes('振替')) return true;
-    
-    // 確実なフラグ
-    if (i.isManual === true || i.isManual === 'true' || i.isManual === 1 || i.details?.isManual === true) return true;
-    
-    // システム生成判定 (auto- 等で始まり、かつ「自動」という言葉が含まれる場合のみ自動。それ以外は手動扱い)
+    // 自動系IDでも、内容が変更されていれば手動扱いとする
     if (idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-')) {
-      // 備考や理由に「自動」という言葉が含まれている場合は、たとえ手動フラグが立っていてもシステム生成とみなす（不整合防止）
-      if (reason.includes('自動') || note.includes('自動')) return false;
-      if (reason === '' && note === '') return false;
-      return true;
+      if (note !== '' && !note.includes('自動')) return true;
+      if (reason !== '' && !reason.includes('自動')) return true;
+      return false;
     }
 
-    // 休暇・振替系タイプ判定 (部分一致も許容)
-    // 「公休」は出勤枠に近い扱い（休日・休暇セクションに表示されるが、シフトと同様に管理される）のため、ここでは手動データとしてマークする
-    const leaveTypes = ['年休', '有給', '時間', '振替', '夏季', '特休', '休暇', '欠勤', '休'];
-    if (leaveTypes.some(lt => type.includes(lt))) return true;
-    
-    const h = i.hours ?? i.details?.duration ?? i.duration;
-    if (h !== undefined && h !== null && h !== 0 && h !== '0') return true;
-
-    if (/^\d+$/.test(idStr) && !type.includes('出勤')) return true;
-
-    return false;
+    return true; // その他は安全のため手動扱い
   };
 
+  const map = new Map();
   list.forEach(item => {
     if (!item || !item.staffName || !item.date) return;
-    // 削除済みステータスはスキップ
     if (item.status === 'deleted' || item.status === 'removed') {
       discardedIds.push(item.id);
       return;
     }
-    if (!item.id) item.id = `temp-${item.staffName}-${item.date}-${Date.now()}`;
     
-    // キーには「人-日」で一意にする（1日1件が基本だが、時間給などの併記は表示側でこなす）
-    // ※ここをタイプまで含めると、同じ日に別タイプの「自動」と「手動」が両方残ってしまうため。
-    // 手動と自動の競合をここで確実に解決する。
     const key = `${normalizeName(item.staffName)}-${item.date}`;
     const existing = map.get(key);
 
-    const isLockNew = isLocked(item);
-    const wasLockOld = existing ? isLocked(existing) : false;
+    if (!existing) {
+      map.set(key, item);
+      return;
+    }
 
+    const isLockNew = isLocked(item);
+    const wasLockOld = isLocked(existing);
     const isManNew = isManual(item);
-    const wasManOld = existing ? isManual(existing) : false;
+    const wasManOld = isManual(existing);
 
     let isPriority = false;
-    if (!existing) {
+
+    // 1. ロック優先
+    if (isLockNew && !wasLockOld) {
       isPriority = true;
-    } else {
-      // 最優先ルール: 新しいデータが m- (ユーザー直接入力) であれば、既存のロック等に関わらず採用
-      const isNewTrueManual = String(item.id || '').startsWith('m-');
-      const wasOldTrueManual = String(existing.id || '').startsWith('m-');
-      
-      if (isNewTrueManual && !wasOldTrueManual) {
+    } else if (!isLockNew && wasLockOld) {
+      isPriority = false;
+    } 
+    // 2. 手動優先
+    else if (isManNew && !wasManOld) {
+      isPriority = true;
+    } else if (!isManNew && wasManOld) {
+      isPriority = false;
+    } 
+    // 3. 更新時間優先
+    else {
+      const timeNew = getTime(item);
+      const timeOld = getTime(existing);
+      if (timeNew > timeOld) {
         isPriority = true;
-      } else if (!isNewTrueManual && wasOldTrueManual) {
-        isPriority = false;
-      } else {
-        // IDの接頭辞が同じ（両方 m- または両方それ以外）場合は、従来の優先順位（ロック > 手動 > 時間）
-        if (isLockNew && !wasLockOld) {
-          isPriority = true;
-        } else if (!isLockNew && wasLockOld) {
-          isPriority = false;
-        } else if (isManNew && !wasManOld) {
-          isPriority = true;
-        } else if (!isManNew && wasManOld) {
-          isPriority = false;
-        } else {
-          // それ以外は更新日時または承認ステータス優先
-          const timeNew = getTime(item);
-          const timeOld = getTime(existing);
-          if (timeNew > timeOld) {
-            isPriority = true;
-          } else if (timeNew === timeOld) {
-            isPriority = (item.status === 'approved' && existing.status !== 'approved');
-          }
-        }
+      } else if (timeNew === timeOld) {
+        isPriority = (item.status === 'approved' && existing.status !== 'approved');
       }
     }
 
     if (isPriority) {
-      // 自己修復機能: 優先されたデータ(特に m-) が時間給タイプなのに時間が 0 の場合、
-      // 適切なデフォルト値で補完する（前回の不整合データを引きずらないため）
-      if (item.id && String(item.id).startsWith('m-')) {
-        const h = item.hours ?? item.details?.hours ?? 0;
-        if (h === 0 || h === '0') {
-          if (['時間休', '特休', '看護休暇', '振替＋時間休'].includes(item.type)) {
-            item.hours = 1.0;
-            if (item.details) item.details.hours = 1.0;
-          }
-        }
-      }
-
-      if (existing && existing.id !== item.id) discardedIds.push(existing.id);
+      if (existing.id !== item.id) discardedIds.push(existing.id);
       map.set(key, item);
     } else {
       if (item.id !== existing.id) discardedIds.push(item.id);
@@ -333,12 +288,10 @@ export default function App() {
 
           const cloudRequests = await cloudStorage.fetchRequests();
           if (cloudRequests && cloudRequests.length > 0) {
-            const { cleanList, discardedIds } = deduplicateRequests([...(localRequests || []), ...cloudRequests]);
+            const { cleanList } = deduplicateRequests([...(localRequests || []), ...cloudRequests]);
             setRequests(cleanList);
             await saveData(STORAGE_KEYS.REQUESTS, cleanList);
-            if (discardedIds.length > 0) {
-              await cloudStorage.deleteRequests(discardedIds).catch(console.error);
-            }
+            // 最初期の「不要データの強制削除」は危険（端末間の競合でデータを消す恐れ）なため停止
           } else if (localRequests && localRequests.length > 0) {
             setRequests(localRequests);
           }
@@ -544,10 +497,6 @@ export default function App() {
 
       if (needsPush) {
         await cloudStorage.upsertRequests(cleanList).catch(console.error);
-      }
-
-      if (discardedIds.length > 0) {
-        await cloudStorage.deleteRequests(discardedIds).catch(console.error);
       }
       
       return true;
