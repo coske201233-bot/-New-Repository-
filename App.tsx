@@ -19,7 +19,7 @@ import { COLORS, SPACING } from './src/theme/theme';
 import { STORAGE_KEYS, saveData, loadData } from './src/utils/storage';
 import { cloudStorage } from './src/utils/cloudStorage';
 import { sortStaffByName, normalizeName } from './src/utils/staffUtils';
-import { getDateStr } from './src/utils/dateUtils';
+import { getDateStr, toDateStr } from './src/utils/dateUtils';
 
 // Helper to ensure only one request per person per day, prioritizing manual edits
 const deduplicateRequests = (list: any[]) => {
@@ -36,23 +36,27 @@ const deduplicateRequests = (list: any[]) => {
 
   const isManual = (i: any) => {
     if (!i) return false;
+    // ステータスが削除済みのものは手動・自動問わず除外対象
+    if (i.status === 'deleted' || i.status === 'removed') return false;
+
     const idStr = String(i.id || '');
     // タイプ名や理由、備考をトリム（空白除去）して取得
     const type = String(i.type || '').trim();
     const reason = String(i.reason || '').trim();
     const note = String(i.details?.note || '').trim();
     
-    // 【最優先】ID接頭辞判定
-    if (idStr.startsWith('m-') || idStr.startsWith('manual-')) return true;
+    // 【最優先】ID接頭辞判定 (m- または manual- は確実に手動)
+    if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('off-')) return true;
 
-    // 【追加：最優先】振替という文字があれば無条件で手動（自動生成されないタイプのため）
+    // 振替系は手動
     if (type.includes('振替')) return true;
     
     // 確実なフラグ
-    if (i.isManual === true || i.isManual === 'true' || i.isManual === 1) return true;
+    if (i.isManual === true || i.isManual === 'true' || i.isManual === 1 || i.details?.isManual === true) return true;
     
     // システム生成判定 (auto- 等で始まり、かつ「自動」という言葉が含まれる場合のみ自動。それ以外は手動扱い)
     if (idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-')) {
+      // 備考や理由に「自動」という言葉が含まれている場合は、たとえ手動フラグが立っていてもシステム生成とみなす（不整合防止）
       if (reason.includes('自動') || note.includes('自動')) return false;
       if (reason === '' && note === '') return false;
       return true;
@@ -67,11 +71,16 @@ const deduplicateRequests = (list: any[]) => {
 
     if (/^\d+$/.test(idStr) && !type.includes('出勤')) return true;
 
-    return i.details?.isManual === true;
+    return false;
   };
 
   list.forEach(item => {
     if (!item || !item.staffName || !item.date) return;
+    // 削除済みステータスはスキップ
+    if (item.status === 'deleted' || item.status === 'removed') {
+      discardedIds.push(item.id);
+      return;
+    }
     if (!item.id) item.id = `temp-${item.staffName}-${item.date}-${Date.now()}`;
     
     // キーには「人-日」で一意にする（1日1件が基本だが、時間給などの併記は表示側でこなす）
@@ -89,25 +98,51 @@ const deduplicateRequests = (list: any[]) => {
     let isPriority = false;
     if (!existing) {
       isPriority = true;
-    } else if (isLockNew && !wasLockOld) {
-      isPriority = true;
-    } else if (!isLockNew && wasLockOld) {
-      isPriority = false;
-    } else if (isManNew && !wasManOld) {
-      isPriority = true;
-    } else if (!isManNew && wasManOld) {
-      isPriority = false;
     } else {
-      const timeNew = getTime(item);
-      const timeOld = getTime(existing);
-      if (timeNew > timeOld) {
+      // 最優先ルール: 新しいデータが m- (ユーザー直接入力) であれば、既存のロック等に関わらず採用
+      const isNewTrueManual = String(item.id || '').startsWith('m-');
+      const wasOldTrueManual = String(existing.id || '').startsWith('m-');
+      
+      if (isNewTrueManual && !wasOldTrueManual) {
         isPriority = true;
-      } else if (timeNew === timeOld) {
-        isPriority = (item.status === 'approved' && existing.status !== 'approved');
+      } else if (!isNewTrueManual && wasOldTrueManual) {
+        isPriority = false;
+      } else {
+        // IDの接頭辞が同じ（両方 m- または両方それ以外）場合は、従来の優先順位（ロック > 手動 > 時間）
+        if (isLockNew && !wasLockOld) {
+          isPriority = true;
+        } else if (!isLockNew && wasLockOld) {
+          isPriority = false;
+        } else if (isManNew && !wasManOld) {
+          isPriority = true;
+        } else if (!isManNew && wasManOld) {
+          isPriority = false;
+        } else {
+          // それ以外は更新日時または承認ステータス優先
+          const timeNew = getTime(item);
+          const timeOld = getTime(existing);
+          if (timeNew > timeOld) {
+            isPriority = true;
+          } else if (timeNew === timeOld) {
+            isPriority = (item.status === 'approved' && existing.status !== 'approved');
+          }
+        }
       }
     }
 
     if (isPriority) {
+      // 自己修復機能: 優先されたデータ(特に m-) が時間給タイプなのに時間が 0 の場合、
+      // 適切なデフォルト値で補完する（前回の不整合データを引きずらないため）
+      if (item.id && String(item.id).startsWith('m-')) {
+        const h = item.hours ?? item.details?.hours ?? 0;
+        if (h === 0 || h === '0') {
+          if (['時間休', '特休', '看護休暇', '振替＋時間休'].includes(item.type)) {
+            item.hours = 1.0;
+            if (item.details) item.details.hours = 1.0;
+          }
+        }
+      }
+
       if (existing && existing.id !== item.id) discardedIds.push(existing.id);
       map.set(key, item);
     } else {
@@ -151,9 +186,79 @@ export default function App() {
   const [sessionDuration, setSessionDuration] = useState(24); // Hours
   const [isInitialized, setIsInitialized] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<any[]>([]);
+
+  // スケジュール整合性チェック
+  const validateSchedule = (reqs: any[], staffs: any[], lims: any) => {
+    const errors: any[] = [];
+    const staffMap = new Map();
+    staffs.forEach(s => staffMap.set(normalizeName(s.name), s));
+
+    const workingTerms = ['出勤', '日勤', '勤務', '通常', '午前休', '午後休', '午前振替', '午後振替', '時間休', '特休', '看護休暇'];
+    const isWorking = (type: string) => workingTerms.some(t => type?.includes(t));
+
+    // 1. 休日リミットチェック
+    const holidayCounts: { [date: string]: string[] } = {};
+    reqs.forEach(r => {
+      if (r.status === 'deleted') return;
+      const d = new Date(r.date.replace(/-/g, '/'));
+      const isHol = d.getDay() === 0 || d.getDay() === 6; // 土日
+      // 祝日判定（本当はJAPAN_HOLIDAYSが必要だがアプリ全体の挙動に合わせる）
+      if (isHol && isWorking(r.type)) {
+        holidayCounts[r.date] = holidayCounts[r.date] || [];
+        holidayCounts[r.date].push(r.staffName);
+      }
+    });
+
+    Object.entries(holidayCounts).forEach(([date, names]) => {
+      const d = new Date(date.replace(/-/g, '/'));
+      const dow = d.getDay();
+      const limit = dow === 0 ? (lims.sun || 2) : (lims.sat || 2);
+      if (names.length > limit) {
+        errors.push({ type: 'limit', date, message: `${date} の出勤者が ${names.length}名 で上限(${limit}名)を超えています [${names.join(', ')}]` });
+      }
+    });
+
+    // 2. 連勤チェック (Max 5)
+    const staffHistory: { [name: string]: any[] } = {};
+    reqs.forEach(r => {
+      if (r.status === 'deleted') return;
+      const name = normalizeName(r.staffName);
+      staffHistory[name] = staffHistory[name] || [];
+      staffHistory[name].push({ date: r.date, working: isWorking(r.type) });
+    });
+
+    Object.entries(staffHistory).forEach(([name, history]) => {
+      history.sort((a, b) => a.date.localeCompare(b.date));
+      let streak = 0;
+      let lastDate: Date | null = null;
+      history.forEach(h => {
+        const currentDate = new Date(h.date.replace(/-/g, '/'));
+        if (h.working) {
+          if (lastDate && (currentDate.getTime() - lastDate.getTime()) / 86400000 === 1) streak++;
+          else streak = 1;
+          if (streak > 5) {
+            const staff = staffMap.get(name);
+            errors.push({ type: 'streak', staffName: staff?.name || name, date: h.date, streak, message: `${staff?.name || name} さんが ${h.date} 時点で ${streak}連勤 になっています` });
+          }
+          lastDate = currentDate;
+        } else {
+          streak = 0;
+          lastDate = currentDate;
+        }
+      });
+    });
+
+    setValidationErrors(errors);
+  };
   const [activeDate, setActiveDate] = useState(new Date());
   const [requestsHistory, setRequestsHistory] = useState<any[][]>([]);
   const [staffLocks, setStaffLocks] = useState<Record<string, Record<string, boolean>>>({});
+
+  // 変更があるたびにルール検証を実行
+  useEffect(() => {
+    validateSchedule(requests, staffList, { sat: saturdayLimit, sun: sundayLimit });
+  }, [requests, staffList, saturdayLimit, sundayLimit]);
 
   // Initial Load (Cloud Sync Integrated)
   useEffect(() => {
@@ -486,7 +591,7 @@ export default function App() {
       if (targetReq.date === todayStr) {
         let newStatus: string | null = null;
         if (status === 'approved') {
-          const leaveTypes = ['年休', '有給休暇', '時間休', '時間給', '看護休暇', '振替', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休'];
+          const leaveTypes = ['年休', '有給休暇', '時間休', '看護休暇', '振替', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休'];
           newStatus = leaveTypes.includes(targetReq.type) ? '休暇' : (targetReq.type === '出勤' ? '常勤' : null);
         } else {
           newStatus = '常勤';
@@ -587,15 +692,20 @@ export default function App() {
 
       const oldAutoRequests = requests.filter(r => {
         const idStr = String(r.id || '');
-        const isAuto = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-');
+        const isAutoId = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('ah-') || idStr.startsWith('aw-') || idStr.startsWith('plan-');
         const isTargetMonth = r.date && r.date.startsWith(monthPrefix);
         
         // 当該月・当該スタッフがロックされている場合は、自動割当データであっても削除せずに残す（上書き防止）
         const staff = staffList.find(s => String(s.id) === String(r.staffId));
         const isLocked = staff?.lockedMonths?.[monthPrefix] === true;
         
-        // 「自動割当ID」かつ「対象月」かつ「ロックされていない」場合のみ削除対象
-        return isAuto && isTargetMonth && !isLocked;
+        // 追加判定：自動IDであっても、理由や備考に「自動」が含まれないものは手動で調整されたとみなして削除しない
+        const reason = String(r.reason || '').trim();
+        const note = String(r.details?.note || '').trim();
+        const isActuallyAuto = isAutoId && (reason.includes('自動') || note.includes('自動') || (reason === '' && note === ''));
+
+        // 「（真に）自動割当データ」かつ「対象月」かつ「ロックされていない」場合のみ削除対象
+        return isActuallyAuto && isTargetMonth && !isLocked;
       });
 
       const oldAutoIds = oldAutoRequests.map((r: any) => String(r.id));
@@ -681,11 +791,12 @@ export default function App() {
       onUndoAutoAssign: handleUndoAutoAssign,
       canUndoAutoAssign: requestsHistory.length > 0,
       staffLocks,
-      setStaffLocks: async (newLocks: any) => {
-        setStaffLocks(newLocks);
-        await cloudStorage.saveConfig('staff_locks', newLocks).catch(console.error);
-      }
-    };
+        setStaffLocks: async (newLocks: any) => {
+          setStaffLocks(newLocks);
+          await cloudStorage.saveConfig('staff_locks', newLocks).catch(console.error);
+        },
+        validationErrors
+      };
 
     switch (currentTab) {
       case 'home': return <HomeScreen onNavigateToStaff={() => setCurrentTab('staff')} {...commonProps} />;

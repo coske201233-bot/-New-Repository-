@@ -78,30 +78,35 @@ export const cloudStorage = {
 
   // --- Requests ---
   async fetchRequests() {
-    // 取得上限を大幅に引き上げ（将来的に期間フィルタリングを推奨）
-    const { data, error } = await supabase.from('requests').select('*').limit(100000);
+    // 取得上限を大幅に引き上げ
+    // status が deleted のものは取得しない（ゾンビデータ復活防止）
+    const { data, error } = await supabase
+      .from('requests')
+      .select('*')
+      .neq('status', 'deleted')
+      .limit(100000);
     if (error) throw error;
     return data.map(r => {
       const mapped = mapFromSql(r, REQ_MAP);
-      // details内に埋め込まれたタイムスタンプや保護フラグがあればトップレベルに復元
-      if (mapped.details?.updatedAt) {
-        mapped.updatedAt = mapped.details.updatedAt;
-      }
-      if (mapped.details?.isManual !== undefined) {
-        mapped.isManual = mapped.details.isManual;
-      }
-      if (mapped.details?.priority) {
-        mapped.priority = mapped.details.priority;
-      }
-      // 時間数(hours)の復元
-      const rawDuration = mapped.hours ?? mapped.details?.duration ?? mapped.duration;
+      const d = mapped.details || {};
+      
+      // details内に埋め込まれた情報をトップレベルに復元
+      if (d.updatedAt) mapped.updatedAt = d.updatedAt;
+      if (d.isManual !== undefined) mapped.isManual = d.isManual;
+      if (d.priority !== undefined) mapped.priority = d.priority;
+      if (d.locked !== undefined) mapped.locked = d.locked;
+      if (d.hours !== undefined) mapped.hours = d.hours;
+      
+      // 時間数(hours)の復元（互換性維持：durationなどもチェック）
+      const rawDuration = mapped.hours ?? d.duration ?? mapped.duration;
       if (rawDuration !== undefined && rawDuration !== null && rawDuration !== '') {
         const parsed = parseFloat(String(rawDuration));
         mapped.hours = isNaN(parsed) ? (mapped.type === '半日振替' ? 3.75 : 1.0) : parsed;
       } else {
         // デフォルト値のフォールバック
         if (mapped.type === '半日振替') mapped.hours = 3.75;
-        else if (['時間給', '時間休', '特休', '看護休暇'].includes(mapped.type)) mapped.hours = 1.0;
+        else if (['時間休', '特休', '看護休暇', '振替＋時間休'].includes(mapped.type)) mapped.hours = 1.0;
+        else mapped.hours = 0;
       }
       return mapped;
     });
@@ -111,14 +116,16 @@ export const cloudStorage = {
       const obj: any = {};
       const validKeys = ['id', 'staffName', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
       
-      // updatedAt, isManual, priority を details の中に確実に保存する（DBに列がないため）
+      // DBに列がない重要フィールドを details JSONB 内に確実に保存する
       const details = { ...(r.details || {}) };
       if (r.updatedAt) details.updatedAt = r.updatedAt;
       if (r.isManual !== undefined) details.isManual = r.isManual;
-      if (r.priority) details.priority = r.priority;
-      r.details = details;
+      if (r.priority !== undefined) details.priority = r.priority;
+      if (r.hours !== undefined) details.hours = r.hours;
+      if (r.locked !== undefined) details.locked = r.locked;
       
-      validKeys.forEach(k => { if (r[k] !== undefined) obj[k] = r[k]; });
+      const payload = { ...r, details };
+      validKeys.forEach(k => { if (payload[k] !== undefined) obj[k] = payload[k]; });
       return mapToSql(obj, REQ_MAP);
     });
     const { error } = await supabase.from('requests').upsert(filtered, { onConflict: 'id' });
@@ -133,11 +140,13 @@ export const cloudStorage = {
     const details = { ...(r.details || {}) };
     if (r.updatedAt) details.updatedAt = r.updatedAt;
     if (r.isManual !== undefined) details.isManual = r.isManual;
-    if (r.priority) details.priority = r.priority;
-    r.details = details;
+    if (r.priority !== undefined) details.priority = r.priority;
+    if (r.hours !== undefined) details.hours = r.hours;
+    if (r.locked !== undefined) details.locked = r.locked;
     
+    const payload = { ...r, details };
     const obj: any = {};
-    validKeys.forEach(k => { if (r[k] !== undefined) obj[k] = r[k]; });
+    validKeys.forEach(k => { if (payload[k] !== undefined) obj[k] = payload[k]; });
     const { error } = await supabase.from('requests').upsert(mapToSql(obj, REQ_MAP), { onConflict: 'id' });
     if (error) throw error;
   },

@@ -15,7 +15,7 @@ export const exportShiftToPDF = async (staffName: string, requests: any[], curre
     return `${y}-${m}-${d}`;
   };
 
-  const leaveTypes = ['年休', '有給休暇', '時間休', '時間給', '看護休暇', '振替', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '公休', '午前振替', '午後振替'];
+  const leaveTypes = ['年休', '有給休暇', '時間休', '看護休暇', '振替', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '公休', '午前振替', '午後振替'];
 
   let rowsHtml = '';
   for (let d = 1; d <= daysInMonth; d++) {

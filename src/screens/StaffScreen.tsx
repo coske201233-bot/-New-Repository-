@@ -51,8 +51,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const [isSaving, setIsSaving] = useState(false);
 
   // Constants
-  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '時間給', '空欄'];
-  const HOUR_SELECTOR_TYPES = ['時間休', '振替＋時間休', '特休', '時間給', '看護休暇', '午前休', '午後休'];
+  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '空欄'];
+  const HOUR_SELECTOR_TYPES = ['時間休', '振替＋時間休', '特休', '看護休暇', '午前休', '午後休'];
 
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
   
@@ -87,7 +87,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       } catch (e) {}
     }
 
-    // 最終的な救済措置：0 や NaN を返さない（ただし時間給系で 0 を許可）
+    // 最終的な救済措置：0 や NaN を返さない（ただし時間数指定が必要なタイプで 0 を許可するか検討）
     if (r.type === '半日振替') return 3.75;
     return 0;
   };
@@ -221,8 +221,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     }
   };
 
-  const handlePrint = () => {
-    if (Platform.OS !== 'web' || !selectedStaff) return;
+  const handlePrint = async () => {
+    if (!selectedStaff) return;
     
     try {
       const year = activeDate.getFullYear();
@@ -263,14 +263,18 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         `;
       });
 
-      const html = `<html><head><title>個人別勤務実績表</title><style>@page { size: A4 portrait; margin: 10mm; } body { font-family: sans-serif; padding: 20px; color: #1e293b; } .header { border-bottom: 2px solid #38bdf8; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; } h1 { margin: 0; font-size: 20px; } .meta { font-size: 14px; text-align: right; } table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: center; } th { background-color: #f8fafc; font-size: 13px; font-weight: bold; }</style></head><body><div class="header"><div><h1>個人別勤務実績表 (${month}月)</h1><div style="margin-top: 5px;">氏名: <strong style="font-size: 18px;">${selectedStaff.name}</strong></div></div><div class="meta">${year}年${month}月分<br/>職種: ${selectedStaff.profession}</div></div><table><thead><tr><th style="width: 50px;">日</th><th style="width: 50px;">曜</th><th>勤務実績 / 申請</th><th>特記事項</th></tr></thead><tbody>${rowsHtml}</tbody></table><script>window.onload=function(){window.print();};<\\/script></body></html>`;
+      const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>個人別勤務実績表</title><style>@page { size: A4 portrait; margin: 10mm; } body { font-family: sans-serif; padding: 20px; color: #1e293b; } .header { border-bottom: 2px solid #38bdf8; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; } h1 { margin: 0; font-size: 20px; } .meta { font-size: 14px; text-align: right; } table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: center; } th { background-color: #f8fafc; font-size: 13px; font-weight: bold; }</style></head><body><div class="header"><div><h1>個人別勤務実績表 (${month}月)</h1><div style="margin-top: 5px;">氏名: <strong style="font-size: 18px;">${selectedStaff.name}</strong></div></div><div class="meta">${year}年${month}月分<br/>職種: ${selectedStaff.profession}</div></div><table><thead><tr><th style="width: 50px;">日</th><th style="width: 50px;">曜</th><th>勤務実績 / 申請</th><th>特記事項</th></tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
 
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.write(html);
-        printWindow.document.close();
+      if (Platform.OS === 'web') {
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+        } else {
+          Alert.alert('ポップアップ制限', '実績表のプレビューが開けませんでした。ブラウザ設定でポップアップを許可してください。');
+        }
       } else {
-        Alert.alert('ポップアップ制限', '実績表のプレビューが開けませんでした。ブラウザ設定でポップアップを許可してください。');
+        await Print.printAsync({ html });
       }
     } catch (e) {
       console.error('Print Error:', e);
@@ -305,7 +309,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
               displayLabel = '振(全)'; labelColor = '#ef4444';
             } else if (req.type === '半日振替') {
               displayLabel = '振(半)'; labelColor = '#ef4444';
-            } else if (['時間休', '時間給', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(req.type)) {
+            } else if (['時間休', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(req.type)) {
               const displayH = h;
               displayLabel = `${req.type.charAt(0)}(${displayH}h)`; labelColor = '#ef4444';
             } else {
@@ -350,7 +354,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     const daysInMonthCount = new Date(year, month + 1, 0).getDate();
     
     let workDays = 0, holidayWorkDays = 0, leaveHours = 0;
-    const attendanceTypes = ['出勤', '日勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
+    const attendanceTypes = ['出勤', '日勤', '午前休', '午後休', '時間休', '午前振替', '午後振替', '特休', '看護休暇'];
     const offTypes = ['公休', '振替', '1日振替', '半日振替', '振替休日', '全休'];
 
     for (let day = 1; day <= daysInMonthCount; day++) {
@@ -450,7 +454,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                 >
                   {isMonthLocked ? <Lock size={18} color="white" /> : <Unlock size={18} color={COLORS.textSecondary} />}
                 </TouchableOpacity>
-                {Platform.OS === 'web' && ( <TouchableOpacity onPress={handlePrint} style={styles.iconBtn}><Printer size={22} color="#38bdf8" /></TouchableOpacity> )}
+                <TouchableOpacity onPress={handlePrint} style={styles.iconBtn}><Printer size={22} color="#38bdf8" /></TouchableOpacity>
                 <TouchableOpacity onPress={() => setIsCalendarModalVisible(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity>
               </View>
             </View>

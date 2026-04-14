@@ -94,7 +94,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     const working: any[] = [];
     const off: any[] = [];
     const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
+    const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '午前振替', '午後振替', '特休', '看護休暇'];
 
     (staffList || []).forEach(staff => {
       if (!staff || !staff.name) return;
@@ -268,7 +268,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       reason: '管理者による調整',
       details: { 
         note: '手動割当',
-        duration: (selectedType === '時間休' || selectedType === '時間給' || selectedType === '特休' || selectedType === '看護休暇') ? hourlyDuration : undefined
+        duration: (selectedType === '時間休' || selectedType === '特休' || selectedType === '看護休暇') ? hourlyDuration : undefined
       },
       createdAt: new Date().toISOString(),
     }));
@@ -609,7 +609,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               ))}
             </View>
 
-            {(selectedType === '時間休' || selectedType === '時間給' || selectedType === '特休' || selectedType === '看護休暇') && (
+            {(selectedType === '時間休' || selectedType === '特休' || selectedType === '看護休暇') && (
               <View style={{ marginBottom: 20 }}>
                 <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>

@@ -30,12 +30,14 @@ interface AdminScreenProps {
   canUndoAutoAssign: boolean;
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
+  validationErrors?: any[];
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
-  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests
+  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
+  validationErrors = []
 }) => {
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
   const [adminAuthInput, setAdminAuthInput] = useState('');
@@ -95,9 +97,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     Alert.alert('却下', '申請を却下し、削除しました。');
   };
 
-  const handlePrintAttendanceReport = () => {
-    if (Platform.OS !== 'web') return;
-    
+  const handlePrintAttendanceReport = async () => {
     try {
       // データの準備
       const year = currentYear;
@@ -106,7 +106,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
       const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
       
-      // ヘッダー
+      // ヘッダーの初期化
+      let headerHtml = '<th style="width: 80px;">氏名</th><th style="width: 40px;">職種</th>';
+      
+      // 日付ヘッダーの生成
       monthInfoArr.forEach((d: any) => {
         if (!d.empty) {
           const dDate = new Date(d.dateStr);
@@ -116,7 +119,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         }
       });
 
-      // 行データ
+      // 行データの生成
       let rowsHtml = '';
       const listToPrint = staffList.filter(s => s && s.isApproved);
       listToPrint.forEach(s => {
@@ -149,34 +152,40 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       const html = `
         <html>
           <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
             <title>勤務実績表</title>
             <style>
               @page { size: A4 landscape; margin: 5mm; }
               body { font-family: sans-serif; padding: 10px; color: #1e293b; }
               .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; border-bottom: 2px solid #38bdf8; padding-bottom: 5px; }
               table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 2px solid #334155; }
-              th, td { border: 1px solid #94a3b8; padding: 2px 1px; text-align: center; font-size: 9px; }
+              th, td { border: 1px solid #94a3b8; padding: 2px 1px; text-align: center; font-size: 8px; overflow: hidden; white-space: nowrap; }
               th { background-color: #f1f5f9; font-weight: bold; }
-              td { height: 22px; }
+              td { height: 20px; }
             </style>
           </head>
           <body>
             <div class="header">
-              <h1 style="margin:0; font-size:18px;">勤務実績表（${year}年${month}月）</h1>
-              <div style="font-size: 11px;">印刷日: ${new Date().toLocaleDateString('ja-JP')}</div>
+              <h1 style="margin:0; font-size:16px;">勤務実績表（${year}年${month}月）</h1>
+              <div style="font-size: 10px;">印刷日: ${new Date().toLocaleDateString('ja-JP')}</div>
             </div>
             <table><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>
-            <script>window.onload=function(){window.print();};<\\/script>
           </body>
         </html>
       `;
 
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.write(html);
-        printWindow.document.close();
+      if (Platform.OS === 'web') {
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          // モバイルブラウザでの動作を考慮し、少し遅らせて実行するか、PrintOptionsを使用
+        } else {
+          Alert.alert('ポップアップ制限', 'ブラウザのポップアップ設定を許可してください。');
+        }
       } else {
-        Alert.alert('ポップアップ制限', 'ブラウザのポップアップ設定を許可してください。');
+        // モバイル環境（iOS/Android）では expo-print を使用
+        await Print.printAsync({ html });
       }
     } catch (err) {
       console.error('Print logic error:', err);
@@ -254,6 +263,20 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 <ThemeText bold variant="h2">🛡️ 管理者モード</ThemeText>
                 <TouchableOpacity onPress={() => setIsAdminAuthenticated(false)}><ThemeText color="#ef4444" style={{ fontSize: 12 }}>解除</ThemeText></TouchableOpacity>
               </View>
+              
+              {validationErrors.length > 0 && (
+                <ThemeCard style={{ marginBottom: 16, borderLeftWidth: 4, borderLeftColor: '#ef4444', padding: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                    <Shield size={18} color="#ef4444" style={{ marginRight: 6 }} />
+                    <ThemeText bold color="#ef4444">スケジュール警告 ({validationErrors.length}件)</ThemeText>
+                  </View>
+                  {validationErrors.map((err: any, idx: number) => (
+                    <View key={idx} style={{ marginBottom: 6 }}>
+                      <ThemeText variant="caption" color="#ef4444">• {err.message}</ThemeText>
+                    </View>
+                  ))}
+                </ThemeCard>
+              )}
 
               <ThemeText bold style={{ color: '#ef4444', marginBottom: 12, marginTop: 12 }}>🔔 承認が必要な申請</ThemeText>
               

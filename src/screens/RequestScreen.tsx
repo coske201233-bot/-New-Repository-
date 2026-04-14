@@ -278,7 +278,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 </View>
               </View>
   
-              {(newRequest.type === '時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '看護休暇') && (
+              {(newRequest.type === '時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '特休' || newRequest.type === '看護休暇') && (
                 <View style={styles.timeSelectionArea}>
                   <ThemeText variant="label" style={{ marginBottom: 12 }}>時間設定 (0.25h単位)</ThemeText>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
