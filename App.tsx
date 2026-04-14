@@ -140,17 +140,10 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
 
 
-  // スケジュール整合性チェック
-  const validateSchedule = (reqs: any[], staffs: any[], lims: any) => {
-    const errors: any[] = [];
+
   const [activeDate, setActiveDate] = useState(new Date());
   const [requestsHistory, setRequestsHistory] = useState<any[][]>([]);
   const [staffLocks, setStaffLocks] = useState<Record<string, Record<string, boolean>>>({});
-
-  // 変更があるたびにルール検証を実行(機能削除により空とする)
-  useEffect(() => {
-  }, [requests, staffList, saturdayLimit, sundayLimit]);
-
 
   // Initial Load (Cloud Sync Integrated)
   useEffect(() => {

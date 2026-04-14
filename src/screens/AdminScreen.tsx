@@ -30,14 +30,17 @@ interface AdminScreenProps {
   canUndoAutoAssign: boolean;
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
-  requests: any[];
-  setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
+  onForceSave?: () => void;
+  onForceFetch?: () => void;
+  isSyncing?: boolean;
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
-  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests
+  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign,
+  isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
+  onForceSave, onForceFetch, isSyncing = false
 }) => {
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
   const [adminAuthInput, setAdminAuthInput] = useState('');
@@ -264,7 +267,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 <TouchableOpacity onPress={() => setIsAdminAuthenticated(false)}><ThemeText color="#ef4444" style={{ fontSize: 12 }}>解除</ThemeText></TouchableOpacity>
               </View>
               
-              {/* Removed validationErrors warning block per user request */}
 
               <ThemeText bold style={{ color: '#ef4444', marginBottom: 12, marginTop: 12 }}>🔔 承認が必要な申請</ThemeText>
               
