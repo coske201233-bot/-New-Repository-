@@ -644,22 +644,56 @@ export default async function handler(req: any, res: any) {
             console.log(`POST-PROCESS: remove auto work record(s) for ${staff.name} on ${insertDate}`);
           }
 
-          // 手動出勤のある日に公休を挿入する場合は overrideManual フラグを立てる
+          // 公休の回数制限チェック（休日出勤の数を超えないようにする）
+          const currentAutoOffs = autoAssigned.filter(a => 
+            (String(a.staffId) === sId || normalize(a.staffName) === sName) && 
+            a.type === '公休'
+          );
+          const hWorkCount = staffHolidayWorkCount[sId] || 0;
           const hasManualWork = manualWorkDates.has(insertDate);
-          console.log(`POST-PROCESS: insert 公休 for ${staff.name} on ${insertDate} (streak=${s.length}, overrideManual=${hasManualWork})`);
-          autoAssigned.push({
-            staffId: sId,
-            staffName: staff.name,
-            date: insertDate,
-            type: '公休',
-            details: {
-              note: '連勤調整(自動挿入)',
-              isManual: false,
-              locked: false,
-              overrideManual: hasManualWork,
-              priority: 99
+
+          if (currentAutoOffs.length < hWorkCount) {
+            // 予算に余裕がある場合は新規挿入
+            console.log(`POST-PROCESS: insert 公休 for ${staff.name} on ${insertDate} (streak=${s.length}, budget=${currentAutoOffs.length}/${hWorkCount})`);
+            autoAssigned.push({
+              staffId: sId,
+              staffName: staff.name,
+              date: insertDate,
+              type: '公休',
+              details: {
+                note: '連勤調整(自動挿入)',
+                isManual: false,
+                locked: false,
+                overrideManual: hasManualWork,
+                priority: 99
+              }
+            });
+          } else {
+            // 予算がいっぱいの場合、既存の（連勤中でない）自動公休を探して「移動」させる
+            const moveableOff = currentAutoOffs.find(a => !s.includes(a.date));
+            if (moveableOff) {
+              console.log(`POST-PROCESS: move existing 公休 for ${staff.name} from ${moveableOff.date} to ${insertDate} (budget limit)`);
+              // 移動元の公休を削除（出勤に戻すか、空にするか。ここでは単純削除）
+              autoAssigned = autoAssigned.filter(a => a !== moveableOff);
+              // 新しい箇所に公休を配置
+              autoAssigned.push({
+                staffId: sId,
+                staffName: staff.name,
+                date: insertDate,
+                type: '公休',
+                details: {
+                  note: '連勤調整(自動移動)',
+                  isManual: false,
+                  locked: false,
+                  overrideManual: hasManualWork,
+                  priority: 99
+                }
+              });
+            } else {
+              // 移動できる公休がない場合、出勤の削除のみ行い、公休は追加しない
+              console.log(`POST-PROCESS: skip adding 公休 for ${staff.name} on ${insertDate} (budget full and no moveable)`);
             }
-          });
+          }
           fixApplied = true;
         }
         };
