@@ -106,6 +106,7 @@ export const useAppLogic = () => {
     ...auth, ...staff, ...req, ...config,
     currentTab, setCurrentTab, showSetup, setShowSetup, activeDate, setActiveDate, isSyncing,
     handleForceCloudSync, handleForceSave, handleForceFetch,
+    handleLogout: auth.logout,
     onAutoAssign, onUndoAutoAssign, onDeleteRequests,
     onDeleteRequest: (id: string) => onDeleteRequests([id]),
     onShareApp: () => setCurrentTab('qrShare'),

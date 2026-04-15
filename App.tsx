@@ -45,7 +45,7 @@ export default function App() {
       case 'calendar': return <CalendarScreen {...props} onForceSave={logic.handleForceSave} onForceFetch={logic.handleForceFetch} />;
       case 'requests': return <RequestScreen {...props} />;
       case 'staff': return <StaffScreen {...props} />;
-      case 'admin': return <AdminScreen {...props} onForceSave={logic.handleForceSave} onForceFetch={logic.handleForceFetch} />;
+      case 'admin': return <AdminScreen {...props} onLogout={handleLogout} onForceSave={logic.handleForceSave} onForceFetch={logic.handleForceFetch} />;
       case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={logic.requests} approveRequest={async (id: string, s: string) => {
         const req = logic.requests.find(r => r.id === id);
         if (req) {
