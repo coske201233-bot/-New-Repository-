@@ -7,7 +7,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "build": "expo export --platform web"
+    "build": "npx expo export --platform web"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.57",

@@ -1,11 +1,7 @@
 const normalize = (name) => {
   if (!name || typeof name !== 'string') return '';
   let n = name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/條/g, '条');
-  if (n === '佐藤公') return '佐藤公貴';
-  if (n === '藤森') return '藤森渓';
-  if (n === '三井') return '三井諒';
-  if (n === '佐藤') return '佐藤晃';
-  return n;
+  return n.toUpperCase();
 };
 
 const isManualRecord = (r) => {
@@ -40,42 +36,42 @@ const isManualRecord = (r) => {
 const testCases = [
   {
     name: "Manual ID (m-)",
-    record: { id: "m-123", type: "出勤", staffName: "佐藤晃", date: "2026-06-15" },
+    record: { id: "m-123", type: "出勤", staffName: "TEST USER", date: "2026-06-15" },
     expected: true
   },
   {
     name: "Manual ID (manual-)",
-    record: { id: "manual-456", type: "出勤", staffName: "佐藤晃", date: "2026-06-15" },
+    record: { id: "manual-456", type: "出勤", staffName: "TEST USER", date: "2026-06-15" },
     expected: true
   },
   {
     name: "Locked Flag (Camel)",
-    record: { id: "auto-123", type: "出勤", staffName: "佐藤晃", date: "2026-06-15", locked: true },
+    record: { id: "auto-123", type: "出勤", staffName: "TEST USER", date: "2026-06-15", locked: true },
     expected: true
   },
   {
     name: "Locked Flag (Nested)",
-    record: { id: "auto-123", type: "出勤", staffName: "佐藤晃", date: "2026-06-15", details: { locked: true } },
+    record: { id: "auto-123", type: "出勤", staffName: "TEST USER", date: "2026-06-15", details: { locked: true } },
     expected: true
   },
   {
     name: "isManual Flag (Snake)",
-    record: { id: "auto-123", type: "出勤", staffName: "佐藤晃", date: "2026-06-15", is_manual: true },
+    record: { id: "auto-123", type: "出勤", staffName: "TEST USER", date: "2026-06-15", is_manual: true },
     expected: true
   },
   {
     name: "Leave Type (有給)",
-    record: { id: "auto-123", type: "有給", staffName: "佐藤晃", date: "2026-06-15" },
+    record: { id: "auto-123", type: "有給", staffName: "TEST USER", date: "2026-06-15" },
     expected: true
   },
   {
     name: "Human Note (No '自動')",
-    record: { id: "auto-123", type: "出勤", staffName: "佐藤晃", date: "2026-06-15", details: { note: "法事のため" } },
+    record: { id: "auto-123", type: "出勤", staffName: "TEST USER", date: "2026-06-15", details: { note: "法事のため" } },
     expected: true
   },
   {
     name: "Pure Auto Record",
-    record: { id: "auto-123", type: "出勤", staffName: "佐藤晃", date: "2026-06-15", details: { note: "自動割当(平日)" } },
+    record: { id: "auto-123", type: "出勤", staffName: "TEST USER", date: "2026-06-15", details: { note: "自動割当(平日)" } },
     expected: false
   }
 ];

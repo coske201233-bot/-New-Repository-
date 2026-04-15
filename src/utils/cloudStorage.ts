@@ -25,7 +25,7 @@ const mapFromSql = (obj: any, mapping: Record<string, string>) => {
 };
 
 const STAFF_MAP = { noHoliday: 'no_holiday', createdAt: 'created_at', isApproved: 'is_approved', pin: 'pin', isLocked: 'is_locked', lockedMonths: 'locked_months' };
-const REQ_MAP = { staffName: 'staff_name', createdAt: 'created_at' };
+const REQ_MAP = { staffName: 'staff_name', staffId: 'staff_id', createdAt: 'created_at' };
 const MSG_MAP = { fromId: 'from_id', fromName: 'from_name', toId: 'to_id', createdAt: 'created_at' };
 
 export const cloudStorage = {
@@ -114,7 +114,7 @@ export const cloudStorage = {
   async upsertRequests(requests: any[]) {
     const filtered = requests.map(r => {
       const obj: any = {};
-      const validKeys = ['id', 'staffName', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
+      const validKeys = ['id', 'staffName', 'staffId', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
       
       // DBに列がない重要フィールドを details JSONB 内に確実に保存する
       const details = { ...(r.details || {}) };
@@ -194,7 +194,7 @@ export const cloudStorage = {
     for (let i = 0; i < requests.length; i += chunkSize) {
       const chunk = requests.slice(i, i + chunkSize).map(r => {
         const obj: any = {};
-        const validKeys = ['id', 'staffName', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
+        const validKeys = ['id', 'staffName', 'staffId', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
         const details = { ...(r.details || {}) };
         if (r.updatedAt) details.updatedAt = r.updatedAt;
         if (r.isManual !== undefined) details.isManual = r.isManual;

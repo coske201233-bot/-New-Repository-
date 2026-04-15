@@ -113,9 +113,8 @@ export const getMonthInfo = (year: number, month: number) => {
  */
 export const normalizeName = (name: string): string => {
   if (!name || typeof name !== 'string') return '';
-  // 1. 空白、タブ、改行、および一般的な記号（カッコ等）の除去
   let n = name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '');
-  // 2. 漢字の表記ゆれ吸収
-  n = n.replace(/條/g, '条');
-  return n;
+  // 旧字体・異体字の正規化（英字名移行後も互換性のため維持）
+  n = n.replace(/條/g, '条').replace(/齊/g, '斉').replace(/齋/g, '斎');
+  return n.toUpperCase(); // 比較のため大文字に統一
 };

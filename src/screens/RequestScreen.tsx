@@ -84,14 +84,15 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
 
     try {
       const now = new Date().toISOString();
+      const requestId = `m-${normalizeName(nameStr)}-${newRequest.date}`;
       const request = {
-        id: `m-${Date.now()}`,
+        id: requestId,
         staffId: profile.id,
         type: newRequest.type,
         date: newRequest.date,
         reason: newRequest.reason,
         status: isManager ? 'approved' : 'pending',
-        staffName: nameStr,
+        staffName: normalizeName(nameStr),
         createdAt: now,
         updatedAt: now,
         hours: duration,

@@ -19,6 +19,8 @@ const isWorking = (t: string) => {
   return workingTerms.some(term => t.includes(term));
 };
 
+const isWorkingType = isWorking;
+
 const isManualRecord = (r: any) => {
   if (!r) return false;
   // Supabase から取得する際はスネークケース、アプリ内ではキャメルケースが混在するため両方チェック
@@ -283,7 +285,7 @@ export default async function handler(req: any, res: any) {
         return (pA === -1 ? 999 : pA) - (pB === -1 ? 999 : pB);
       });
 
-    console.log(`DEBUG: Holiday candidate names: ${holidayQueue.map(s => s.name).join(', ')}`);
+    console.log(`DEBUG: Holiday candidate names: ${holidayQueue.map((s: any) => s.name).join(', ')}`);
 
     // 1. 休日（土日祝）の割り当て
     for (const dStr of holidays) {
@@ -296,7 +298,7 @@ export default async function handler(req: any, res: any) {
       const currentWorkers = new Set(
         allCurrentRequests
           .filter((r: any) => r.date === dStr && isWorkingType(r.type))
-          .map(r => normalize(r.staffName))
+          .map((r: any) => normalize(r.staffName))
       );
       autoAssigned.forEach(a => {
         if (a.date === dStr && isWorkingType(a.type)) {

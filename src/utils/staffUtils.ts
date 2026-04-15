@@ -3,17 +3,12 @@
  * @param name スタッフ名
  * @returns 正規化された名前
  */
-export const normalizeName = (name: string) => {
+export const normalizeName = (name: string): string => {
   if (!name || typeof name !== 'string') return '';
-  // 1. 空白、タブ、改行、および一般的な記号（カッコ等）の除去
   let n = name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '');
-  // 2. 漢字の表記ゆれ吸収
-  n = n.replace(/條/g, '条');
-  // 3. 特定の短縮名などを正規化（API/AutoAssignとの一貫性のため）
-  if (n === '佐藤公') return '佐藤公貴';
-  if (n === '藤森') return '藤森渓';
-  if (n === '三井') return '三井諒';
-  return n;
+  // 旧字体・異体字の正規化（英字名移行後も互換性のため維持）
+  n = n.replace(/條/g, '条').replace(/齊/g, '斉').replace(/齋/g, '斎');
+  return n.toUpperCase(); // 比較のため大文字に統一
 };
 
 export const sortStaffByName = (staffList: any[]) => {

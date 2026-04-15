@@ -13,7 +13,7 @@ async function runTest() {
   
   // 2. Prepare a "Manual" record for testing (e.g., Satoh Akira, 2026-06-15, Type: '有給')
   const testDate = '2026-06-15';
-  const testStaffName = '佐藤晃';
+  const testStaffName = 'TEST USER';
   const testType = '有給';
   
   // 3. Upsert this manual record
@@ -70,7 +70,7 @@ async function runTest() {
   }
 
   console.log('\nCleaning up test record...');
-  await supabase.from('requests').delete().eq('staff_name', testStaffName).eq('date', testDate);
+  await supabase.from('requests').delete().eq('staff_name', 'TEST USER').eq('date', testDate);
 }
 
 runTest();

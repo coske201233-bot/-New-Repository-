@@ -16,6 +16,7 @@ interface AdminScreenProps {
   setProfile: (p: any) => void;
   staffList: any[];
   setStaffList: (staff: any[] | ((prev: any[]) => any[])) => void;
+  updateStaffList: (staff: any[] | ((prev: any[]) => any[])) => Promise<void>;
   updateLimits: (type: string, val: number, monthStr?: string) => void;
   updatePassword: (pass: string) => void;
   adminPassword?: string;
@@ -34,9 +35,8 @@ interface AdminScreenProps {
   onForceFetch?: () => void;
   isSyncing?: boolean;
 }
-
 export const AdminScreen: React.FC<AdminScreenProps> = ({
-  profile, setProfile, staffList = [], setStaffList,
+  profile, setProfile, staffList = [], setStaffList, updateStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
   currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign,
   isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
@@ -61,6 +61,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const [editNoHoliday, setEditNoHoliday] = useState(false);
   const [editRole, setEditRole] = useState(['スタッフ']);
   
+  const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
+  const [orphanedRequests, setOrphanedRequests] = useState<any[]>([]);
+  const [repairMap, setRepairMap] = useState<Record<string, string>>({});
+  const [isRepairing, setIsRepairing] = useState(false);
+  
   const [isAssigning, setIsAssigning] = useState(false);
 
   // Safeguard: Ensure currentDate exists
@@ -83,9 +88,15 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const ROLE_OPTS = [{ label: '一般スタッフ', value: ['スタッフ'] }, { label: 'シフト管理者', value: ['管理者', 'スタッフ'] }];
 
   // --- Handlers ---
-  const handleApproveStaff = (id: string) => {
-    setStaffList(prev => prev.map(s => s.id === id ? { ...s, isApproved: true } : s));
-    Alert.alert('完了', '登録を承認しました。');
+  const handleApproveStaff = async (id: string) => {
+    try {
+      await updateStaffList(prev => prev.map(s => s && s.id === id ? { ...s, isApproved: true } : s));
+      if (Platform.OS === 'web') window.alert('✅ 登録を承認しました');
+      else Alert.alert('完了', '登録を承認しました。');
+    } catch (e) {
+      if (Platform.OS === 'web') window.alert('❌ 承認に失敗しました');
+      else Alert.alert('エラー', '承認に失敗しました');
+    }
   };
 
   const handleApproveRequest = async (req: any) => {
@@ -142,9 +153,16 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '公休' : '公休');
             }
 
-            const isOff = ['公休', '年休', '特休', '休暇', '欠勤'].includes(type);
+            const offTypes = ['公休', '年休', '特休', '休暇', '欠勤'];
+            const isOff = offTypes.some(ot => normalizeName(ot) === normalizeName(type));
             const style = isOff ? 'background-color: #fef2f2; color: #ef4444;' : '';
-            const label = type === '公休' ? '公' : (type === '出勤' ? '出' : (type === '夜勤' ? '夜' : (type === '早番' ? '早' : (type === '遅番' ? '遅' : (type ? type.charAt(0) : '')))));
+            const normalizedType = normalizeName(type);
+            const label = normalizedType === normalizeName('公休') ? '公' : 
+                          (normalizedType === normalizeName('出勤') ? '出' : 
+                          (normalizedType === normalizeName('夜勤') ? '夜' : 
+                          (normalizedType === normalizeName('早番') ? '早' : 
+                          (normalizedType === normalizeName('遅番') ? '遅' : 
+                          (type ? type.charAt(0) : '')))));
             row += `<td style="${style}">${label}</td>`;
           }
         });
@@ -233,15 +251,151 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     else { Alert.alert('エラー', '管理用パスワードが違います。'); }
   };
 
-  const handleStaffUpdate = () => {
+  const handleStaffUpdate = async () => {
     if (!editStaff) return;
-    setStaffList(prev => prev.map(s => s && s.id === editStaff.id ? { ...s, name: editName, profession: editProfession, placement: editPlacement, position: editPosition, status: editStatus, noHoliday: editNoHoliday, role: editRole } : s));
-    setShowStaffEditModal(false);
-    Alert.alert('完了', `${editName}さんの情報を更新しました。`);
+    try {
+      // Normalize all fields before saving to ensure strict matching
+      const normalizedNameVal = normalizeName(editName);
+      const normalizedProfession = editProfession?.trim() || '';
+      const normalizedPlacement = editPlacement?.trim() || '';
+      const normalizedPosition = editPosition?.trim() || '';
+      const normalizedStatus = editStatus?.trim() || '常勤';
+
+      // Update staff list
+      await updateStaffList(prev => prev.map(s => s && s.id === editStaff.id ? { 
+        ...s, 
+        name: normalizedNameVal, 
+        profession: normalizedProfession, 
+        placement: normalizedPlacement, 
+        position: normalizedPosition, 
+        status: normalizedStatus, 
+        noHoliday: editNoHoliday, 
+        role: editRole 
+      } : s));
+
+      const oldName = editStaff.name;
+      const isNameChanged = normalizeName(oldName) !== normalizedNameVal;
+
+      // If name changed, we MUST update all existing requests for this staff member
+      // to avoid mapping errors on the calendar and personal screens.
+      if (isNameChanged) {
+        setRequests(prev => {
+          const updated = prev.map(r => {
+            if (normalizeName(r.staffName) === normalizeName(oldName)) {
+              return { ...r, staffName: normalizedNameVal };
+            }
+            return r;
+          });
+          
+          // Trigger cloud sync for the updated requests
+          const changedRequests = updated.filter(r => normalizeName(r.staffName) === normalizedNameVal);
+          if (changedRequests.length > 0) {
+            cloudStorage.upsertRequests(changedRequests).catch(err => {
+              console.error('Failed to sync renamed requests:', err);
+            });
+          }
+          
+          return updated;
+        });
+      }
+
+      setShowStaffEditModal(false);
+      if (Platform.OS === 'web') window.alert('✅ 情報を更新しました');
+      else Alert.alert('完了', `${editName}さんの情報を更新しました。`);
+    } catch (e) {
+      if (Platform.OS === 'web') window.alert('❌ 更新に失敗しました');
+      else Alert.alert('エラー', '情報の更新に失敗しました');
+    }
   };
 
   const handleDeleteStaff = (id: string, name: string) => {
-    Alert.alert('職員削除', `${name}さんを削除しますか？`, [{ text: 'キャンセル', style: 'cancel' }, { text: '削除', style: 'destructive', onPress: () => { setStaffList(prev => prev.filter(s => s.id !== id)); setShowStaffEditModal(false); }}]);
+    const performDelete = async () => {
+      try {
+        await cloudStorage.deleteStaff(id);
+        if (updateStaffList) {
+          await updateStaffList(prev => prev.filter(s => s && s.id !== id));
+        } else {
+          setStaffList(prev => prev.filter(s => s && s.id !== id));
+        }
+        setShowStaffEditModal(false);
+        if (Platform.OS === 'web') window.alert('✅ 削除しました');
+        else Alert.alert('完了', '削除しました');
+      } catch (e) {
+        if (Platform.OS === 'web') window.alert('❌ 削除に失敗しました');
+        else Alert.alert('エラー', '削除に失敗しました');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${name}さんを削除しますか？`)) performDelete();
+    } else {
+      Alert.alert('職員削除', `${name}さんを削除しますか？`, [
+        { text: 'キャンセル', style: 'cancel' },
+        { text: '削除', style: 'destructive', onPress: performDelete }
+      ]);
+    }
+  };
+
+  const handleIdentifyOrphans = () => {
+    const sNames = staffList.filter(s => s && s.name).map(s => normalizeName(s.name));
+    const orphans = requests.filter(r => {
+      if (!r) return false;
+      const sName = r.staffName || r.staff_name;
+      return sName && !sNames.includes(normalizeName(sName));
+    });
+    
+    if (orphans.length === 0) {
+      Alert.alert('クリーンです', '現在、スタッフリストに見当たらない氏名の申請データはありません。');
+      return;
+    }
+    
+    setOrphanedRequests(orphans);
+    setShowMaintenanceModal(true);
+  };
+
+  const handleExecuteRepair = async () => {
+    if (Object.keys(repairMap).length === 0) {
+      Alert.alert('未選択', '統合先のスタッフを1つ以上選択してください。');
+      return;
+    }
+
+    setIsRepairing(true);
+    try {
+      const updatedRequests = requests.map(r => {
+        const sName = r.staffName || r.staff_name;
+        if (!sName) return r;
+        const targetStaffName = repairMap[sName];
+        if (targetStaffName) {
+          const targetStaff = staffList.find(s => s && s.name === targetStaffName);
+          return {
+            ...r,
+            staffName: targetStaffName,
+            staffId: targetStaff?.id,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return r;
+      });
+
+      const changedOnly = updatedRequests.filter((r, i) => r.staffName !== requests[i].staffName);
+      
+      // Update local state first
+      setRequests(updatedRequests);
+      
+      // Sync to cloud
+      if (changedOnly.length > 0) {
+        await cloudStorage.upsertRequests(changedOnly);
+      }
+      
+      Alert.alert('完了', `${changedOnly.length}件の申請データを新しい名前に統合しました。`);
+      setShowMaintenanceModal(false);
+      setRepairMap({});
+    } catch (e) {
+      console.error('Repair error:', e);
+      Alert.alert('エラー', 'データの修復中にエラーが発生しました。');
+    } finally {
+      setIsRepairing(false);
+    }
   };
 
   return (
@@ -375,6 +529,17 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </TouchableOpacity>
               </ThemeCard>
 
+              <ThemeCard style={styles.itemRow}>
+                <View style={styles.iconCircle}><Database size={20} color="#a855f7" /></View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <ThemeText bold>氏名データの不整合を修復</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>旧名で残っているデータを新しい名前に統合します</ThemeText>
+                </View>
+                <TouchableOpacity style={[styles.inlineBtn, { backgroundColor: 'rgba(168, 85, 247, 0.1)' }]} onPress={handleIdentifyOrphans}>
+                  <ThemeText bold color="#a855f7">チェック</ThemeText>
+                </TouchableOpacity>
+              </ThemeCard>
+
               <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>👥 職員の属性・役割管理</ThemeText>
               <View style={styles.staffAdminList}>
                 {staffList.filter(s => s && s.isApproved).map(s => (
@@ -407,8 +572,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </ThemeText>
                 <View style={{ flexDirection: 'row', gap: 12 }}>
                   <TouchableOpacity 
-                    style={[styles.syncFullBtn, { backgroundColor: COLORS.primary }]}
+                    style={[styles.syncFullBtn, { backgroundColor: COLORS.primary }, isSyncing && { opacity: 0.5 }]}
+                    disabled={isSyncing}
                     onPress={() => {
+                      if (!onForceSave) return;
                       if (Platform.OS === 'web') {
                         if (window.confirm('現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？')) onForceSave();
                       } else {
@@ -421,12 +588,14 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                     }}
                   >
                     <Save size={18} color="white" />
-                    <ThemeText bold color="white" style={{ marginLeft: 8 }}>クラウドに保存</ThemeText>
+                    <ThemeText bold color="white" style={{ marginLeft: 8 }}>{isSyncing ? '保存中...' : 'クラウドに保存'}</ThemeText>
                   </TouchableOpacity>
                   
                   <TouchableOpacity 
-                    style={[styles.syncFullBtn, { backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: COLORS.border }]}
+                    style={[styles.syncFullBtn, { backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: COLORS.border }, isSyncing && { opacity: 0.5 }]}
+                    disabled={isSyncing}
                     onPress={() => {
+                      if (!onForceFetch) return;
                       if (Platform.OS === 'web') {
                         if (window.confirm('クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？')) onForceFetch();
                       } else {
@@ -439,7 +608,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                     }}
                   >
                     <Clock size={18} color={COLORS.text} />
-                    <ThemeText bold color={COLORS.text} style={{ marginLeft: 8 }}>クラウドから更新</ThemeText>
+                    <ThemeText bold color={COLORS.text} style={{ marginLeft: 8 }}>{isSyncing ? '更新中...' : 'クラウドから更新'}</ThemeText>
                   </TouchableOpacity>
                 </View>
               </ThemeCard>
@@ -453,7 +622,77 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       {/* --- モーダル群 --- */}
       <Modal visible={showStaffEditModal} transparent animationType="slide">
         <View style={styles.modalOverlay}><View style={[styles.detailModal, {maxHeight: '90%'}]}><View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:20}}><ThemeText variant="h2">職員情報の編集</ThemeText><TouchableOpacity onPress={() => setShowStaffEditModal(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity></View><ScrollView showsVerticalScrollIndicator={false}><ThemeText bold style={{marginBottom:8, fontSize:13, color:COLORS.textSecondary}}>氏名</ThemeText><TextInput style={styles.modalInput} value={editName} onChangeText={setEditName} placeholder="氏名を入力" placeholderTextColor={COLORS.textSecondary} /><DropdownSelector label="職種" value={editProfession} options={PROFESSION_OPTS} onSelect={setEditProfession} /><DropdownSelector label="役割(ポジション)" value={editPosition} options={POSITION_OPTS} onSelect={setEditPosition} /><DropdownSelector label="配置" value={editPlacement} options={PLACEMENT_OPTS} onSelect={setEditPlacement} /><DropdownSelector label="ステータス" value={editStatus} options={STATUS_OPTS} onSelect={setEditStatus} /><DropdownSelector label="休日設定 (自動割当条件)" value={editNoHoliday} options={HOLIDAY_SETTING_OPTS} onSelect={setEditNoHoliday} /><DropdownSelector label="アプリ権限" value={editRole} options={ROLE_OPTS} onSelect={setEditRole} /><View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}><TouchableOpacity style={styles.cancelBtn} onPress={() => setShowStaffEditModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={styles.confirmBtn} onPress={handleStaffUpdate}><ThemeText bold color="white">保存する</ThemeText></TouchableOpacity></View><TouchableOpacity style={{ marginTop: 24, padding: 12, alignItems: 'center' }} onPress={() => editStaff && handleDeleteStaff(editStaff.id, editStaff.name)}><ThemeText color="#ef4444">職員を削除する</ThemeText></TouchableOpacity></ScrollView></View></View></Modal>
-      <Modal visible={showAdminAuthModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>管理者認証</ThemeText><TextInput style={styles.modalInput} placeholder="管理パスワード" secureTextEntry value={adminAuthInput} onChangeText={setAdminAuthInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowAdminAuthModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#38bdf8'}]} onPress={handleAdminAuth}><ThemeText bold color="white">ログイン</ThemeText></TouchableOpacity></View></View></View></Modal>
+      <Modal visible={showAdminPassChangeModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>管理者パスワード変更</ThemeText><TextInput style={styles.modalInput} placeholder="新しいパスワード" secureTextEntry value={newAdminPassInput} onChangeText={setNewAdminPassInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowAdminPassChangeModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#38bdf8'}]} onPress={() => { updatePassword(newAdminPassInput); setShowAdminPassChangeModal(false); setNewAdminPassInput(''); Alert.alert('完了', 'パスワードを変更しました。'); }}><ThemeText bold color="white">変更する</ThemeText></TouchableOpacity></View></View></View></Modal>
+
+      {/* --- Maintenance Modal --- */}
+      <Modal visible={showMaintenanceModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.detailModal, { maxHeight: '85%' }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
+              <ThemeText variant="h2">データ不整合の修復</ThemeText>
+              <TouchableOpacity onPress={() => setShowMaintenanceModal(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity>
+            </View>
+            
+            <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginBottom: 16 }}>
+              スタッフリストに存在しない旧名の申請データが見つかりました（計{orphanedRequests.length}件）。
+              これらを現在のアルファベット氏名に紐付け直します。
+            </ThemeText>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {Array.from(new Set(orphanedRequests.map(r => r.staffName))).map(oldName => {
+                const count = orphanedRequests.filter(r => r.staffName === oldName).length;
+                return (
+                  <View key={oldName} style={{ marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                    <ThemeText bold color={COLORS.primary}>{oldName} ({count}件)</ThemeText>
+                    <ThemeText variant="caption" style={{ marginTop: 4 }}>統合先を選択：</ThemeText>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                      {staffList.filter(s => s && s.isApproved).map(s => (
+                        <TouchableOpacity 
+                          key={s.id} 
+                          style={[
+                            styles.miniTag, 
+                            repairMap[oldName] === s.name && { backgroundColor: COLORS.primary, borderColor: COLORS.primary }
+                          ]}
+                          onPress={() => setRepairMap(prev => ({ ...prev, [oldName]: s.name }))}
+                        >
+                          <ThemeText variant="caption" color={repairMap[oldName] === s.name ? 'white' : COLORS.text}>{s.name}</ThemeText>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowMaintenanceModal(false)} disabled={isRepairing}>
+                <ThemeText bold>閉じる</ThemeText>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.confirmBtn, { backgroundColor: '#a855f7' }]} 
+                onPress={handleExecuteRepair} 
+                disabled={isRepairing || Object.keys(repairMap).length === 0}
+              >
+                {isRepairing ? <ActivityIndicator size="small" color="white" /> : <ThemeText bold color="white">実行する</ThemeText>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* --- Styles for tags --- */}
+      <View style={{display: 'none'}}>
+        <style>
+          {`
+            .miniTag {
+              padding: 4px 10px;
+              border-radius: 6px;
+              border: 1px solid rgba(255,255,255,0.2);
+              margin-right: 6px;
+            }
+          `}
+        </style>
+      </View>
     </SafeAreaView>
   );
 };
@@ -483,5 +722,6 @@ const styles = StyleSheet.create({
   syncFullBtn: { flex: 1, height: 52, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   pickerItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.02)' },
-  pickerItemActive: { backgroundColor: 'rgba(56, 189, 248, 0.05)' }
+  pickerItemActive: { backgroundColor: 'rgba(56, 189, 248, 0.05)' },
+  miniTag: { padding: 4, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', marginRight: 6 }
 });

@@ -268,19 +268,6 @@
     "created_at": "2026-04-13T04:48:22.74+00:00"
   },
   {
-    "id": "m-1775609673233-2026-04-21",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-21",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-10T07:41:16.752Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-10T07:41:16.751+00:00"
-  },
-  {
     "id": "auto-1774912404116-2026-07-07-ntq0zm",
     "staff_name": "大沼",
     "date": "2026-07-07",
@@ -406,84 +393,6 @@
     },
     "reason": null,
     "created_at": "2026-04-13T11:37:42.723+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-14",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-14",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-13T11:32:56.191Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:32:56.19+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-06",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-06",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-13T11:32:54.820Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:32:54.819+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-27",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-27",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-13T11:32:53.206Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:32:53.205+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-28",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-28",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-13T11:32:51.990Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:32:51.99+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-10",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-10",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-13T11:32:50.749Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:32:50.748+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-03",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-03",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-13T11:32:49.154Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:32:49.153+00:00"
   },
   {
     "id": "m-1775085958034-2026-04-23",
@@ -650,19 +559,6 @@
     },
     "reason": null,
     "created_at": "2026-04-12T11:54:17.446+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-13",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-13",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-10T07:41:13.849Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-10T07:41:13.848+00:00"
   },
   {
     "id": "af-森田-2026-03-20",
@@ -889,26 +785,6 @@
     },
     "reason": null,
     "created_at": "2026-03-31T02:46:12.692+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-24",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-24",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:26.092+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-17",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-17",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:23.495+00:00"
   },
   {
     "id": "m-1775009981527-2026-05-05",
@@ -1288,18 +1164,6 @@
     "created_at": "2026-04-13T03:07:09.682+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-07-24-70jsj9",
-    "staff_name": "佐藤晃",
-    "date": "2026-07-24",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
     "id": "auto-1774840034905-2026-07-27-tnijwh",
     "staff_name": "坂下",
     "date": "2026-07-27",
@@ -1382,16 +1246,6 @@
     },
     "reason": null,
     "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-04",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-04",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:30.913+00:00"
   },
   {
     "id": "auto-w-1774167885447-216",
@@ -1632,16 +1486,6 @@
     "created_at": null
   },
   {
-    "id": "m-1775609673233-2026-04-19",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-19",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:01:27.306+00:00"
-  },
-  {
     "id": "aw1774401851729-193-4800",
     "staff_name": "佐藤公",
     "date": "2026-03-05",
@@ -1871,18 +1715,6 @@
     "created_at": "2026-04-13T11:38:05.218+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-06-19-dre9c9",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-19",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
     "id": "auto-1774840034905-2026-06-22-3tpdg9",
     "staff_name": "坂下",
     "date": "2026-06-22",
@@ -2102,18 +1934,6 @@
     "id": "auto-1775085958034-2026-06-26-82uvxl",
     "staff_name": "佐藤公貴",
     "date": "2026-06-26",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-06-29-i2i3ft",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-29",
     "type": "出勤",
     "status": "approved",
     "details": {
@@ -2387,18 +2207,6 @@
     "created_at": "2026-04-13T11:38:05.218+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-06-08-etn3mf",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-08",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
     "id": "auto-1774840034905-2026-06-09-sl8grr",
     "staff_name": "坂下",
     "date": "2026-06-09",
@@ -2603,18 +2411,6 @@
     "created_at": "2026-04-13T11:38:05.218+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-06-18-bxnssz",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-18",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
     "id": "auto-1774840034905-2026-06-19-dc84dy",
     "staff_name": "坂下",
     "date": "2026-06-19",
@@ -2774,18 +2570,6 @@
     "id": "auto-1775013120373-2026-06-08-qrhnn4",
     "staff_name": "久保田",
     "date": "2026-06-08",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-06-09-sxuw22",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-09",
     "type": "出勤",
     "status": "approved",
     "details": {
@@ -2961,18 +2745,6 @@
     "created_at": "2026-04-13T11:38:05.218+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-06-25-uozyff",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-25",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
     "id": "auto-1775022701838-2026-06-26-fx85os",
     "staff_name": "三井諒",
     "date": "2026-06-26",
@@ -3120,18 +2892,6 @@
     "id": "auto-1774827622985-2026-06-12-03lph6",
     "staff_name": "佐久間",
     "date": "2026-06-12",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-06-15-hqx9b0",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-15",
     "type": "出勤",
     "status": "approved",
     "details": {
@@ -3417,18 +3177,6 @@
     "created_at": "2026-04-13T11:38:05.218+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-06-01-ab7zzz",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-01",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
     "id": "auto-1774840034905-2026-06-02-zb83cq",
     "staff_name": "坂下",
     "date": "2026-06-02",
@@ -3598,18 +3346,6 @@
     "id": "auto-1775006415428-2026-06-15-dfxryt",
     "staff_name": "鈴木",
     "date": "2026-06-15",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-06-16-jm044e",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-16",
     "type": "出勤",
     "status": "approved",
     "details": {
@@ -3907,18 +3643,6 @@
     "created_at": "2026-04-13T11:38:05.218+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-06-22-jrv3mt",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-22",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
     "id": "auto-1774912404116-2026-06-23-v730ta",
     "staff_name": "大沼",
     "date": "2026-06-23",
@@ -4051,18 +3775,6 @@
     "created_at": "2026-04-13T11:38:05.218+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-06-03-xwh4ow",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-03",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
     "id": "auto-1774840034905-2026-06-04-6klucp",
     "staff_name": "坂下",
     "date": "2026-06-04",
@@ -4159,16 +3871,6 @@
     },
     "reason": null,
     "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-27",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-27",
-    "type": "出勤",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:04:29.164+00:00"
   },
   {
     "id": "manual-1774912137253",
@@ -4533,18 +4235,6 @@
     "created_at": "2026-04-13T11:38:05.218+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-06-05-qflqns",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-05",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
     "id": "auto-1775022701838-2026-06-08-ozz484",
     "staff_name": "三井諒",
     "date": "2026-06-08",
@@ -4721,16 +4411,6 @@
     "created_at": "2026-03-23T07:32:14.744+00:00"
   },
   {
-    "id": "m-1775609673233-2026-05-15",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-15",
-    "type": "出勤",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:53.431+00:00"
-  },
-  {
     "id": "aw1774401851729-202-6675",
     "staff_name": "阿部",
     "date": "2026-03-18",
@@ -4806,18 +4486,6 @@
     "id": "auto-1775112743717-2026-07-07-ezp0z1",
     "staff_name": "山川",
     "date": "2026-07-07",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-07-23-5r1cyy",
-    "staff_name": "佐藤晃",
-    "date": "2026-07-23",
     "type": "出勤",
     "status": "approved",
     "details": {
@@ -4962,18 +4630,6 @@
     "id": "auto-1774827622985-2026-07-27-cmib7j",
     "staff_name": "佐久間",
     "date": "2026-07-27",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-07-29-8b9y91",
-    "staff_name": "佐藤晃",
-    "date": "2026-07-29",
     "type": "出勤",
     "status": "approved",
     "details": {
@@ -6042,16 +5698,6 @@
     "created_at": "2026-04-13T03:07:09.682+00:00"
   },
   {
-    "id": "m-1775609673233-2026-05-05",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-05",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:33.641+00:00"
-  },
-  {
     "id": "auto-1775013120373-2026-06-16-m96db9",
     "staff_name": "久保田",
     "date": "2026-06-16",
@@ -6079,18 +5725,6 @@
     "id": "auto-1775085958034-2026-06-22-jg4tq4",
     "staff_name": "佐藤公貴",
     "date": "2026-06-22",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-06-24-9i45h4",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-24",
     "type": "出勤",
     "status": "approved",
     "details": {
@@ -6293,18 +5927,6 @@
     "created_at": "2026-04-13T03:07:09.682+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-07-30-t6tnee",
-    "staff_name": "佐藤晃",
-    "date": "2026-07-30",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
     "id": "af-1775386344005-0.7767930299468061",
     "staff_name": "三井諒",
     "date": "2026-07-01",
@@ -6403,18 +6025,6 @@
   {
     "id": "auto-1775013401701-2026-07-06-s10cbz",
     "staff_name": "南条",
-    "date": "2026-07-06",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-07-06-kp3uth",
-    "staff_name": "佐藤晃",
     "date": "2026-07-06",
     "type": "出勤",
     "status": "approved",
@@ -6545,18 +6155,6 @@
     "created_at": "2026-04-13T03:07:09.682+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-07-02-qtnego",
-    "staff_name": "佐藤晃",
-    "date": "2026-07-02",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
     "id": "auto-1774998710828-2026-07-21-pcjgfz",
     "staff_name": "阿部",
     "date": "2026-07-21",
@@ -6678,18 +6276,6 @@
     "id": "auto-1775085958034-2026-06-01-33e58a",
     "staff_name": "佐藤公貴",
     "date": "2026-06-01",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-06-02-63t85j",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-02",
     "type": "出勤",
     "status": "approved",
     "details": {
@@ -7059,18 +6645,6 @@
     "created_at": "2026-04-13T11:38:05.218+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-06-12-uyopb4",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-12",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
     "id": "auto-1774912404116-2026-06-15-9ynsaw",
     "staff_name": "大沼",
     "date": "2026-06-15",
@@ -7081,58 +6655,6 @@
     },
     "reason": null,
     "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-30",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-30",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-10T07:41:25.281Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-10T07:41:25.28+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-23",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-23",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-10T07:41:23.976Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-10T07:41:23.975+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-22",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-22",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-10T07:41:22.503Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-10T07:41:22.502+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-20",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-20",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-10T07:41:18.073Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-10T07:41:18.072+00:00"
   },
   {
     "id": "m-1775085958034-2026-05-23",
@@ -7534,19 +7056,6 @@
     "created_at": "2026-04-13T11:32:05.932+00:00"
   },
   {
-    "id": "m-1775609673233-2026-04-07",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-07",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-10T07:41:11.086Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-10T07:41:11.086+00:00"
-  },
-  {
     "id": "auto-1774827622985-2026-06-02-4typsy",
     "staff_name": "佐久間",
     "date": "2026-06-02",
@@ -7646,18 +7155,6 @@
     "id": "auto-1774703106992-2026-06-19-yh9eo3",
     "staff_name": "吉田",
     "date": "2026-06-19",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:38:05.218+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-06-23-jdviwa",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-23",
     "type": "出勤",
     "status": "approved",
     "details": {
@@ -8043,32 +7540,6 @@
     "created_at": "2026-04-12T11:54:13.914+00:00"
   },
   {
-    "id": "m-1775609673233-2026-06-11",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-11",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-13T11:40:49.439Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:40:49.438+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-06-10",
-    "staff_name": "佐藤晃",
-    "date": "2026-06-10",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-13T11:40:47.097Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T11:40:47.096+00:00"
-  },
-  {
     "id": "m-1774840034905-2026-04-25",
     "staff_name": "坂下",
     "date": "2026-04-25",
@@ -8274,18 +7745,6 @@
     "created_at": "2026-04-07T01:44:59.283+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-07-28-qvjwkl",
-    "staff_name": "佐藤晃",
-    "date": "2026-07-28",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
     "id": "auto-1774998710828-2026-07-08-lqkkyy",
     "staff_name": "阿部",
     "date": "2026-07-08",
@@ -8435,16 +7894,6 @@
     "created_at": "2026-03-23T07:32:14.74+00:00"
   },
   {
-    "id": "m-1775609673233-2026-04-15",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-15",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:01:15.958+00:00"
-  },
-  {
     "id": "auto-w-1774251134740-204",
     "staff_name": "大沼",
     "date": "2026-03-24",
@@ -8490,16 +7939,6 @@
     "details": {},
     "reason": null,
     "created_at": "2026-04-07T02:26:42.362+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-02",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-02",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:00:25.032+00:00"
   },
   {
     "id": "m-1775013401701-2026-04-04",
@@ -8631,30 +8070,6 @@
     "created_at": "2026-04-13T03:07:09.682+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-07-14-vpqqf9",
-    "staff_name": "佐藤晃",
-    "date": "2026-07-14",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
-    "id": "auto-1775609673233-2026-07-15-3zic22",
-    "staff_name": "佐藤晃",
-    "date": "2026-07-15",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
     "id": "m-1775098529702",
     "staff_name": "佐藤 公貴",
     "date": "2026-04-17",
@@ -8720,16 +8135,6 @@
     "details": {},
     "reason": null,
     "created_at": "2026-04-07T02:44:37.385+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-19",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-19",
-    "type": "出勤",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:57.809+00:00"
   },
   {
     "id": "man-1775468734500",
@@ -9104,26 +8509,6 @@
     },
     "reason": null,
     "created_at": "2026-04-05T10:02:26.159+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-12",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-12",
-    "type": "出勤",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:46.621+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-11",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-11",
-    "type": "出勤",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:44.35+00:00"
   },
   {
     "id": "manual-1775444313038",
@@ -9554,54 +8939,6 @@
     "created_at": "2026-04-12T11:51:28.093+00:00"
   },
   {
-    "id": "m-1775609673233-2026-05-16",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-16",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "updatedAt": "2026-04-09T07:47:28.805Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-09T07:47:28.805+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-23",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-23",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "updatedAt": "2026-04-09T07:47:26.813Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-09T07:47:26.813+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-30",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-30",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "updatedAt": "2026-04-09T07:47:25.411Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-09T07:47:25.411+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-05",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-05",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "updatedAt": "2026-04-09T07:47:59.636Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-09T07:47:59.636+00:00"
-  },
-  {
     "id": "auto-1775112743717-2026-07-08-kakngw",
     "staff_name": "山川",
     "date": "2026-07-08",
@@ -9689,32 +9026,6 @@
     },
     "reason": null,
     "created_at": "2026-04-10T08:11:13.55+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-24",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-24",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-10T07:41:26.632Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-10T07:41:26.631+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-08",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-08",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-10T07:41:09.575Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-10T07:41:09.575+00:00"
   },
   {
     "id": "auto-1775112743717-2026-04-10-abjlr2",
@@ -10031,16 +9342,6 @@
     },
     "reason": null,
     "created_at": "2026-04-10T08:11:24.123+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-03",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-03",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:18.02+00:00"
   },
   {
     "id": "auto-1775013401701-2026-04-17-28gkri",
@@ -10664,18 +9965,6 @@
     "created_at": "2026-03-25T00:48:41.209+00:00"
   },
   {
-    "id": "auto-1775609673233-2026-07-09-ajcc5j",
-    "staff_name": "佐藤晃",
-    "date": "2026-07-09",
-    "type": "出勤",
-    "status": "approved",
-    "details": {
-      "note": "自動割当(平日)"
-    },
-    "reason": null,
-    "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
     "id": "auto-1775022701838-2026-07-13-8nzsed",
     "staff_name": "三井諒",
     "date": "2026-07-13",
@@ -10794,19 +10083,6 @@
     },
     "reason": null,
     "created_at": "2026-04-13T03:07:09.682+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-09",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-09",
-    "type": "公休",
-    "status": "approved",
-    "details": {
-      "isManual": true,
-      "updatedAt": "2026-04-10T07:41:08.095Z"
-    },
-    "reason": null,
-    "created_at": "2026-04-10T07:41:08.094+00:00"
   },
   {
     "id": "auto-w-1774251134740-196",
@@ -11023,16 +10299,6 @@
     "details": {},
     "reason": null,
     "created_at": null
-  },
-  {
-    "id": "m-1775609673233-2026-05-10",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-10",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:20.782+00:00"
   },
   {
     "id": "m-1774998710828-2026-04-29",
@@ -11464,36 +10730,6 @@
     "created_at": "2026-04-07T03:01:28.015+00:00"
   },
   {
-    "id": "m-1775609673233-2026-05-22",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-22",
-    "type": "出勤",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:03:03.869+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-21",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-21",
-    "type": "出勤",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:03:01.836+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-05-31",
-    "staff_name": "佐藤晃",
-    "date": "2026-05-31",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:02:28.087+00:00"
-  },
-  {
     "id": "m-1775112743717-2026-05-15",
     "staff_name": "山川",
     "date": "2026-05-15",
@@ -11545,16 +10781,6 @@
     },
     "reason": null,
     "created_at": "2026-03-31T02:46:12.691+00:00"
-  },
-  {
-    "id": "m-1775609673233-2026-04-01",
-    "staff_name": "佐藤晃",
-    "date": "2026-04-01",
-    "type": "公休",
-    "status": "approved",
-    "details": {},
-    "reason": null,
-    "created_at": "2026-04-08T01:00:21.882+00:00"
   },
   {
     "id": "manual-1775010825313",
