@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Platform, Alert, AppState } from 'react-native';
 import { useAuthSession } from './useAuthSession';
 import { useStaffData } from './useStaffData';
@@ -24,15 +24,20 @@ export const useAppLogic = () => {
   const config = useConfigData();
 
   const handleForceCloudSync = useCallback(async (isBackground = false) => {
-    if (isSyncing) return false;
-    setIsSyncing(true);
+    // バックグラウンド同期（リアルタイムイベント等）の場合はUIのローディング状態（点滅）をスキップ
+    if (!isBackground) setIsSyncing(true);
+    
     try {
       const cloudReqs = await cloudStorage.fetchRequests();
-      if (cloudReqs) req.setRequests(cloudReqs);
+      if (cloudReqs) await req.mergeCloudRequests(cloudReqs);
       await staff.syncStaffWithCloud();
       return true;
-    } catch (e) { return false; } finally { setIsSyncing(false); }
-  }, [isSyncing, req, staff]);
+    } catch (e) { 
+      return false; 
+    } finally { 
+      if (!isBackground) setIsSyncing(false); 
+    }
+  }, [req, staff]); // Removed isSyncing from dependencies to avoid loop
 
   const handleForceSave = async () => {
     setIsSyncing(true);
@@ -47,7 +52,7 @@ export const useAppLogic = () => {
     setIsSyncing(true);
     try {
       const cr = await cloudStorage.fetchRequests();
-      if (cr) req.setRequests(cr);
+      if (cr) await req.mergeCloudRequests(cr);
       await staff.syncStaffWithCloud();
       if (Platform.OS === 'web') window.alert('✅ 更新完了');
       else Alert.alert('✅ 完了', '更新しました');
@@ -98,15 +103,47 @@ export const useAppLogic = () => {
     await cloudStorage.deleteRequests(ids);
   }, [req.updateRequests]);
 
+  const syncRef = useRef(handleForceCloudSync);
   useEffect(() => {
-    staff.syncStaffWithCloud();
-  }, []);
+    syncRef.current = handleForceCloudSync;
+  }, [handleForceCloudSync]);
+
+  useEffect(() => {
+    // 起動時の初期同期
+    handleForceCloudSync(true);
+
+    // リアルタイム同期のサブスクリプション
+    // syncRef を使用することで、useEffect 自体の再実行を避けながら最新の関数を呼び出す
+    const channel = cloudStorage.subscribeToChanges(() => {
+      syncRef.current(true);
+    });
+
+    return () => {
+      cloudStorage.unsubscribe(channel);
+    };
+  }, []); // 空の依存関係により、マウント時のみ実行（チャネルが維持される）
+
+  const handleRegister = useCallback(async (newStaff: any) => {
+    // 1. 本人のローカルプロファイルを更新
+    await auth.handleUpdateProfile(newStaff);
+    
+    // 2. 全体スタッフリストに追加し、クラウドに同期
+    await staff.updateStaffList(prev => {
+      // 重複登録を避けるためIDチェック
+      if (prev.find(s => s && s.id === newStaff.id)) return prev;
+      return [...prev, newStaff];
+    });
+    
+    // 3. (オプション) セットアップ画面を閉じる
+    setShowSetup(false);
+  }, [auth.handleUpdateProfile, staff.updateStaffList, setShowSetup]);
 
   return {
     ...auth, ...staff, ...req, ...config,
     currentTab, setCurrentTab, showSetup, setShowSetup, activeDate, setActiveDate, isSyncing,
     handleForceCloudSync, handleForceSave, handleForceFetch,
     handleLogout: auth.logout,
+    handleRegister,
     onAutoAssign, onUndoAutoAssign, onDeleteRequests,
     onDeleteRequest: (id: string) => onDeleteRequests([id]),
     onShareApp: () => setCurrentTab('qrShare'),

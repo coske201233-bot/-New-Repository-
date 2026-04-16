@@ -10,6 +10,7 @@ import { normalizeName } from '../utils/staffUtils';
 interface RequestScreenProps {
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
+  updateRequests: (requests: any[] | ((prev: any[]) => any[])) => Promise<void>;
   onDeleteRequest?: (id: string) => void;
   approveRequest: (id: string, status: string) => void;
   profile: any;
@@ -17,7 +18,7 @@ interface RequestScreenProps {
   onForceCloudSync?: () => Promise<boolean>;
 }
 
-export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setRequests, onDeleteRequest, approveRequest, profile, isAdminAuthenticated, onForceCloudSync }) => {
+export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setRequests, updateRequests, onDeleteRequest, approveRequest, profile, isAdminAuthenticated, onForceCloudSync }) => {
   const [showForm, setShowForm] = useState(false);
   const [isDateModalVisible, setIsDateModalVisible] = useState(false);
   const [newRequest, setNewRequest] = useState({
@@ -103,7 +104,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
         } : null
       };
 
-      setRequests(prev => [request, ...prev]);
+      await updateRequests(prev => [request, ...prev]);
       setShowForm(false);
       setNewRequest({ type: '年休', date: '', reason: '', startTime: '08:30', endTime: '17:15', hours: 1.0 });
       

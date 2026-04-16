@@ -6,7 +6,10 @@ const mapToSql = (obj: any, mapping: Record<string, string>) => {
   const result: any = {};
   for (const key in obj) {
     const sqlKey = mapping[key] || key;
-    result[sqlKey] = obj[key];
+    let val = obj[key];
+    // Ensure 'role' is stored as a string even if passed as an array (data type safety)
+    if (key === 'role' && Array.isArray(val)) val = val.join(',');
+    result[sqlKey] = val;
   }
   return result;
 };
@@ -46,7 +49,11 @@ export const cloudStorage = {
     }
   },
   async upsertStaff(staff: any[]) {
-    const validKeys = ['id', 'name', 'placement', 'position', 'status', 'profession', 'role', 'noHoliday', 'phone', 'password', 'createdAt', 'isApproved', 'pin'];
+    const validKeys = [
+      'id', 'name', 'placement', 'position', 'status', 'profession', 'role', 
+      'noHoliday', 'phone', 'password', 'createdAt', 'isApproved', 'pin',
+      'isLocked', 'lockedMonths'
+    ];
     const filtered = staff.map(s => {
       const obj: any = {};
       validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });
@@ -92,6 +99,7 @@ export const cloudStorage = {
       
       // details内に埋め込まれた情報をトップレベルに復元
       if (d.updatedAt) mapped.updatedAt = d.updatedAt;
+      if (d.source) mapped.source = d.source;
       if (d.isManual !== undefined) mapped.isManual = d.isManual;
       if (d.priority !== undefined) mapped.priority = d.priority;
       if (d.locked !== undefined) mapped.locked = d.locked;
@@ -112,13 +120,37 @@ export const cloudStorage = {
     });
   },
   async upsertRequests(requests: any[]) {
-    const filtered = requests.map(r => {
+    if (!requests || requests.length === 0) return;
+
+    // 1. 最新のクラウド状態を取得して比較する（Safe-Upsert）
+    const targetIds = requests.map(r => r.id);
+    const { data: cloudItems } = await supabase
+      .from('requests')
+      .select('id, details')
+      .in('id', targetIds);
+
+    const cloudUpdateMap = new Map();
+    if (cloudItems) {
+      cloudItems.forEach(item => {
+        const uAt = item.details?.updatedAt || item.details?.updated_at || 0;
+        cloudUpdateMap.set(item.id, typeof uAt === 'string' ? new Date(uAt).getTime() : 0);
+      });
+    }
+
+    const filtered = requests.filter(r => {
+      const clientTime = r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
+      const cloudTime = cloudUpdateMap.get(r.id) || 0;
+      
+      // クライアント側が「新しい」または「同等（レガシーデータ含む）」の場合、
+      // あるいはクラウドに存在しない場合に保存を許可
+      return clientTime >= cloudTime;
+    }).map(r => {
       const obj: any = {};
       const validKeys = ['id', 'staffName', 'staffId', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
       
-      // DBに列がない重要フィールドを details JSONB 内に確実に保存する
       const details = { ...(r.details || {}) };
       if (r.updatedAt) details.updatedAt = r.updatedAt;
+      if (r.source) details.source = r.source;
       if (r.isManual !== undefined) details.isManual = r.isManual;
       if (r.priority !== undefined) details.priority = r.priority;
       if (r.hours !== undefined) details.hours = r.hours;
@@ -128,27 +160,22 @@ export const cloudStorage = {
       validKeys.forEach(k => { if (payload[k] !== undefined) obj[k] = payload[k]; });
       return mapToSql(obj, REQ_MAP);
     });
+
+    if (filtered.length === 0) {
+      console.log('No newer requests to sync. Skipping upsert.');
+      return;
+    }
+
     const { error } = await supabase.from('requests').upsert(filtered, { onConflict: 'id' });
     if (error) {
        console.error('Requests sync error:', error);
        throw error;
     }
-    console.log('Requests synced to cloud successfully');
+    console.log(`${filtered.length} requests synced to cloud successfully (Safe-Upsert)`);
   },
   async upsertSingleRequest(r: any) {
-    const validKeys = ['id', 'staffName', 'staffId', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
-    const details = { ...(r.details || {}) };
-    if (r.updatedAt) details.updatedAt = r.updatedAt;
-    if (r.isManual !== undefined) details.isManual = r.isManual;
-    if (r.priority !== undefined) details.priority = r.priority;
-    if (r.hours !== undefined) details.hours = r.hours;
-    if (r.locked !== undefined) details.locked = r.locked;
-    
-    const payload = { ...r, details };
-    const obj: any = {};
-    validKeys.forEach(k => { if (payload[k] !== undefined) obj[k] = payload[k]; });
-    const { error } = await supabase.from('requests').upsert(mapToSql(obj, REQ_MAP), { onConflict: 'id' });
-    if (error) throw error;
+    // 安全のため、単一更新も共通の Safe-Upsert ロジックを通す
+    await this.upsertRequests([r]);
   },
   async deleteRequest(id: string) {
     const { error } = await supabase.from('requests').delete().eq('id', id);
@@ -187,29 +214,26 @@ export const cloudStorage = {
 
   /**
    * 現在の全リクエストをクラウドに強制保存します（Source of Truth の確立）
+   * 盲目的な全上書きを防止するため、Smart-Sync (Merge) を実行します
    */
   async forceStoreRequests(requests: any[]) {
-    // チャンクに分けてアップロード（大量データ対策）
-    const chunkSize = 100;
-    for (let i = 0; i < requests.length; i += chunkSize) {
-      const chunk = requests.slice(i, i + chunkSize).map(r => {
-        const obj: any = {};
-        const validKeys = ['id', 'staffName', 'staffId', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
-        const details = { ...(r.details || {}) };
-        if (r.updatedAt) details.updatedAt = r.updatedAt;
-        if (r.isManual !== undefined) details.isManual = r.isManual;
-        if (r.hours !== undefined) details.hours = r.hours;
-        if (r.locked !== undefined) details.locked = r.locked;
-        
-        const payload = { ...r, details };
-        validKeys.forEach(k => { if (payload[k] !== undefined) obj[k] = payload[k]; });
-        return mapToSql(obj, REQ_MAP);
-      });
-
-      const { error } = await supabase.from('requests').upsert(chunk, { onConflict: 'id' });
-      if (error) throw error;
+    console.log('Performing Smart-Sync for all requests...');
+    
+    // 1. まずクラウドの全データを取得
+    const cloudReqs = await this.fetchRequests();
+    
+    // 2. クラウドデータとローカルデータを重複排除ロジックでマージ
+    // (循環参照を避けるため、動的インポートまたは共通ユーティリティを使用)
+    const { deduplicateRequests } = require('./requestUtils');
+    const { cleanList } = deduplicateRequests([...cloudReqs, ...requests]);
+    
+    // 3. マージ後の結果を Safe-Upsert で保存
+    if (cleanList.length === 0 && requests.length > 0) {
+      console.warn('Smart-Sync resulted in empty list while input was not empty. Cancellation for safety.');
+      return;
     }
-    console.log(`Force stored ${requests.length} requests to cloud.`);
+    await this.upsertRequests(cleanList);
+    console.log(`Smart-Sync completed. Resulting in ${cleanList.length} unified requests.`);
   },
 
   // --- Realtime ---

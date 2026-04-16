@@ -64,7 +64,7 @@ export default function App() {
         <StatusBar style="light" />
         {!profile ? (
           showSetup ? (
-            <SetupScreen onComplete={handleUpdateProfile} onBack={() => setShowSetup(false)} />
+            <SetupScreen onComplete={logic.handleRegister} onBack={() => setShowSetup(false)} />
           ) : (
             <LoginScreen staffList={staffList} onLogin={handleUpdateProfile} onGoToSetup={() => setShowSetup(true)} />
           )

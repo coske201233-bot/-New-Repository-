@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { STORAGE_KEYS, saveData, loadData } from '../utils/storage';
 import { cloudStorage } from '../utils/cloudStorage';
 
@@ -31,5 +31,31 @@ export const useConfigData = () => {
     load();
   }, []);
 
-  return { weekdayLimit, holidayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode, setStaffViewMode, setMonthlyLimits, setAdminPassword };
+  const updateLimits = useCallback(async (type: string, val: number, monthStr?: string) => {
+    if (monthStr) {
+      setMonthlyLimits(prev => {
+        const next = { ...prev, [monthStr]: { ...(prev[monthStr] || { weekday: 12, sat: 1, sun: 0, pub: 1 }), [type]: val } };
+        saveData(STORAGE_KEYS.MONTHLY_LIMITS, next);
+        cloudStorage.saveConfig(STORAGE_KEYS.MONTHLY_LIMITS, next);
+        return next;
+      });
+    } else {
+      if (type === 'weekday') { setWeekdayLimit(val); saveData(STORAGE_KEYS.WEEKDAY_LIMIT, val); cloudStorage.saveConfig(STORAGE_KEYS.WEEKDAY_LIMIT, val); }
+      if (type === 'saturday') { setSaturdayLimit(val); saveData(STORAGE_KEYS.SATURDAY_LIMIT, val); cloudStorage.saveConfig(STORAGE_KEYS.SATURDAY_LIMIT, val); }
+      if (type === 'sunday') { setSundayLimit(val); saveData(STORAGE_KEYS.SUNDAY_LIMIT, val); cloudStorage.saveConfig(STORAGE_KEYS.SUNDAY_LIMIT, val); }
+      if (type === 'publicHoliday') { setPublicHolidayLimit(val); saveData(STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT, val); cloudStorage.saveConfig(STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT, val); }
+    }
+  }, []);
+
+  const updatePassword = useCallback(async (pass: string) => {
+    setAdminPassword(pass);
+    await saveData(STORAGE_KEYS.ADMIN_PASSWORD, pass);
+    await cloudStorage.saveConfig(STORAGE_KEYS.ADMIN_PASSWORD, pass);
+  }, []);
+
+  return useMemo(() => ({ 
+    weekdayLimit, holidayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode, 
+    setStaffViewMode, setMonthlyLimits, setAdminPassword,
+    updateLimits, updatePassword
+  }), [weekdayLimit, holidayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode, updateLimits, updatePassword]);
 };

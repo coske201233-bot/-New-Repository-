@@ -28,6 +28,7 @@ const getSeasonalTheme = (month: number) => {
 interface CalendarScreenProps {
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
+  updateRequests: (requests: any[] | ((prev: any[]) => any[])) => Promise<void>;
   weekdayLimit: number;
   holidayLimit: number;
   saturdayLimit: number;
@@ -53,7 +54,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   saturdayLimit, sundayLimit, publicHolidayLimit,
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,
   currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest,
-  onForceSave, onForceFetch, isSyncing = false
+  onForceSave, onForceFetch, isSyncing = false, updateRequests
 }) => {
   const [selectedDate, setSelectedDate] = useState(currentDate || new Date());
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
@@ -217,22 +218,27 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               }
             }
 
-            // 3. ローカルステートの更新と「状態保持（公休化）」
-            setRequests((prev: any[]) => {
-              // まず対象の全リクエストをフィルタリング
-              const filtered = prev.filter(r => !(normalizeName(r.staffName) === normalizeName(staffName) && r.date === dateStr));
+            // 3. ローカルおよびクラウドステートの更新と「状態保持（公休化）」
+            // 決定論的ID (m-スタッフ名-日付) を使用することで、DB内での重複を防ぎ、確実に上書きされるようにします
+            const deterministicId = `m-${normalizeName(staffName)}-${dateStr}`;
+
+            await updateRequests((prev: any[]) => {
+              // 重複を避けるため、既存の同一日のデータをフィルタリング
+              const filtered = prev.filter(r => !(normalizeName(r.staffName || r.staff_name) === normalizeName(staffName) && r.date === dateStr));
               
               // 平日で「出勤」を削除した場合のみ、「公休（休み）」として状態を上書き保持する
               if (wasWorking && dayType === 'weekday') {
                 const offRequest = {
-                  id: `off-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                  id: deterministicId,
                   staffName: staffName,
                   date: dateStr,
                   type: '公休',
                   status: 'approved',
                   reason: '調整',
+                  isManual: true,
                   createdAt: new Date().toISOString(),
                   updatedAt: new Date().toISOString(),
+                  details: { priority: 100 } // 管理者操作を最優先にする
                 };
                 return [...filtered, offRequest];
               }
@@ -263,7 +269,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
           }
         }
         
-        setRequests((prev: any[]) => prev.filter(r => !idsToDelete.includes(r.id)));
+        await updateRequests((prev: any[]) => prev.filter(r => !idsToDelete.includes(r.id)));
         Alert.alert('完了', 'シフトをクリアしました。');
       }
       setIsAddStaffModalVisible(false);
@@ -273,19 +279,22 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     }
 
     const newReqs = staffNames.map(name => ({
-      id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `m-${normalizeName(name)}-${dateStr}`, // Deterministic ID
       staffName: name,
       date: dateStr,
       type: selectedType,
       status: 'approved',
       reason: '管理者による調整',
+      isManual: true,
       details: { 
         note: '手動割当',
+        priority: 100, // 管理者操作を最優先
         duration: (selectedType === '時間休' || selectedType === '特休' || selectedType === '看護休暇') ? hourlyDuration : undefined
       },
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     }));
-    setRequests((prev: any[]) => [...prev, ...newReqs]);
+    await updateRequests((prev: any[]) => [...prev, ...newReqs]);
     setIsAddStaffModalVisible(false);
     setIsTypeModalVisible(false);
     setSelectedStaffToAdd([]);

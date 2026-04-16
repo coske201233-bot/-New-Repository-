@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { STORAGE_KEYS, saveData, loadData } from '../utils/storage';
 import { cloudStorage } from '../utils/cloudStorage';
 import { sortStaffByName } from '../utils/staffUtils';
@@ -17,20 +17,22 @@ export const useStaffData = () => {
     load();
   }, []);
 
-  const updateStaffList = async (update: any[] | ((prev: any[]) => any[])) => {
-    const next = typeof update === 'function' ? update(staffList) : update;
-    const sorted = sortStaffByName(next.filter((s: any) => s && s.name));
-    setStaffList(sorted);
-    await saveData(STORAGE_KEYS.STAFF_LIST, sorted);
-    if (sorted.length > 0) await cloudStorage.upsertStaff(sorted);
-  };
+  const updateStaffList = useCallback(async (update: any[] | ((prev: any[]) => any[])) => {
+    setStaffList(prev => {
+      const next = typeof update === 'function' ? update(prev) : update;
+      const sorted = sortStaffByName(next.filter((s: any) => s && s.name));
+      saveData(STORAGE_KEYS.STAFF_LIST, sorted);
+      if (sorted.length > 0) cloudStorage.upsertStaff(sorted);
+      return sorted;
+    });
+  }, []);
 
-  const updateStaffLocks = async (l: any) => {
+  const updateStaffLocks = useCallback(async (l: any) => {
     setStaffLocks(l);
     await cloudStorage.saveConfig('staff_locks', l).catch(console.error);
-  };
+  }, []);
 
-  const syncStaffWithCloud = async () => {
+  const syncStaffWithCloud = useCallback(async () => {
     try {
       const cloudStaff = await cloudStorage.fetchStaff();
       if (cloudStaff && cloudStaff.length > 0) {
@@ -43,7 +45,9 @@ export const useStaffData = () => {
       console.error('Sync Staff Error:', e);
     }
     return null;
-  };
+  }, []);
 
-  return { staffList, setStaffList, staffLocks, setStaffLocks, updateStaffList, updateStaffLocks, syncStaffWithCloud };
+  return useMemo(() => ({ 
+    staffList, setStaffList, staffLocks, setStaffLocks, updateStaffList, updateStaffLocks, syncStaffWithCloud 
+  }), [staffList, staffLocks, updateStaffList, updateStaffLocks, syncStaffWithCloud]);
 };

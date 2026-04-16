@@ -6,7 +6,6 @@ import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { Users, Coffee, Briefcase, Building2, MapPin, X, RefreshCw, AlertCircle, ChevronRight } from 'lucide-react-native';
 import { getDayType, getDateStr, normalizeName } from '../utils/dateUtils';
 import { sortStaffByName } from '../utils/staffUtils';
-import { getCurrentLimit } from '../utils/limitUtils';
 
 interface HomeScreenProps {
   onNavigateToStaff?: (ward: string) => void;
@@ -31,31 +30,62 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onForceCloudSync, profile, isAdminAuthenticated, onOpenRequests
 }) => {
   const [selectedWardDetails, setSelectedWardDetails] = useState<string | null>(null);
+  const [isLeaveModalVisible, setIsLeaveModalVisible] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
   const hospitalPlacements = ['2F', '4F', '外来', 'フォロー', '兼務', '管理'];
   
+  const today = new Date();
+  const dayType = getDayType(today);
+  
+  const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '午前振替', '午後振替', '特休', '看護休暇'];
+
+  // Helper to determine if a staff member is working today based on shift requests
+  // Aligned with CalendarScreen.tsx logic
+  const isWorkingToday = (staffName: string) => {
+    const todayStr = getDateStr(new Date());
+    const userReqs = requests.filter(r => normalizeName(r.staffName || r.staff_name) === normalizeName(staffName) && r.date === todayStr);
+    
+    // Check approved first, then pending as fallback (matches CalendarScreen logic)
+    const approved = userReqs.find(r => r.status === 'approved');
+    const pending = userReqs.find(r => r.status === 'pending');
+    const shift = approved || pending;
+
+    if (shift) {
+      return attendanceTypes.some(at => normalizeName(at) === normalizeName(shift.type));
+    }
+    // If no explicit shift exists, standard staff default to Working on weekdays, Off on weekends.
+    return dayType === 'weekday';
+  };
+
+  const isStaffOut = (s: any) => {
+    const status = normalizeName(s.status || '');
+    const placement = normalizeName(s.placement || '');
+    const position = normalizeName(s.position || '');
+    return status === '長期休暇' || placement === '長期休暇' || position === '長期休暇' || status === '入職前';
+  };
+
   const hospitalCounts = hospitalPlacements.map(label => {
     return {
       label,
       count: staffList.filter(s => {
-        const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
+        const isOut = isStaffOut(s);
         return s.placement === label && s.profession !== '助手' && !isOut;
       }).length
     };
   });
 
-  const outStaffCount = staffList.filter(s => normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前').length;
+  const outStaffCount = staffList.filter(s => isStaffOut(s)).length;
   const assistantCount = staffList.filter(s => {
-    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
+    const isOut = isStaffOut(s);
     return (s.profession === '助手' || s.placement === '助手') && !isOut;
   }).length;
   const totalVisits = staffList.filter(s => {
-    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
+    const isOut = isStaffOut(s);
     return s.placement === '訪問' && !isOut;
   }).length;
 
   const hospitalEligible = staffList.filter(s => {
-    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
+    const isOut = isStaffOut(s);
     return hospitalPlacements.includes(s.placement) && !isOut && s.profession !== '助手';
   });
   
@@ -63,41 +93,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const otCount = hospitalEligible.filter(s => s.profession === 'OT').length;
   const stCount = hospitalEligible.filter(s => s.profession === 'ST').length;
   const hokatsuCount = staffList.filter(s => {
-    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
+    const isOut = isStaffOut(s);
     return s.placement === '包括' && !isOut;
   }).length;
   const hainyoCount = staffList.filter(s => {
-    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
+    const isOut = isStaffOut(s);
     return s.placement === '排尿支援' && !isOut;
   }).length;
 
   const totalHospital = ptCount + otCount + stCount + hokatsuCount + hainyoCount;
-  
-  const today = new Date();
-  const dayType = getDayType(today);
-  
-  // Helper to determine if a staff member is working today based on shift requests
-  const isWorkingToday = (staffName: string) => {
-    const todayStr = getDateStr(new Date());
-    const shift = requests.find(r => normalizeName(r.staffName) === normalizeName(staffName) && r.date === todayStr && r.status === 'approved');
-    if (shift) {
-      return shift.type === '出勤';
-    }
-    // If no explicit shift exists, standard staff default to Working on weekdays, Off on weekends.
-    // However, since we now have full auto-assignment, we rely solely on what is marked.
-    // But as a fallback for missing shifts on weekdays:
-    return false;
-  };
 
-  // Today's attendance counts based on shifts
-  const hospitalAttending = staffList.filter(s => {
-    const isOut = normalizeName(s.status) === '長期休暇' || normalizeName(s.placement) === '長期休暇' || normalizeName(s.position) === '長期休暇' || normalizeName(s.status) === '入職前';
-    return isWorkingToday(s.name) && 
-           (hospitalPlacements.includes(s.placement) || ['包括', '排尿支援'].includes(s.placement)) &&
-           s.profession !== '助手' &&
-           !isOut;
+  // 1. 出勤者数 (訪問と助手を抜いた数)
+  const attendingStaffCount = staffList.filter(s => {
+    const isOut = isStaffOut(s);
+    const isVisitorOrAssistant = s.placement === '訪問' || s.profession === '助手' || s.placement === '助手';
+    return isWorkingToday(s.name) && !isVisitorOrAssistant && !isOut;
   }).length;
 
+  // 2. 休暇者数 (全員、長期休暇含む)
+  const leaveStaffList = staffList.filter(s => !isWorkingToday(s.name) || isStaffOut(s));
+  const leaveStaffCount = leaveStaffList.length;
 
   const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
   const currentMonthly = monthlyLimits[monthStr] || { 
@@ -108,9 +123,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                        dayType === 'sat' ? currentMonthly.sat :
                        dayType === 'sun' ? currentMonthly.sun :
                        currentMonthly.pub;
-  const isOverLimit = hospitalAttending > currentLimit;
-  const isUnderLimit = hospitalAttending < currentLimit;
-  
+
   const professionCounts = [
     { label: 'PT', count: ptCount, color: '#0ea5e9' },
     { label: 'OT', count: otCount, color: '#f59e0b' },
@@ -170,7 +183,52 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           })()
         )}
 
-        {/* Top Summary Cards */}
+        {/* Today's Status Summary */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleRow}>
+            <Coffee color={COLORS.primary} size={18} />
+            <ThemeText variant="h2">本日の状況</ThemeText>
+          </View>
+        </View>
+        <View style={styles.summaryRow}>
+          <ThemeCard style={[styles.summaryCard, { borderColor: COLORS.primary, borderWidth: 1 }]}>
+            <ThemeText variant="label">出勤者数</ThemeText>
+            <ThemeText variant="h2" style={{ color: COLORS.primary }}>
+              {attendingStaffCount}<ThemeText variant="caption"> 名</ThemeText>
+            </ThemeText>
+            <ThemeText variant="caption" color={COLORS.textSecondary}>※訪問・助手を抜く</ThemeText>
+          </ThemeCard>
+
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setIsLeaveModalVisible(true)}>
+            <ThemeCard style={[styles.summaryCard, { borderColor: '#f87171', borderWidth: 1 }]}>
+              <ThemeText variant="label">休暇者数</ThemeText>
+              <ThemeText variant="h2" style={{ color: '#f87171' }}>
+                {leaveStaffCount}<ThemeText variant="caption"> 名</ThemeText>
+              </ThemeText>
+              <ThemeText variant="caption" color={COLORS.textSecondary}>タップで一覧表示</ThemeText>
+            </ThemeCard>
+          </TouchableOpacity>
+        </View>
+
+        {/* Attendance Limit Info */}
+        {(dayType === 'weekday' || dayType === 'sat') && (
+          <ThemeCard style={{ padding: SPACING.md, marginBottom: SPACING.xl, backgroundColor: 'rgba(56, 189, 248, 0.05)', borderColor: 'rgba(56, 189, 248, 0.2)', borderWidth: 1 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <ThemeText variant="body">本日の出勤制限: <ThemeText bold>{currentLimit}名</ThemeText></ThemeText>
+              <ThemeText variant="body" color={attendingStaffCount > currentLimit ? '#ef4444' : '#10b981'}>
+                {attendingStaffCount > currentLimit ? `制限オーバー (${attendingStaffCount - currentLimit}名)` : '制限内'}
+              </ThemeText>
+            </View>
+          </ThemeCard>
+        )}
+
+        {/* Top Summary Cards (Enrollment) */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleRow}>
+            <Users color={COLORS.primary} size={18} />
+            <ThemeText variant="h2">在籍数状況</ThemeText>
+          </View>
+        </View>
         <View style={styles.summaryRow}>
           <ThemeCard style={styles.summaryCard}>
             <View style={styles.summaryIcon}>
@@ -253,7 +311,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           ))}
         </View>
 
-        {/* Drill-down Modal */}
+        {/* Hospital Drill-down Modal */}
         <Modal
           visible={!!selectedWardDetails}
           transparent
@@ -296,6 +354,60 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <TouchableOpacity 
                 style={styles.closeBtn} 
                 onPress={() => setSelectedWardDetails(null)}
+              >
+                <ThemeText color={COLORS.primary} bold>閉じる</ThemeText>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Leave List Modal */}
+        <Modal
+          visible={isLeaveModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setIsLeaveModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <View style={styles.modalTitleRow}>
+                  <Coffee color="#f87171" size={20} />
+                  <ThemeText variant="h2" style={{ marginLeft: 8 }}>本日の休暇スタッフ</ThemeText>
+                </View>
+                <TouchableOpacity onPress={() => setIsLeaveModalVisible(false)}>
+                  <X color={COLORS.textSecondary} size={24} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.staffListScroll}>
+                {sortStaffByName(leaveStaffList)
+                  .map((staff, idx) => (
+                    <View key={staff.id || idx} style={styles.staffListItem}>
+                      <View style={[styles.staffAvatar, { backgroundColor: 'rgba(248, 113, 113, 0.1)' }]}>
+                        <ThemeText bold color="#f87171">{staff.name[0]}</ThemeText>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <ThemeText variant="body" bold adjustsFontSizeToFit numberOfLines={1}>{staff.name}</ThemeText>
+                        <ThemeText variant="caption" color={COLORS.textSecondary} adjustsFontSizeToFit numberOfLines={1}>{staff.placement || '未設定'} / {staff.profession}</ThemeText>
+                      </View>
+                      {isStaffOut(staff) && (
+                        <View style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                          <ThemeText variant="caption" color="#a855f7" bold>長期/入職前</ThemeText>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                {leaveStaffList.length === 0 && (
+                  <View style={{ padding: 40, alignItems: 'center' }}>
+                    <ThemeText color={COLORS.textSecondary}>本日、休暇予定の職員はいません</ThemeText>
+                  </View>
+                )}
+              </ScrollView>
+
+              <TouchableOpacity 
+                style={styles.closeBtn} 
+                onPress={() => setIsLeaveModalVisible(false)}
               >
                 <ThemeText color={COLORS.primary} bold>閉じる</ThemeText>
               </TouchableOpacity>

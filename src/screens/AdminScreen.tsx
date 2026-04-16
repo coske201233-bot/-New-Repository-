@@ -31,6 +31,7 @@ interface AdminScreenProps {
   canUndoAutoAssign: boolean;
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
+  updateRequests: (requests: any[] | ((prev: any[]) => any[])) => Promise<void>;
   onForceSave?: () => void;
   onForceFetch?: () => void;
   isSyncing?: boolean;
@@ -39,7 +40,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList, updateStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
   currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign,
-  isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
+  isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests, updateRequests,
   onForceSave, onForceFetch, isSyncing = false
 }) => {
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
@@ -101,13 +102,13 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   const handleApproveRequest = async (req: any) => {
     const updatedReq = { ...req, status: 'approved' };
-    setRequests(prev => prev.map(r => r.id === req.id ? updatedReq : r));
-    await cloudStorage.upsertRequests([updatedReq]);
+    await updateRequests(prev => prev.map(r => r.id === req.id ? updatedReq : r));
     Alert.alert('完了', '申請を承認しました。');
   };
 
   const handleRejectRequest = async (id: string) => {
-    setRequests(prev => prev.filter(r => r.id !== id));
+    await updateRequests(prev => prev.filter(r => r.id !== id));
+    await cloudStorage.deleteRequests([id]); // Ensure cloud deletion
     Alert.alert('却下', '申請を却下し、削除しました。');
   };
 
@@ -279,23 +280,13 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       // If name changed, we MUST update all existing requests for this staff member
       // to avoid mapping errors on the calendar and personal screens.
       if (isNameChanged) {
-        setRequests(prev => {
-          const updated = prev.map(r => {
-            if (normalizeName(r.staffName) === normalizeName(oldName)) {
+        await updateRequests(prev => {
+          return prev.map(r => {
+            if (normalizeName(r.staffName || r.staff_name) === normalizeName(oldName)) {
               return { ...r, staffName: normalizedNameVal };
             }
             return r;
           });
-          
-          // Trigger cloud sync for the updated requests
-          const changedRequests = updated.filter(r => normalizeName(r.staffName) === normalizedNameVal);
-          if (changedRequests.length > 0) {
-            cloudStorage.upsertRequests(changedRequests).catch(err => {
-              console.error('Failed to sync renamed requests:', err);
-            });
-          }
-          
-          return updated;
         });
       }
 
@@ -379,13 +370,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
       const changedOnly = updatedRequests.filter((r, i) => r.staffName !== requests[i].staffName);
       
-      // Update local state first
-      setRequests(updatedRequests);
-      
-      // Sync to cloud
-      if (changedOnly.length > 0) {
-        await cloudStorage.upsertRequests(changedOnly);
-      }
+      // Update local and cloud state
+      await updateRequests(updatedRequests);
       
       Alert.alert('完了', `${changedOnly.length}件の申請データを新しい名前に統合しました。`);
       setShowMaintenanceModal(false);
