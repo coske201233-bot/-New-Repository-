@@ -14,23 +14,36 @@ export const useConfigData = () => {
 
   useEffect(() => {
     const load = async () => {
-      const loadConfig = async (key: string, setter: (v: any) => void) => {
+      const configKeys = [
+        { key: STORAGE_KEYS.WEEKDAY_LIMIT, setter: setWeekdayLimit },
+        { key: STORAGE_KEYS.SATURDAY_LIMIT, setter: setSaturdayLimit },
+        { key: STORAGE_KEYS.SUNDAY_LIMIT, setter: setSundayLimit },
+        { key: STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT, setter: setPublicHolidayLimit },
+        { key: STORAGE_KEYS.MONTHLY_LIMITS, setter: setMonthlyLimits },
+        { key: STORAGE_KEYS.ADMIN_PASSWORD, setter: setAdminPassword },
+        { key: STORAGE_KEYS.STAFF_VIEW_MODE, setter: setStaffViewMode },
+      ];
+
+      // 個別のロード関数
+      const loadItem = async (key: string, setter: (v: any) => void) => {
         try {
           const lv = await loadData(key);
           if (lv !== null) setter(lv);
-          const cv = await cloudStorage.fetchConfig(key);
+          
+          // クラウド取得。タイムアウトを設けて起動を妨げないようにする
+          const cv = await Promise.race([
+            cloudStorage.fetchConfig(key),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+          ]).catch(() => null);
+
           if (cv !== undefined && cv !== null) setter(cv);
         } catch (e) {
-          console.warn(`Config load failed for key: ${key}`, e);
+          console.warn(`Config background load failed for key: ${key}`);
         }
       };
-      await loadConfig(STORAGE_KEYS.WEEKDAY_LIMIT, setWeekdayLimit);
-      await loadConfig(STORAGE_KEYS.SATURDAY_LIMIT, setSaturdayLimit);
-      await loadConfig(STORAGE_KEYS.SUNDAY_LIMIT, setSundayLimit);
-      await loadConfig(STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT, setPublicHolidayLimit);
-      await loadConfig(STORAGE_KEYS.MONTHLY_LIMITS, setMonthlyLimits);
-      await loadConfig(STORAGE_KEYS.ADMIN_PASSWORD, setAdminPassword);
-      await loadConfig(STORAGE_KEYS.STAFF_VIEW_MODE, setStaffViewMode);
+
+      // すべての設定を並列でロード開始（全体を待たない）
+      configKeys.forEach(item => loadItem(item.key, item.setter));
     };
     load();
   }, []);
