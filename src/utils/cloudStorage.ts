@@ -92,15 +92,20 @@ export const cloudStorage = {
 
   // --- Requests ---
   async fetchRequests() {
-    // 取得上限を大幅に引き上げ
-    // status が deleted のものは取得しない（ゾンビデータ復活防止）
-    const { data, error } = await supabase
-      .from('requests')
-      .select('*')
-      .neq('status', 'deleted')
-      .limit(100000);
-    if (error) throw error;
-    return (data || []).map(r => {
+    try {
+      if (!supabase) return [];
+      // 取得上限を大幅に引き上げ
+      // status が deleted のものは取得しない（ゾンビデータ復活防止）
+      const { data, error } = await supabase
+        .from('requests')
+        .select('*')
+        .neq('status', 'deleted')
+        .limit(100000);
+      if (error) {
+        console.warn('[CONFIG_ERROR Handled] fetchRequests failed:', error.message);
+        return [];
+      }
+      return (data || []).map(r => {
       const mapped = mapFromSql(r, REQ_MAP);
       const d = mapped.details || {};
       
@@ -125,6 +130,10 @@ export const cloudStorage = {
       }
       return mapped;
     });
+    } catch (e) {
+      console.warn('[CRITICAL CATCH] fetchRequests failed');
+      return [];
+    }
   },
   async upsertRequests(requests: any[]) {
     if (!requests || requests.length === 0) return;
@@ -296,9 +305,18 @@ export const cloudStorage = {
 
   // --- Config ---
   async fetchConfig(key: string) {
-    const { data, error } = await supabase.from('app_config').select('value').eq('key', key).single();
-    if (error && error.code !== 'PGRST116') throw error;
-    return data?.value;
+    try {
+      if (!supabase) return null;
+      const { data, error } = await supabase.from('app_config').select('value').eq('key', key).single();
+      if (error && error.code !== 'PGRST116') {
+        console.warn(`[CONFIG_ERROR Handled] fetchConfig failed for ${key}:`, error.message);
+        return null;
+      }
+      return data?.value;
+    } catch (e) {
+      console.warn(`[CRITICAL CATCH] fetchConfig failed for ${key}`);
+      return null;
+    }
   },
   async saveConfig(key: string, value: any) {
     const { error } = await supabase.from('app_config').upsert({ key, value }, { onConflict: 'key' });

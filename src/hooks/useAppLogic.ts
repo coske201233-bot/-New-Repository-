@@ -209,30 +209,48 @@ export const useAppLogic = () => {
     let isMounted = true;
 
     const initializeData = async () => {
-      // 起動タイムアウトガード: 7秒経過しても初期化が終わらない場合、強制的に起動フラグを立てる
-      // これにより、Supabaseへの接続待ちでアプリが「真っ白」になるのを防ぎます
+      // 超強力タイムアウト・ガード (5s) - シニアアーキテクト命令
       const forceInitTimeout = setTimeout(() => {
         if (isMounted) {
-          console.warn('⚠️ Initialization safety timeout reached. Forcing app start...');
-          // useAuthSession 側の初期化が遅れていても、アプリとしての生存を優先
+          console.warn('🚨 APP CRITICAL: Initialization deadlock detected at 5s. FORCING UI RENDER.');
+          setIsInitialized(true); // 強制起動
         }
-      }, 7000);
+      }, 5000); 
 
       try {
-        // 0. 強制リセット（一度だけ実行、失敗しても先に進む）
-        await performGlobalReset().catch(e => console.error('Reset failed:', e));
+        console.log('--- APP INITIALIZATION START ---');
+        setCloudSyncStatus('syncing');
+
+        // 0. 強制リセット（一度だけ実行、死活に影響させない）
+        await performGlobalReset().catch(e => console.warn('Reset skipped:', e));
 
         // 1. 起動時の初期同期
-        // データ取得に時間がかかっても、アプリの起動（画面への遷移）を優先する
-        await Promise.race([
-          handleForceCloudSync(true),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Initial sync timeout')), 5000))
-        ]).catch(e => console.error('Initial sync skipped or timed out:', e));
+        // すべての内部呼び出しを .catch() で保護し、Uncaught Promise をゼロにする
+        try {
+          await Promise.race([
+            (async () => {
+              // 個別に catch して、Database unconfigured 等で全体を殺さないようにする
+              const fetchStaff = cloudStorage.fetchStaff().catch(() => []);
+              const fetchRequests = cloudStorage.fetchRequests().catch(() => []);
+              
+              const [cStaff, cReqs] = await Promise.all([fetchStaff, fetchRequests]);
+              
+              if (cStaff && cStaff.length > 0) setStaff(cStaff);
+              if (cReqs && cReqs.length > 0) setRequests(cReqs);
+            })(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+          ]);
+        } catch (syncErr) {
+          console.warn('[CONFIG_ERROR Handled] Initialization sync partially failed, continuing...', syncErr);
+        }
 
       } catch (e) {
-        console.error('initializeData fatal error:', e);
+        console.error('Fatal initialization error (caught):', e);
       } finally {
         clearTimeout(forceInitTimeout);
+        setIsInitialized(true); // 絶対にtrueにする
+        setCloudSyncStatus('idle');
+        console.log('--- APP INITIALIZATION COMPLETED (FORCED) ---');
       }
     };
 

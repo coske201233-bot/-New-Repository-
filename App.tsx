@@ -28,15 +28,15 @@ export default function App() {
     handleUpdateProfile, handleLogout, handleForceCloudSync
   } = logic;
 
-  // レジリエンス・ガード: 5秒以上初期化が終わらない場合、強制的に「起動済み」扱いにする
+  // 超強力レジリエンス・ガード: 絶対に5秒以内に画面を出す (Senior Architect Command)
   const [hasTimedOut, setHasTimedOut] = React.useState(false);
   React.useEffect(() => {
     const timer = setTimeout(() => {
       if (!isInitialized) {
-        console.warn('App Resilience: Initialization taking too long, forcing UI display.');
+        console.warn('🚨 APP CRITICAL: Initialization deadlock detected at 5s. FORCING UI RENDER.');
         setHasTimedOut(true);
       }
-    }, 5000);
+    }, 5000); 
     return () => clearTimeout(timer);
   }, [isInitialized]);
 
@@ -127,18 +127,23 @@ export default function App() {
   }
 
   const renderContent = () => {
-    // 巨大なプロップスオブジェクトの型推論によるビルドエラー（Stack Overflow）を避けるため、anyでキャスト
-    const props: any = { ...logic, currentDate: activeDate, setCurrentDate: setActiveDate, isPrivileged: isAdminAuthenticated };
+    // NULL-DATA SURVIVAL RULE: すべてのアクセスにオプショナルチェイニングを徹底
+    const props: any = { 
+      ...logic, 
+      currentDate: activeDate ?? new Date(), 
+      setCurrentDate: setActiveDate, 
+      isPrivileged: isAdminAuthenticated || false 
+    };
 
-    switch (currentTab) {
-      case 'home': return <HomeScreen onNavigateToStaff={() => setCurrentTab('staff')} {...props} />;
-      case 'calendar': return <CalendarScreen {...props} onForceSave={logic.handleForceSave} onForceFetch={logic.handleForceFetch} />;
+    switch (currentTab || 'home') {
+      case 'home': return <HomeScreen onNavigateToStaff={() => setCurrentTab?.('staff')} {...props} />;
+      case 'calendar': return <CalendarScreen {...props} onForceSave={logic?.handleForceSave} onForceFetch={logic?.handleForceFetch} />;
       case 'requests': return <RequestScreen {...props} />;
       case 'staff': return <StaffScreen {...props} />;
-      case 'admin': return <AdminScreen {...props} onLogout={handleLogout} onForceSave={logic.handleForceSave} onForceFetch={logic.handleForceFetch} />;
-      case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={logic.requests} approveRequest={logic.approveRequest} deleteRequest={(id: string) => logic.onDeleteRequests([id])} />;
-      case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab('admin')} />;
-      default: return <HomeScreen onNavigateToStaff={() => setCurrentTab('staff')} {...props} />;
+      case 'admin': return <AdminScreen {...props} onLogout={handleLogout} onForceSave={logic?.handleForceSave} onForceFetch={logic?.handleForceFetch} />;
+      case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab?.('admin')} requests={logic?.requests || []} approveRequest={logic?.approveRequest} deleteRequest={(id: string) => logic?.onDeleteRequests?.([id])} />;
+      case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab?.('admin')} />;
+      default: return <HomeScreen onNavigateToStaff={() => setCurrentTab?.('staff')} {...props} />;
     }
   };
 
