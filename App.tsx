@@ -28,6 +28,18 @@ export default function App() {
     handleUpdateProfile, handleLogout, handleForceCloudSync
   } = logic;
 
+  // レジリエンス・ガード: 5秒以上初期化が終わらない場合、強制的に「起動済み」扱いにする
+  const [hasTimedOut, setHasTimedOut] = React.useState(false);
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!isInitialized) {
+        console.warn('App Resilience: Initialization taking too long, forcing UI display.');
+        setHasTimedOut(true);
+      }
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [isInitialized]);
+
   // エラー画面コンポーネント
   const renderErrorView = () => {
     const isDbError = loadError?.includes('データベース構成エラー');
@@ -99,8 +111,18 @@ export default function App() {
     );
   };
 
-  // 初期化未完了、またはエラー発生時にプロフィールがない場合はエラー画面を表示
-  if (!isInitialized || (loadError && !profile)) {
+  // 初期化未完了でも、タイムアウトが発生しているかエラーメッセージがある場合は表示を試みる
+  if (!isInitialized && !hasTimedOut && !loadError) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <ThemeText style={{ marginTop: 16, color: COLORS.textSecondary }}>起動中...</ThemeText>
+      </View>
+    );
+  }
+
+  // エラーが発生している、またはタイムアウトしたがプロファイルがない場合
+  if (loadError || (hasTimedOut && !profile)) {
     return renderErrorView();
   }
 

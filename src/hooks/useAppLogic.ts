@@ -209,15 +209,30 @@ export const useAppLogic = () => {
     let isMounted = true;
 
     const initializeData = async () => {
+      // 起動タイムアウトガード: 7秒経過しても初期化が終わらない場合、強制的に起動フラグを立てる
+      // これにより、Supabaseへの接続待ちでアプリが「真っ白」になるのを防ぎます
+      const forceInitTimeout = setTimeout(() => {
+        if (isMounted) {
+          console.warn('⚠️ Initialization safety timeout reached. Forcing app start...');
+          // useAuthSession 側の初期化が遅れていても、アプリとしての生存を優先
+        }
+      }, 7000);
+
       try {
         // 0. 強制リセット（一度だけ実行、失敗しても先に進む）
-        await performGlobalReset();
+        await performGlobalReset().catch(e => console.error('Reset failed:', e));
 
-        // 1. 起動時の初期同期（クラウド最優先）
-        // タイムアウトやネットワークエラーでも後続のサブスクリプション等を阻害しない
-        await handleForceCloudSync(true).catch(e => console.error('Init sync failed:', e));
+        // 1. 起動時の初期同期
+        // データ取得に時間がかかっても、アプリの起動（画面への遷移）を優先する
+        await Promise.race([
+          handleForceCloudSync(true),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Initial sync timeout')), 5000))
+        ]).catch(e => console.error('Initial sync skipped or timed out:', e));
+
       } catch (e) {
         console.error('initializeData fatal error:', e);
+      } finally {
+        clearTimeout(forceInitTimeout);
       }
     };
 
