@@ -9,16 +9,20 @@ export const useConfigData = () => {
   const [sundayLimit, setSundayLimit] = useState(2);
   const [publicHolidayLimit, setPublicHolidayLimit] = useState(2);
   const [monthlyLimits, setMonthlyLimits] = useState<Record<string, any>>({});
-  const [adminPassword, setAdminPassword] = useState('1114');
+  const [adminPassword, setAdminPassword] = useState('0000');
   const [staffViewMode, setStaffViewMode] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       const loadConfig = async (key: string, setter: (v: any) => void) => {
-        const lv = await loadData(key);
-        if (lv !== null) setter(lv);
-        const cv = await cloudStorage.fetchConfig(key);
-        if (cv !== undefined && cv !== null) setter(cv);
+        try {
+          const lv = await loadData(key);
+          if (lv !== null) setter(lv);
+          const cv = await cloudStorage.fetchConfig(key);
+          if (cv !== undefined && cv !== null) setter(cv);
+        } catch (e) {
+          console.warn(`Config load failed for key: ${key}`, e);
+        }
       };
       await loadConfig(STORAGE_KEYS.WEEKDAY_LIMIT, setWeekdayLimit);
       await loadConfig(STORAGE_KEYS.SATURDAY_LIMIT, setSaturdayLimit);
@@ -32,18 +36,35 @@ export const useConfigData = () => {
   }, []);
 
   const updateLimits = useCallback(async (type: string, val: number, monthStr?: string) => {
-    if (monthStr) {
-      setMonthlyLimits(prev => {
-        const next = { ...prev, [monthStr]: { ...(prev[monthStr] || { weekday: 12, sat: 1, sun: 0, pub: 1 }), [type]: val } };
-        saveData(STORAGE_KEYS.MONTHLY_LIMITS, next);
-        cloudStorage.saveConfig(STORAGE_KEYS.MONTHLY_LIMITS, next);
-        return next;
-      });
-    } else {
-      if (type === 'weekday') { setWeekdayLimit(val); saveData(STORAGE_KEYS.WEEKDAY_LIMIT, val); cloudStorage.saveConfig(STORAGE_KEYS.WEEKDAY_LIMIT, val); }
-      if (type === 'saturday') { setSaturdayLimit(val); saveData(STORAGE_KEYS.SATURDAY_LIMIT, val); cloudStorage.saveConfig(STORAGE_KEYS.SATURDAY_LIMIT, val); }
-      if (type === 'sunday') { setSundayLimit(val); saveData(STORAGE_KEYS.SUNDAY_LIMIT, val); cloudStorage.saveConfig(STORAGE_KEYS.SUNDAY_LIMIT, val); }
-      if (type === 'publicHoliday') { setPublicHolidayLimit(val); saveData(STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT, val); cloudStorage.saveConfig(STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT, val); }
+    try {
+      if (monthStr) {
+        setMonthlyLimits(prev => {
+          const next = { ...prev, [monthStr]: { ...(prev[monthStr] || { weekday: 12, sat: 1, sun: 0, pub: 1 }), [type]: val } };
+          
+          // 非同期処理をバックグラウンドで開始
+          cloudStorage.saveConfig(STORAGE_KEYS.MONTHLY_LIMITS, next).catch(e => console.error('Save cloud config failed:', e));
+          saveData(STORAGE_KEYS.MONTHLY_LIMITS, next).catch(e => console.error('Save local config failed:', e));
+          
+          return next;
+        });
+      } else {
+        const key = type === 'weekday' ? STORAGE_KEYS.WEEKDAY_LIMIT :
+                    type === 'saturday' ? STORAGE_KEYS.SATURDAY_LIMIT :
+                    type === 'sunday' ? STORAGE_KEYS.SUNDAY_LIMIT :
+                    type === 'publicHoliday' ? STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT : '';
+        
+        if (key) {
+          await cloudStorage.saveConfig(key, val);
+          if (type === 'weekday') setWeekdayLimit(val);
+          if (type === 'saturday') setSaturdayLimit(val);
+          if (type === 'sunday') setSundayLimit(val);
+          if (type === 'publicHoliday') setPublicHolidayLimit(val);
+          await saveData(key, val);
+        }
+      }
+    } catch (e) {
+      console.error('Config update error:', e);
+      throw e;
     }
   }, []);
 

@@ -18,13 +18,28 @@ export const useStaffData = () => {
   }, []);
 
   const updateStaffList = useCallback(async (update: any[] | ((prev: any[]) => any[])) => {
-    setStaffList(prev => {
-      const next = typeof update === 'function' ? update(prev) : update;
+    try {
+      const currentStaffSnap = Array.isArray(staffList) ? staffList : [];
+      const next = typeof update === 'function' ? update(currentStaffSnap) : update;
+      
+      if (!Array.isArray(next)) return;
+      
       const sorted = sortStaffByName(next.filter((s: any) => s && s.name));
-      saveData(STORAGE_KEYS.STAFF_LIST, sorted);
-      if (sorted.length > 0) cloudStorage.upsertStaff(sorted);
+      
+      // 1. Cloud Upsert FIRST
+      if (sorted.length > 0) {
+        await cloudStorage.upsertStaff(sorted);
+      }
+
+      // 2. React State and Local Storage SECOND
+      setStaffList(sorted);
+      await saveData(STORAGE_KEYS.STAFF_LIST, sorted);
+      
       return sorted;
-    });
+    } catch (e) {
+      console.error('Staff Update Error (Persistence Failed):', e);
+      throw e;
+    }
   }, []);
 
   const updateStaffLocks = useCallback(async (l: any) => {

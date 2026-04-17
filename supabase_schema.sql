@@ -1,56 +1,50 @@
-DROP TABLE IF EXISTS staff CASCADE;
-DROP TABLE IF EXISTS requests CASCADE;
-DROP TABLE IF EXISTS messages CASCADE;
-DROP TABLE IF EXISTS app_config CASCADE;
-
--- 1. スタッフテーブル (Staff)
-CREATE TABLE staff (
+-- Staff table
+CREATE TABLE IF NOT EXISTS staff (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  placement TEXT NOT NULL,
-  position TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT '出勤',
-  profession TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT '一般職員',
-  no_holiday BOOLEAN DEFAULT false,
+  placement TEXT,
+  position TEXT,
+  profession TEXT,
+  status TEXT,
+  role TEXT,
+  no_holiday BOOLEAN DEFAULT FALSE,
   phone TEXT,
-  password TEXT DEFAULT '0000',
-  is_approved BOOLEAN DEFAULT false,
+  password TEXT,
   pin TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+  is_approved BOOLEAN DEFAULT FALSE,
+  is_locked BOOLEAN DEFAULT FALSE,
+  locked_months JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. シフト・申請テーブル (Requests)
-CREATE TABLE requests (
+-- Requests table
+CREATE TABLE IF NOT EXISTS requests (
   id TEXT PRIMARY KEY,
   staff_name TEXT NOT NULL,
-  date TEXT NOT NULL, -- YYYY-MM-DD
+  staff_id TEXT,
+  date TEXT NOT NULL,
   type TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending', -- pending, approved, rejected
-  details JSONB DEFAULT '{}'::jsonb,
+  status TEXT DEFAULT 'pending',
   reason TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+  details JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 3. メッセージテーブル (Messages)
-CREATE TABLE messages (
-  id TEXT PRIMARY KEY,
-  from_id TEXT NOT NULL,
-  from_name TEXT NOT NULL,
-  to_id TEXT NOT NULL,
-  content TEXT NOT NULL,
-  type TEXT NOT NULL, -- global, private
-  attachments JSONB,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- 4. 設定テーブル (Config - 制限数など)
-CREATE TABLE app_config (
+-- App Config table (for locks, monthly limits, etc.)
+CREATE TABLE IF NOT EXISTS app_config (
   key TEXT PRIMARY KEY,
-  value JSONB NOT NULL
+  value JSONB,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-ALTER TABLE staff DISABLE ROW LEVEL SECURITY;
-ALTER TABLE requests DISABLE ROW LEVEL SECURITY;
-ALTER TABLE messages DISABLE ROW LEVEL SECURITY;
-ALTER TABLE app_config DISABLE ROW LEVEL SECURITY;
+-- Messages table
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  from_id TEXT,
+  from_name TEXT,
+  to_id TEXT,
+  content TEXT,
+  type TEXT,
+  attachments JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

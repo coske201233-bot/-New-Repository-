@@ -81,13 +81,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         const [sh, sm] = String(r.details.startTime).split(':').map(Number);
         const [eh, em] = String(r.details.endTime).split(':').map(Number);
         if (!isNaN(sh) && !isNaN(eh)) {
-          const hours = (eh + em / 60) - (sh + sm / 60);
+          const hours = (eh + (em || 0) / 60) - (sh + (sm || 0) / 60);
           if (hours > 0) return hours;
         }
       } catch (e) {}
     }
 
-    // 最終的な救済措置：0 や NaN を返さない（ただし時間数指定が必要なタイプで 0 を許可するか検討）
     if (r.type === '半日振替') return 3.75;
     return 0;
   };
@@ -148,22 +147,22 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       const type = selectedType;
       const now = new Date().toISOString();
       const newReq = {
-        id: `m-${selectedStaff.id}-${selectedDay}`,
-        staffId: selectedStaff.id,
-        staffName: selectedStaff.name,
+        id: `m-${selectedStaff?.id || 'unknown'}-${selectedDay}`,
+        staffId: selectedStaff?.id || '',
+        staffName: selectedStaff?.name || '',
         date: selectedDay,
         type: type,
         hours: HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : undefined,
         status: 'approved',
         createdAt: now,
-        updatedAt: now, // 常に最新の時刻をセットして重複排除で勝つようにする
+        updatedAt: now,
         isShift: true,
-        isManual: true // 手動フラグを確実に立てる
+        isManual: true
       };
       
-      const sT = normalize(selectedStaff.name);
+      const sT = normalize(selectedStaff?.name || '');
       setRequests((prev: any[]) => {
-        const without = prev.filter((r: any) => r && !( (String(r.staffId) === selectedStaff.id || normalize(r.staffName) === sT) && r.date === selectedDay ));
+        const without = (prev || []).filter((r: any) => r && !( (String(r.staffId) === (selectedStaff?.id || '') || normalize(r.staffName || '') === sT) && r.date === selectedDay ));
         return [newReq, ...without];
       });
       
@@ -233,17 +232,17 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       
       let rowsHtml = '';
       monthInfo.forEach((d: MonthDay) => {
-        if (d.empty) return;
+        if (!d || d.empty) return;
         const r = requestMap.get(d.dateStr)?.get(sT);
         
         let type = '';
         if (r) {
-          type = r.type;
+          type = r.type || '';
         } else {
           const dDate = new Date(d.dateStr);
           const dtype = getDayType(dDate);
-          const isNoHoliday = (dtype !== 'weekday') && (selectedStaff.monthlyNoHoliday?.[currentMonthKey] ?? selectedStaff.noHoliday);
-          type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '公休' : '公休');
+          const isNoHoliday = (dtype !== 'weekday') && (selectedStaff?.monthlyNoHoliday?.[currentMonthKey] ?? selectedStaff?.noHoliday);
+          type = (dtype === 'weekday') ? '出勤' : '公休';
         }
 
         const h = r ? getReqHours(r) : 0;
@@ -256,8 +255,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         rowsHtml += `
           <tr style="${style}">
             <td style="text-align: center;">${d.day}</td>
-            <td style="text-align: center;">${dayNames[dayIdx]}</td>
-            <td style="font-weight: bold; text-align: center;">${shiftDisplay}</td>
+            <td style="text-align: center;">${dayNames[dayIdx] || ''}</td>
+            <td style="font-weight: bold; text-align: center;">${shiftDisplay || ''}</td>
             <td>${r?.details?.note || ''}</td>
           </tr>
         `;
@@ -345,10 +344,11 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
   const calculateStats = (staff: any) => {
     if (!staff) return { workDays: 0, holidayWorkDays: 0, leaveHours: '0.00' };
-    const sName = normalize(staff.name);
+    const sName = normalize(staff?.name || '');
+    if (!sName) return { workDays: 0, holidayWorkDays: 0, leaveHours: '0.00' };
+    
     const year = activeDate.getFullYear();
     const month = activeDate.getMonth();
-    const targetMonth = year + '-' + String(month + 1).padStart(2, '0');
     
     // 月の日数を取得
     const daysInMonthCount = new Date(year, month + 1, 0).getDate();
@@ -356,17 +356,20 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     let workDays = 0, holidayWorkDays = 0, leaveHours = 0;
     const attendanceTypes = ['出勤', '日勤', '午前休', '午後休', '時間休', '午前振替', '午後振替', '特休', '看護休暇'];
     const offTypes = ['公休', '振替', '1日振替', '半日振替', '振替休日', '全休'];
+    const safeRequests = Array.isArray(requests) ? requests : [];
 
     for (let day = 1; day <= daysInMonthCount; day++) {
       const date = new Date(year, month, day);
+      if (isNaN(date.getTime())) continue;
+      
       const dateStr = getDateStr(date);
-      const sT = normalize(staff.name);
-      const req = requests.find(r => r && normalize(r.staffName) === sT && r.date === dateStr && r.status !== 'deleted');
+      const req = safeRequests.find(r => r && normalize(r?.staffName || r?.staff_name || '') === sName && r.date === dateStr && r.status !== 'deleted');
       const dtype = getDayType(date);
       
       if (req) {
         // 出勤系（一部でも出勤していれば日数にカウント）
-        if (attendanceTypes.includes(req.type)) {
+        const rType = req?.type || '';
+        if (attendanceTypes.some(at => normalize(at) === normalize(rType))) {
           if (dtype === 'weekday') workDays++; else holidayWorkDays++;
           
           // 時間休などは休暇時間としても加算
@@ -374,11 +377,11 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           if (h > 0) leaveHours += h;
         } 
         // 休暇系
-        else if (!offTypes.includes(req.type)) {
+        else if (!offTypes.some(ot => normalize(ot) === normalize(rType))) {
           const h = getReqHours(req);
           if (h > 0) {
             leaveHours += h;
-          } else if (['年休', '有給休暇', '夏季休暇', '休暇', '欠勤'].includes(req.type)) {
+          } else if (['年休', '有給休暇', '夏季休暇', '休暇', '欠勤'].some(lt => normalize(lt) === normalize(rType))) {
             leaveHours += 7.75;
           }
         }

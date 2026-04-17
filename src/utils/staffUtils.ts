@@ -18,3 +18,14 @@ export const sortStaffByName = (staffList: any[]) => {
     return nameA.localeCompare(nameB, 'ja');
   });
 };
+
+/**
+ * 名前から認証用のダミーメールアドレスを生成します。
+ * @param name スタッフ名
+ * @returns 形式: [正規化された名前]@app.local
+ */
+export const getDummyEmail = (name: string): string => {
+  if (!name) return '';
+  const clean = normalizeName(name).toLowerCase();
+  return `${clean}@app.local`;
+};

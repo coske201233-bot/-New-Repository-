@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { deduplicateRequests } from './requestUtils';
 import { Alert } from 'react-native';
 
 // Helpers to map between camelCase (JS) and snake_case (SQL)
@@ -27,9 +28,11 @@ const mapFromSql = (obj: any, mapping: Record<string, string>) => {
   return result;
 };
 
-const STAFF_MAP = { noHoliday: 'no_holiday', createdAt: 'created_at', isApproved: 'is_approved', pin: 'pin', isLocked: 'is_locked', lockedMonths: 'locked_months' };
-const REQ_MAP = { staffName: 'staff_name', staffId: 'staff_id', createdAt: 'created_at' };
+const STAFF_MAP = { noHoliday: 'no_holiday', createdAt: 'created_at', isApproved: 'is_approved', pin: 'pin', userId: 'user_id', isLocked: 'is_locked', lockedMonths: 'locked_months' };
+const REQ_MAP = { staffName: 'staff_name', createdAt: 'created_at' };
 const MSG_MAP = { fromId: 'from_id', fromName: 'from_name', toId: 'to_id', createdAt: 'created_at' };
+
+import { normalizeName } from './dateUtils';
 
 export const cloudStorage = {
   // --- Staff ---
@@ -37,7 +40,7 @@ export const cloudStorage = {
     try {
       const { data, error } = await supabase.from('staff').select('*').limit(10000);
       if (error) throw error;
-      const result = data.map(s => mapFromSql(s, STAFF_MAP));
+      const result = (data || []).map(s => mapFromSql(s, STAFF_MAP));
       if (typeof window !== 'undefined' && result.length > 0) {
         // Only alert on PC or non-init fetch if we want to confirm connection
         console.log('Fetched staff from cloud:', result.length);
@@ -57,15 +60,19 @@ export const cloudStorage = {
     const filtered = staff.map(s => {
       const obj: any = {};
       validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });
+      if (s.user_id) obj.user_id = s.user_id; // Add user_id if present
       return mapToSql(obj, STAFF_MAP);
     });
     const { error } = await supabase.from('staff').upsert(filtered, { onConflict: 'id' });
     if (error) {
-      console.error('Staff sync error:', error);
-      Alert.alert('クラウド保存失敗', error.message);
-      throw error;
+      console.error('❌ Staff sync error:', error);
+      const msg = `Staff save failed: ${error.message} (${error.code})`;
+      if (typeof window !== 'undefined') {
+        console.warn('%c[STORAGE ERROR]', 'color: red; font-weight: bold;', msg);
+      }
+      throw new Error(msg);
     }
-    console.log('Staff synced to cloud successfully');
+    console.log('✅ Staff synced to cloud successfully');
   },
   async upsertSingleStaff(s: any) {
     const validKeys = ['id', 'name', 'placement', 'position', 'profession', 'status', 'noHoliday', 'isApproved', 'role', 'password', 'isLocked', 'lockedMonths'];
@@ -93,7 +100,7 @@ export const cloudStorage = {
       .neq('status', 'deleted')
       .limit(100000);
     if (error) throw error;
-    return data.map(r => {
+    return (data || []).map(r => {
       const mapped = mapFromSql(r, REQ_MAP);
       const d = mapped.details || {};
       
@@ -146,7 +153,7 @@ export const cloudStorage = {
       return clientTime >= cloudTime;
     }).map(r => {
       const obj: any = {};
-      const validKeys = ['id', 'staffName', 'staffId', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
+      const validKeys = ['id', 'staffName', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
       
       const details = { ...(r.details || {}) };
       if (r.updatedAt) details.updatedAt = r.updatedAt;
@@ -156,7 +163,11 @@ export const cloudStorage = {
       if (r.hours !== undefined) details.hours = r.hours;
       if (r.locked !== undefined) details.locked = r.locked;
       
-      const payload = { ...r, details };
+      const payload = { 
+        ...r, 
+        staffName: normalizeName(r.staffName || ''),
+        details 
+      };
       validKeys.forEach(k => { if (payload[k] !== undefined) obj[k] = payload[k]; });
       return mapToSql(obj, REQ_MAP);
     });
@@ -168,10 +179,15 @@ export const cloudStorage = {
 
     const { error } = await supabase.from('requests').upsert(filtered, { onConflict: 'id' });
     if (error) {
-       console.error('Requests sync error:', error);
-       throw error;
+       console.error('❌ Requests sync error:', error);
+       // 403 Forbidden (RLS) 等の致命的エラーを検知しやすくする
+       const msg = `Save failed: ${error.message} (${error.code})`;
+       if (typeof window !== 'undefined') {
+         console.warn('%c[STORAGE ERROR]', 'color: red; font-weight: bold;', msg);
+       }
+       throw new Error(msg);
     }
-    console.log(`${filtered.length} requests synced to cloud successfully (Safe-Upsert)`);
+    console.log(`✅ ${filtered.length} requests synced to cloud successfully (Safe-Upsert)`);
   },
   async upsertSingleRequest(r: any) {
     // 安全のため、単一更新も共通の Safe-Upsert ロジックを通す
@@ -223,15 +239,16 @@ export const cloudStorage = {
     const cloudReqs = await this.fetchRequests();
     
     // 2. クラウドデータとローカルデータを重複排除ロジックでマージ
-    // (循環参照を避けるため、動的インポートまたは共通ユーティリティを使用)
-    const { deduplicateRequests } = require('./requestUtils');
-    const { cleanList } = deduplicateRequests([...cloudReqs, ...requests]);
+    const { cleanList } = deduplicateRequests([...(cloudReqs || []), ...(requests || [])]);
     
-    // 3. マージ後の結果を Safe-Upsert で保存
-    if (cleanList.length === 0 && requests.length > 0) {
-      console.warn('Smart-Sync resulted in empty list while input was not empty. Cancellation for safety.');
+    // 3. 【新設ガード】マージ後のデータがクラウド側の既存データより著しく少ない場合は警告して中断
+    // これにより、不完全なデータによる「先祖返り」や「全消去」を物理的に阻止します。
+    if (cloudReqs.length > 0 && cleanList.length === 0) {
+      console.warn('Smart-Sync protection: Blocked empty overwrite. Cloud had data but merged result was empty.');
       return;
     }
+
+    // 4. マージ後の結果を Safe-Upsert で保存
     await this.upsertRequests(cleanList);
     console.log(`Smart-Sync completed. Resulting in ${cleanList.length} unified requests.`);
   },
@@ -258,7 +275,7 @@ export const cloudStorage = {
   async fetchMessages() {
     const { data, error } = await supabase.from('messages').select('*').order('created_at', { ascending: true }).limit(5000);
     if (error) throw error;
-    return data.map(m => mapFromSql(m, MSG_MAP));
+    return (data || []).map(m => mapFromSql(m, MSG_MAP));
   },
   async pushMessage(msg: any) {
     const validKeys = ['id', 'fromId', 'fromName', 'toId', 'content', 'type', 'attachments', 'createdAt'];

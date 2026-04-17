@@ -32,32 +32,26 @@ export const useRequestData = () => {
   }, []);
 
   const updateRequests = useCallback(async (update: any[] | ((prev: any[]) => any[])) => {
-    let toUpsert: any[] = [];
-    let toDelete: string[] = [];
-    let finalCleanList: any[] = [];
-
-    // 1. Calculate the new state synchronously based on previous state
-    setRequests(prev => {
-      const nextRaw = typeof update === 'function' ? update(prev) : update;
+    setIsSyncing(true);
+    try {
+      // 1. Calculate the new full list from previous state
+      const currentReqSnap = Array.isArray(requests) ? requests : [];
+      nextRaw = typeof update === 'function' ? update(currentReqSnap) : update;
+      if (!Array.isArray(nextRaw)) nextRaw = [];
       
+      const now = new Date().toISOString();
       const nextWithMeta = nextRaw.map(r => {
-        const old = prev.find(o => o.id === r.id);
-        
-        // 変更検知の強化: 全体の内容を比較（簡易的なJSON比較）
-        // ただし updatedAt 自体の違いは無視して判定する
+        if (!r) return r;
+        const old = currentReqSnap.find(o => o && o.id === r.id);
         const cleanOld = old ? { ...old, updatedAt: undefined } : null;
         const cleanNew = { ...r, updatedAt: undefined };
         const isChanged = !old || JSON.stringify(cleanOld) !== JSON.stringify(cleanNew);
 
         if (isChanged) {
-          const now = new Date().toISOString();
           return { 
             ...r, 
             updatedAt: now,
-            details: {
-              ...(r.details || {}),
-              updatedAt: now // details内にも二重保持して確実にDBへ渡す
-            },
+            details: { ...(r.details || {}), updatedAt: now },
             source: isMobileDevice() ? 'mobile' : 'web'
           };
         }
@@ -66,37 +60,41 @@ export const useRequestData = () => {
 
       const { cleanList, discardedIds } = deduplicateRequests(nextWithMeta);
       
-      // Identify what needs to be synced to cloud
-      toUpsert = cleanList.filter(nr => {
-        const old = prev.find(o => o.id === nr.id);
+      const toUpsert = cleanList.filter(nr => {
+        if (!nr) return false;
+        const old = currentReqSnap.find(o => o && o.id === nr.id);
         return !old || old.updatedAt !== nr.updatedAt;
       });
-      
-      toDelete = discardedIds;
-      finalCleanList = cleanList;
-      
-      return cleanList;
-    });
 
-    // 2. Perform side effects AFTER the state update logic
-    try {
-      await saveData(STORAGE_KEYS.REQUESTS, finalCleanList);
-      
+      // 2. Perform CLOUD update FIRST (Source of Truth)
+      // This fulfills the user's requirement for "verified with 200 OK"
       if (toUpsert.length > 0) {
         await cloudStorage.upsertRequests(toUpsert);
       }
-      if (toDelete.length > 0) {
-        await cloudStorage.deleteRequests(toDelete);
+      if (discardedIds.length > 0) {
+        await cloudStorage.deleteRequests(discardedIds);
       }
-    } catch (e) {
-      console.error('Async storage/cloud update error:', e);
+
+      // 3. Update React State and Local Storage ONLY on success
+      setRequests(cleanList);
+      await saveData(STORAGE_KEYS.REQUESTS, cleanList);
+      
+      return cleanList;
+    } catch (e: any) {
+      console.error('Critical Update Error (Persistence Failed):', e);
+      // Notify parent or UI that save failed
+      throw e; 
+    } finally {
+      setIsSyncing(false);
     }
-  }, []);
+  }, [requests]);
 
   // クラウドからのデータを安全にマージする
   const mergeCloudRequests = useCallback(async (cloudReqs: any[]) => {
     setRequests(current => {
-      const combined = [...current, ...cloudReqs];
+      const safeCurrent = Array.isArray(current) ? current : [];
+      const safeCloud = Array.isArray(cloudReqs) ? cloudReqs : [];
+      const combined = [...safeCurrent, ...safeCloud];
       const { cleanList } = deduplicateRequests(combined);
       saveData(STORAGE_KEYS.REQUESTS, cleanList);
       return cleanList;

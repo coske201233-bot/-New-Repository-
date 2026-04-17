@@ -42,87 +42,92 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   // Helper to determine if a staff member is working today based on shift requests
   // Aligned with CalendarScreen.tsx logic
   const isWorkingToday = (staffName: string) => {
+    if (!staffName || !Array.isArray(requests)) return dayType === 'weekday';
     const todayStr = getDateStr(new Date());
-    const userReqs = requests.filter(r => normalizeName(r.staffName || r.staff_name) === normalizeName(staffName) && r.date === todayStr);
+    const userReqs = requests.filter(r => r && normalizeName(r?.staffName || r?.staff_name || '') === normalizeName(staffName) && r.date === todayStr);
     
     // Check approved first, then pending as fallback (matches CalendarScreen logic)
-    const approved = userReqs.find(r => r.status === 'approved');
-    const pending = userReqs.find(r => r.status === 'pending');
+    const approved = userReqs.find(r => r?.status === 'approved');
+    const pending = userReqs.find(r => r?.status === 'pending');
     const shift = approved || pending;
 
     if (shift) {
-      return attendanceTypes.some(at => normalizeName(at) === normalizeName(shift.type));
+      return attendanceTypes.some(at => normalizeName(at) === normalizeName(shift?.type || ''));
     }
     // If no explicit shift exists, standard staff default to Working on weekdays, Off on weekends.
     return dayType === 'weekday';
   };
 
   const isStaffOut = (s: any) => {
-    const status = normalizeName(s.status || '');
-    const placement = normalizeName(s.placement || '');
-    const position = normalizeName(s.position || '');
+    if (!s) return false;
+    const status = normalizeName(s?.status || '');
+    const placement = normalizeName(s?.placement || '');
+    const position = normalizeName(s?.position || '');
     return status === '長期休暇' || placement === '長期休暇' || position === '長期休暇' || status === '入職前';
   };
 
   const hospitalCounts = hospitalPlacements.map(label => {
+    const list = Array.isArray(staffList) ? staffList : [];
     return {
       label,
-      count: staffList.filter(s => {
+      count: list.filter(s => {
+        if (!s) return false;
         const isOut = isStaffOut(s);
-        return s.placement === label && s.profession !== '助手' && !isOut;
+        return normalizeName(s?.placement || '') === normalizeName(label) && normalizeName(s?.profession || '') !== normalizeName('助手') && !isOut;
       }).length
     };
   });
 
-  const outStaffCount = staffList.filter(s => isStaffOut(s)).length;
-  const assistantCount = staffList.filter(s => {
+  const staffArray = Array.isArray(staffList) ? staffList : [];
+  const outStaffCount = staffArray.filter(s => isStaffOut(s)).length;
+  const assistantCount = staffArray.filter(s => {
+    if (!s) return false;
     const isOut = isStaffOut(s);
-    return (s.profession === '助手' || s.placement === '助手') && !isOut;
+    return (normalizeName(s?.profession || '') === normalizeName('助手') || normalizeName(s?.placement || '') === normalizeName('助手')) && !isOut;
   }).length;
-  const totalVisits = staffList.filter(s => {
+  const totalVisits = staffArray.filter(s => {
+    if (!s) return false;
     const isOut = isStaffOut(s);
-    return s.placement === '訪問' && !isOut;
+    return normalizeName(s?.placement || '') === normalizeName('訪問') && !isOut;
   }).length;
 
-  const hospitalEligible = staffList.filter(s => {
+  const hospitalEligible = staffArray.filter(s => {
+    if (!s) return false;
     const isOut = isStaffOut(s);
-    return hospitalPlacements.includes(s.placement) && !isOut && s.profession !== '助手';
+    return hospitalPlacements.includes(s?.placement || '') && !isOut && normalizeName(s?.profession || '') !== normalizeName('助手');
   });
   
-  const ptCount = hospitalEligible.filter(s => s.profession === 'PT').length;
-  const otCount = hospitalEligible.filter(s => s.profession === 'OT').length;
-  const stCount = hospitalEligible.filter(s => s.profession === 'ST').length;
-  const hokatsuCount = staffList.filter(s => {
+  const ptCount = hospitalEligible.filter(s => s && normalizeName(s?.profession || '') === normalizeName('PT')).length;
+  const otCount = hospitalEligible.filter(s => s && normalizeName(s?.profession || '') === normalizeName('OT')).length;
+  const stCount = hospitalEligible.filter(s => s && normalizeName(s?.profession || '') === normalizeName('ST')).length;
+  const hokatsuCount = staffArray.filter(s => {
+    if (!s) return false;
     const isOut = isStaffOut(s);
-    return s.placement === '包括' && !isOut;
+    return normalizeName(s?.placement || '') === normalizeName('包括') && !isOut;
   }).length;
-  const hainyoCount = staffList.filter(s => {
+  const hainyoCount = staffArray.filter(s => {
+    if (!s) return false;
     const isOut = isStaffOut(s);
-    return s.placement === '排尿支援' && !isOut;
+    return normalizeName(s?.placement || '') === normalizeName('排尿支援') && !isOut;
   }).length;
 
   const totalHospital = ptCount + otCount + stCount + hokatsuCount + hainyoCount;
 
   // 1. 出勤者数 (訪問と助手を抜いた数)
-  const attendingStaffCount = staffList.filter(s => {
+  const attendingStaffCount = staffArray.filter(s => {
+    if (!s) return false;
+    const name = s?.name;
+    if (!name) return false;
     const isOut = isStaffOut(s);
-    const isVisitorOrAssistant = s.placement === '訪問' || s.profession === '助手' || s.placement === '助手';
-    return isWorkingToday(s.name) && !isVisitorOrAssistant && !isOut;
+    const p = normalizeName(s?.placement || '');
+    const pr = normalizeName(s?.profession || '');
+    const isVisitorOrAssistant = p === normalizeName('訪問') || pr === normalizeName('助手') || p === normalizeName('助手');
+    return isWorkingToday(name) && !isVisitorOrAssistant && !isOut;
   }).length;
 
   // 2. 休暇者数 (全員、長期休暇含む)
-  const leaveStaffList = staffList.filter(s => !isWorkingToday(s.name) || isStaffOut(s));
+  const leaveStaffList = staffArray.filter(s => s && (s?.name ? (!isWorkingToday(s.name) || isStaffOut(s)) : false));
   const leaveStaffCount = leaveStaffList.length;
-
-  const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  const currentMonthly = monthlyLimits[monthStr] || { 
-    weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit 
-  };
-
-  const currentLimit = dayType === 'weekday' ? currentMonthly.weekday : 
-                       dayType === 'sat' ? currentMonthly.sat :
-                       dayType === 'sun' ? currentMonthly.sun :
-                       currentMonthly.pub;
 
   const professionCounts = [
     { label: 'PT', count: ptCount, color: '#0ea5e9' },
@@ -132,7 +137,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     { label: '長期休暇/入職前', count: outStaffCount, color: '#a855f7' },
     { label: '包括', count: hokatsuCount, color: '#ec4899' },
     { label: '排尿支援', count: hainyoCount, color: '#f43f5e' },
-    { label: 'その他', count: hospitalEligible.filter(s => !['PT', 'OT', 'ST'].includes(s.profession)).length, color: COLORS.textSecondary },
+    { label: 'その他', count: hospitalEligible.filter(s => s && !['PT', 'OT', 'ST'].includes(s?.profession || '')).length, color: COLORS.textSecondary },
   ];
 
   return (
@@ -158,7 +163,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* Pending Approval Notification for Managers */}
         {((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated) && (
           (() => {
-            const pendingCount = requests.filter(r => r.status === 'pending').length;
+            const pendingCount = (requests || []).filter(r => r?.status === 'pending').length;
             if (pendingCount > 0) {
               return (
                 <TouchableOpacity 
@@ -209,18 +214,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </ThemeCard>
           </TouchableOpacity>
         </View>
-
-        {/* Attendance Limit Info */}
-        {(dayType === 'weekday' || dayType === 'sat') && (
-          <ThemeCard style={{ padding: SPACING.md, marginBottom: SPACING.xl, backgroundColor: 'rgba(56, 189, 248, 0.05)', borderColor: 'rgba(56, 189, 248, 0.2)', borderWidth: 1 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <ThemeText variant="body">本日の出勤制限: <ThemeText bold>{currentLimit}名</ThemeText></ThemeText>
-              <ThemeText variant="body" color={attendingStaffCount > currentLimit ? '#ef4444' : '#10b981'}>
-                {attendingStaffCount > currentLimit ? `制限オーバー (${attendingStaffCount - currentLimit}名)` : '制限内'}
-              </ThemeText>
-            </View>
-          </ThemeCard>
-        )}
 
         {/* Top Summary Cards (Enrollment) */}
         <View style={styles.sectionHeader}>
@@ -331,16 +324,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </View>
 
               <ScrollView style={styles.staffListScroll}>
-                {sortStaffByName(staffList
-                  .filter(s => s.placement === selectedWardDetails && isWorkingToday(s.name)))
+                {sortStaffByName(staffArray
+                  .filter(s => s && normalizeName(s.placement || '') === normalizeName(selectedWardDetails || '') && isWorkingToday(s.name)))
                   .map((staff, idx) => (
-                    <View key={staff.id || idx} style={styles.staffListItem}>
+                    <View key={staff?.id || idx} style={styles.staffListItem}>
                       <View style={styles.staffAvatar}>
-                        <ThemeText bold color={COLORS.primary}>{staff.name[0]}</ThemeText>
+                        <ThemeText bold color={COLORS.primary}>{staff?.name ? staff.name[0] : '?'}</ThemeText>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <ThemeText variant="body" bold adjustsFontSizeToFit numberOfLines={1}>{staff.name}</ThemeText>
-                        <ThemeText variant="caption" color={COLORS.textSecondary} adjustsFontSizeToFit numberOfLines={1}>{staff.position} / {staff.profession}</ThemeText>
+                        <ThemeText variant="body" bold adjustsFontSizeToFit numberOfLines={1}>{staff?.name || '不明'}</ThemeText>
+                        <ThemeText variant="caption" color={COLORS.textSecondary} adjustsFontSizeToFit numberOfLines={1}>{staff?.position || '一般'} / {staff?.profession || '不明'}</ThemeText>
                       </View>
                     </View>
                   ))}

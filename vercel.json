@@ -1,13 +1,12 @@
 {
-  "functions": {
-    "api/*.ts": {
-      "maxDuration": 60
-    }
-  },
   "routes": [
     {
       "src": "/api/ai-shift",
       "dest": "/api/ai-shift.ts"
+    },
+    {
+      "src": "/api/admin-reset-password",
+      "dest": "/api/admin-reset-password.ts"
     },
     {
       "src": "/(.*)",

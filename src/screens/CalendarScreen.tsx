@@ -112,37 +112,40 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
 
     (staffList || []).forEach(staff => {
       if (!staff || !staff.name) return;
+      const rDateStr = dateStr;
       
-      const isOut = normalizeName(staff.status) === normalizeName('長期休暇') || normalizeName(staff.placement) === normalizeName('長期休暇') || normalizeName(staff.position) === normalizeName('長期休暇') || normalizeName(staff.status) === normalizeName('入職前');
-      const isHomeVisit = normalizeName(staff.placement) === normalizeName('訪問');
-      const isAssistant = normalizeName(staff.profession) === normalizeName('助手') || normalizeName(staff.placement) === normalizeName('助手');
+      const isOut = normalizeName(staff.status || '') === normalizeName('長期休暇') || normalizeName(staff.placement || '') === normalizeName('長期休暇') || normalizeName(staff.position || '') === normalizeName('長期休暇') || normalizeName(staff.status || '') === normalizeName('入職前');
+      const isHomeVisit = normalizeName(staff.placement || '') === normalizeName('訪問');
+      const isAssistant = normalizeName(staff.profession || '') === normalizeName('助手') || normalizeName(staff.placement || '') === normalizeName('助手');
       
       if (isOut) return;
 
-      const userRequests = requestMap.get(dateStr)?.get(normalizeName(staff.name)) || [];
-      const approvedReqs = userRequests.filter(r => r.status === 'approved');
-      const pendingReqs = userRequests.filter(r => r.status === 'pending');
+      const userRequests = (requestMap && rDateStr ? requestMap.get(rDateStr)?.get(normalizeName(staff.name || '')) : []) || [];
+      const approvedReqs = userRequests.filter((r: any) => r && r.status === 'approved');
+      const pendingReqs = userRequests.filter((r: any) => r && r.status === 'pending');
       const isNoHoliday = (dayType !== 'weekday') && (staff.monthlyNoHoliday?.[monthStr] ?? staff.noHoliday);
 
       if (approvedReqs.length > 0) {
-        approvedReqs.forEach(req => {
-          const isAtt = attendanceTypes.some(at => normalizeName(at) === normalizeName(req.type));
+        approvedReqs.forEach((req: any) => {
+          if (!req) return;
+          const isAtt = attendanceTypes.some(at => normalizeName(at) === normalizeName(req?.type || ''));
           if (isAtt) {
-            working.push({ staff, type: req.type, requestId: req.id, isManual: true, isHomeVisit, isAssistant, status: 'approved', details: req.details });
+            working.push({ staff, type: req?.type, requestId: req?.id, isManual: true, isHomeVisit, isAssistant, status: 'approved', details: req?.details });
 
-            if (req.type !== '出勤') {
-              off.push({ staff, type: req.type, requestId: req.id, isManual: true, isHomeVisit, status: 'approved', details: req.details });
+            if (req?.type !== '出勤') {
+              off.push({ staff, type: req?.type, requestId: req?.id, isManual: true, isHomeVisit, status: 'approved', details: req?.details });
             }
           } else {
-            off.push({ staff, type: req.type, requestId: req.id, isManual: true, isHomeVisit, status: 'approved', details: req.details });
+            off.push({ staff, type: req?.type, requestId: req?.id, isManual: true, isHomeVisit, status: 'approved', details: req?.details });
           }
         });
       } else if (pendingReqs.length > 0) {
-        pendingReqs.forEach(req => {
-          const list = attendanceTypes.some(at => normalizeName(at) === normalizeName(req.type)) ? working : off;
-          list.push({ staff, type: req.type, requestId: req.id, isManual: true, isHomeVisit, status: 'pending', details: req.details });
-          if (list === working && req.type !== '出勤') {
-            off.push({ staff, type: req.type, requestId: req.id, isManual: true, isHomeVisit, status: 'pending', details: req.details });
+        pendingReqs.forEach((req: any) => {
+          if (!req) return;
+          const list = attendanceTypes.some(at => normalizeName(at) === normalizeName(req?.type || '')) ? working : off;
+          list.push({ staff, type: req?.type, requestId: req?.id, isManual: true, isHomeVisit, status: 'pending', details: req?.details });
+          if (list === working && req?.type !== '出勤') {
+            off.push({ staff, type: req?.type, requestId: req?.id, isManual: true, isHomeVisit, status: 'pending', details: req?.details });
           }
         });
       } else {
@@ -171,8 +174,8 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       const dayType = getDayType(d);
       
       dataMap.set(day, {
-        workingCount: (info.working || []).filter(w => w && !w.isHomeVisit && !w.isAssistant).length,
-        holidayWorkers: dayType !== 'weekday' ? (info.working || []).filter(w => w && !w.isHomeVisit && !w.isAssistant).map(w => w.staff?.name).filter(Boolean) : [],
+        workingCount: (info.working || []).length,
+        holidayWorkers: dayType !== 'weekday' ? (info.working || []).map(w => w.staff?.name).filter(Boolean) : [],
         dayType
       });
     }
@@ -479,7 +482,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             <View style={styles.detailItem}>
               <View style={styles.detailTitleRow}><Users size={16} color={COLORS.primary} /><ThemeText variant="label" style={{ marginLeft: 8 }}>現在の出勤数</ThemeText></View>
               <ThemeText variant="h1">
-                {workingStaff.filter(w => !w.isHomeVisit).length}
+                {workingStaff.length}
                 <ThemeText variant="caption"> 名</ThemeText>
               </ThemeText>
             </View>
@@ -496,22 +499,22 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               {workingStaff.length > 0 ? workingStaff.map((item, idx) => (
                 <View key={idx} style={styles.leafItem}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                    <ThemeText variant="caption" bold>{item.staff?.name || '不明'}</ThemeText>
-                    {item.isHomeVisit && <View style={[styles.badgeTiny, { backgroundColor: '#ec4899' }]}><ThemeText style={styles.badgeTinyText}>訪問</ThemeText></View>}
-                    {(item.staff?.profession === '助手' || item.staff?.placement === '助手') && <View style={[styles.badgeTiny, { backgroundColor: '#8b5cf6' }]}><ThemeText style={styles.badgeTinyText}>助手</ThemeText></View>}
+                    <ThemeText variant="caption" bold>{item?.staff?.name || '不明'}</ThemeText>
+                    {item?.isHomeVisit && <View style={[styles.badgeTiny, { backgroundColor: '#ec4899' }]}><ThemeText style={styles.badgeTinyText}>訪問</ThemeText></View>}
+                    {(item?.staff?.profession === '助手' || item?.staff?.placement === '助手') && <View style={[styles.badgeTiny, { backgroundColor: '#8b5cf6' }]}><ThemeText style={styles.badgeTinyText}>助手</ThemeText></View>}
                     <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginLeft: 8 }} numberOfLines={1}>
-                      ({item.type})
-                      {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
-                      {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.duration}h</ThemeText>}
-                      {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
+                      ({item?.type || '不明'})
+                      {item?.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
+                      {(!item?.details?.startTime && item?.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.duration}h</ThemeText>}
+                      {item?.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-                  {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
+                  {(isPrivileged || (profile && item?.staff && normalizeName(profile.name || '') === normalizeName(item.staff.name || ''))) && (
                     <View style={{ flexDirection: 'row', gap: 8 }}>
-                      {item.status === 'pending' && (
+                      {item?.status === 'pending' && (
                         <TouchableOpacity 
                           style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
-                          onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
+                          onPress={() => item?.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
                         >
                           <Check size={14} color={COLORS.primary} />
                         </TouchableOpacity>
@@ -531,22 +534,22 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             {offStaff.length > 0 ? offStaff.map((item, idx) => (
                 <View key={idx} style={styles.leafItem}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                    <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>{item.staff?.name || '不明'}</ThemeText>
-                    {item.isHomeVisit && <View style={[styles.badgeTiny, { backgroundColor: '#ec4899' }]}><ThemeText style={styles.badgeTinyText}>訪問</ThemeText></View>}
-                    {(item.staff?.profession === '助手' || item.staff?.placement === '助手') && <View style={[styles.badgeTiny, { backgroundColor: '#8b5cf6' }]}><ThemeText style={styles.badgeTinyText}>助手</ThemeText></View>}
+                    <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>{item?.staff?.name || '不明'}</ThemeText>
+                    {item?.isHomeVisit && <View style={[styles.badgeTiny, { backgroundColor: '#ec4899' }]}><ThemeText style={styles.badgeTinyText}>訪問</ThemeText></View>}
+                    {(item?.staff?.profession === '助手' || item?.staff?.placement === '助手') && <View style={[styles.badgeTiny, { backgroundColor: '#8b5cf6' }]}><ThemeText style={styles.badgeTinyText}>助手</ThemeText></View>}
                     <ThemeText variant="caption" style={{ marginLeft: 8, color: COLORS.textSecondary }} numberOfLines={1}>
-                      ({item.type})
-                      {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
-                      {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.duration}h</ThemeText>}
-                      {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
+                      ({item?.type || '不明'})
+                      {item?.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
+                      {(!item?.details?.startTime && item?.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.duration}h</ThemeText>}
+                      {item?.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-                  {(isPrivileged || (profile?.name && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
+                  {(isPrivileged || (profile?.name && item?.staff && normalizeName(profile.name || '') === normalizeName(item.staff.name || ''))) && (
                     <View style={{ flexDirection: 'row', gap: 8 }}>
-                      {item.status === 'pending' && (
+                      {item?.status === 'pending' && (
                         <TouchableOpacity 
                           style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
-                          onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
+                          onPress={() => item?.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
                         >
                           <Check size={14} color={COLORS.primary} />
                         </TouchableOpacity>

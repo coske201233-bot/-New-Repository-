@@ -25,14 +25,14 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
     }
     // Sort by date (newest first), then by updated time
     return [...list].sort((a, b) => {
-      const dateA = a.date ? new Date(String(a.date).replace(/-/g, '/')).getTime() : 0;
-      const dateB = b.date ? new Date(String(b.date).replace(/-/g, '/')).getTime() : 0;
+      const dateA = (a && a.date) ? new Date(String(a.date).replace(/-/g, '/')).getTime() : 0;
+      const dateB = (b && b.date) ? new Date(String(b.date).replace(/-/g, '/')).getTime() : 0;
       
-      if (dateB !== dateA) return dateB - dateA;
+      if (dateB !== dateA) return (isNaN(dateB) ? 0 : dateB) - (isNaN(dateA) ? 0 : dateA);
       
-      const timeA = new Date(a.updatedAt || a.createdAt || a.created_at || 0).getTime();
-      const timeB = new Date(b.updatedAt || b.createdAt || b.created_at || 0).getTime();
-      return timeB - timeA;
+      const timeA = new Date((a && (a.updatedAt || a.createdAt || a.created_at || 0))).getTime();
+      const timeB = new Date((b && (b.updatedAt || b.createdAt || b.created_at || 0))).getTime();
+      return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
     });
   }, [requests, filter]);
 
@@ -47,9 +47,16 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
         { text: 'キャンセル', style: 'cancel' },
         { 
           text: '承認する', 
-          onPress: () => {
-            pendings.forEach(r => approveRequest(r.id, 'approved'));
-            Alert.alert('完了', '一括承認しました');
+          onPress: async () => {
+            try {
+              for (const r of pendings) {
+                if (r && r.id) await approveRequest(r.id, 'approved');
+              }
+              Alert.alert('完了', '一括承認しました');
+            } catch (e: any) {
+              console.error('Batch approval error:', e);
+              Alert.alert('エラー', '一括承認中にエラーが発生しました: ' + (e.message || ''));
+            }
           }
         }
       ]
