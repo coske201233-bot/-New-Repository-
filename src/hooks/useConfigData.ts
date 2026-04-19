@@ -12,6 +12,17 @@ export const useConfigData = () => {
   const [adminPassword, setAdminPassword] = useState('0000');
   const [staffViewMode, setStaffViewMode] = useState(false);
 
+  // 統合されたconfigオブジェクト（読み取り用）
+  const config = useMemo(() => ({
+    '@weekday_limit': weekdayLimit,
+    '@saturday_limit': saturdayLimit,
+    '@sunday_limit': sundayLimit,
+    '@public_holiday_limit': publicHolidayLimit,
+    '@monthly_limits': monthlyLimits,
+    '@admin_password': adminPassword,
+    '@staff_view_mode': staffViewMode
+  }), [weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode]);
+
   useEffect(() => {
     const load = async () => {
       const configKeys = [
@@ -24,13 +35,11 @@ export const useConfigData = () => {
         { key: STORAGE_KEYS.STAFF_VIEW_MODE, setter: setStaffViewMode },
       ];
 
-      // 個別のロード関数
       const loadItem = async (key: string, setter: (v: any) => void) => {
         try {
           const lv = await loadData(key);
           if (lv !== null) setter(lv);
           
-          // クラウド取得。タイムアウトを設けて起動を妨げないようにする
           const cv = await Promise.race([
             cloudStorage.fetchConfig(key),
             new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
@@ -42,54 +51,48 @@ export const useConfigData = () => {
         }
       };
 
-      // すべての設定を並列でロード開始（全体を待たない）
       configKeys.forEach(item => loadItem(item.key, item.setter));
     };
     load();
   }, []);
 
-  const updateLimits = useCallback(async (type: string, val: number, monthStr?: string) => {
+  const updateConfigValue = useCallback(async (key: string, val: any) => {
     try {
-      if (monthStr) {
-        setMonthlyLimits(prev => {
-          const next = { ...prev, [monthStr]: { ...(prev[monthStr] || { weekday: 12, sat: 1, sun: 0, pub: 1 }), [type]: val } };
-          
-          // 非同期処理をバックグラウンドで開始
-          cloudStorage.saveConfig(STORAGE_KEYS.MONTHLY_LIMITS, next).catch(e => console.error('Save cloud config failed:', e));
-          saveData(STORAGE_KEYS.MONTHLY_LIMITS, next).catch(e => console.error('Save local config failed:', e));
-          
-          return next;
-        });
-      } else {
-        const key = type === 'weekday' ? STORAGE_KEYS.WEEKDAY_LIMIT :
-                    type === 'saturday' ? STORAGE_KEYS.SATURDAY_LIMIT :
-                    type === 'sunday' ? STORAGE_KEYS.SUNDAY_LIMIT :
-                    type === 'publicHoliday' ? STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT : '';
-        
-        if (key) {
-          await cloudStorage.saveConfig(key, val);
-          if (type === 'weekday') setWeekdayLimit(val);
-          if (type === 'saturday') setSaturdayLimit(val);
-          if (type === 'sunday') setSundayLimit(val);
-          if (type === 'publicHoliday') setPublicHolidayLimit(val);
-          await saveData(key, val);
-        }
-      }
+      // 内部ステートの即時反映
+      if (key === STORAGE_KEYS.WEEKDAY_LIMIT) setWeekdayLimit(Number(val));
+      if (key === STORAGE_KEYS.SATURDAY_LIMIT) setSaturdayLimit(Number(val));
+      if (key === STORAGE_KEYS.SUNDAY_LIMIT) setSundayLimit(Number(val));
+      if (key === STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT) setPublicHolidayLimit(Number(val));
+      if (key === STORAGE_KEYS.MONTHLY_LIMITS) setMonthlyLimits(val);
+      if (key === STORAGE_KEYS.ADMIN_PASSWORD) setAdminPassword(String(val));
+      if (key === STORAGE_KEYS.STAFF_VIEW_MODE) setStaffViewMode(Boolean(val));
+
+      // 保存処理
+      await saveData(key, val);
+      await cloudStorage.saveConfig(key, val);
     } catch (e) {
       console.error('Config update error:', e);
       throw e;
     }
   }, []);
 
-  const updatePassword = useCallback(async (pass: string) => {
-    setAdminPassword(pass);
-    await saveData(STORAGE_KEYS.ADMIN_PASSWORD, pass);
-    await cloudStorage.saveConfig(STORAGE_KEYS.ADMIN_PASSWORD, pass);
-  }, []);
+  const updateLimits = useCallback(async (type: string, val: number, monthStr?: string) => {
+    if (monthStr) {
+        const next = { ...monthlyLimits, [monthStr]: { ...(monthlyLimits[monthStr] || { weekday: 12, sat: 1, sun: 0, pub: 1 }), [type]: val } };
+        await updateConfigValue(STORAGE_KEYS.MONTHLY_LIMITS, next);
+    } else {
+        const key = type === 'weekday' ? STORAGE_KEYS.WEEKDAY_LIMIT :
+                    type === 'saturday' ? STORAGE_KEYS.SATURDAY_LIMIT :
+                    type === 'sunday' ? STORAGE_KEYS.SUNDAY_LIMIT :
+                    type === 'publicHoliday' ? STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT : '';
+        if (key) await updateConfigValue(key, val);
+    }
+  }, [monthlyLimits, updateConfigValue]);
 
   return useMemo(() => ({ 
+    config, 
     weekdayLimit, holidayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode, 
-    setStaffViewMode, setMonthlyLimits, setAdminPassword,
-    updateLimits, updatePassword
-  }), [weekdayLimit, holidayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode, updateLimits, updatePassword]);
+    updateLimits, updatePassword: (p: string) => updateConfigValue(STORAGE_KEYS.ADMIN_PASSWORD, p),
+    updateConfigValue
+  }), [config, weekdayLimit, holidayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode, updateLimits, updateConfigValue]);
 };

@@ -4,9 +4,8 @@ import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { 
-  Shield, Users, ChevronLeft, ChevronRight, MapPin, Briefcase, 
-  Calendar, Info, AlertCircle, XCircle, Trash2, CheckCircle, 
-  Clock, Plus, Filter, Lock, Unlock, Printer, X
+  ChevronLeft, ChevronRight, Calendar, User, 
+  Check, X, Clock, MapPin, Briefcase, Trash2, Settings, Shield, Printer
 } from 'lucide-react-native';
 import { getMonthInfo, getDayType, isHoliday, getDateStr } from '../utils/dateUtils';
 import { normalizeName } from '../utils/staffUtils';
@@ -25,8 +24,6 @@ interface StaffScreenProps {
   initialWard?: string;
   currentDate: Date;
   setCurrentDate: (d: Date | ((prev: Date) => Date)) => void;
-  staffLocks?: Record<string, Record<string, boolean>>;
-  setStaffLocks?: (locks: any) => Promise<void>;
 }
 
 interface MonthDay {
@@ -37,7 +34,7 @@ interface MonthDay {
 }
 
 export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
-  const { staffList, setStaffList, requests, setRequests, onDeleteRequest, isPrivileged, profile, currentDate, setCurrentDate, staffLocks, setStaffLocks } = props;
+  const { staffList, requests, setRequests, onDeleteRequest, isPrivileged, profile, currentDate, setCurrentDate } = props;
   const isAdminAuthenticated = props.isAdminAuthenticated || isPrivileged;
   
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
@@ -47,12 +44,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState('出勤');
-  const [selectedHours, setSelectedHours] = useState(0);
+  const [selectedHours, setSelectedHours] = useState(1.0);
   const [isSaving, setIsSaving] = useState(false);
 
   // Constants
   const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '空欄'];
-  const HOUR_SELECTOR_TYPES = ['時間休', '振替＋時間休', '特休', '看護休暇', '午前休', '午後休'];
+  const HOUR_SELECTOR_TYPES = ['時間休', '振替＋時間休', '特休', '時間給', '看護休暇', '午前休', '午後休'];
 
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
   
@@ -80,14 +77,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       try {
         const [sh, sm] = String(r.details.startTime).split(':').map(Number);
         const [eh, em] = String(r.details.endTime).split(':').map(Number);
-        if (!isNaN(sh) && !isNaN(eh)) {
-          const hours = (eh + (em || 0) / 60) - (sh + (sm || 0) / 60);
-          if (hours > 0) return hours;
-        }
+        if (!isNaN(sh) && !isNaN(eh)) return (eh + em / 60) - (sh + sm / 60);
       } catch (e) {}
     }
-
-    if (r.type === '半日振替') return 3.75;
     return 0;
   };
 
@@ -112,25 +104,17 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     return map;
   }, [requests]);
 
-  const currentMonthKey = `${activeDate.getFullYear()}-${String(activeDate.getMonth() + 1).padStart(2, '0')}`;
-  const isMonthLocked = staffLocks?.[selectedStaff?.id]?.[currentMonthKey] === true;
-
   const handleDayPress = (d: MonthDay) => {
-    if (isMonthLocked) {
-      Alert.alert('保護されています', `${activeDate.getMonth() + 1}月のカレンダーは保護されているため編集できません。一番右上の「保護中」ボタンを押して解除してください。`);
-      return;
-    }
+    if (!d || d.empty) return;
     setSelectedDay(d.dateStr);
     const sT = normalize(selectedStaff?.name || '');
     const existing = requestMap.get(d.dateStr)?.get(sT);
     if (existing) {
-      setSelectedType((existing.type === '日勤' || existing.type === '出勤' || existing.type === '勤務') ? '出勤' : existing.type);
-      setSelectedHours(getReqHours(existing));
+      setSelectedType((existing.type === '日勤' || existing.type === '出勤') ? '出勤' : existing.type);
+      setSelectedHours(getReqHours(existing) || 1.0);
     } else {
-      const date = new Date(d.dateStr);
-      const isWeekday = getDayType(date) === 'weekday';
-      setSelectedType(isWeekday ? '出勤' : '公休');
-      setSelectedHours(0);
+      setSelectedType('出勤');
+      setSelectedHours(1.0);
     }
   };
 
@@ -147,22 +131,22 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       const type = selectedType;
       const now = new Date().toISOString();
       const newReq = {
-        id: `m-${selectedStaff?.id || 'unknown'}-${selectedDay}`,
-        staffId: selectedStaff?.id || '',
-        staffName: selectedStaff?.name || '',
+        id: `m-${selectedStaff.id}-${selectedDay}`,
+        staffId: selectedStaff.id,
+        staffName: selectedStaff.name,
         date: selectedDay,
         type: type,
         hours: HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : undefined,
         status: 'approved',
         createdAt: now,
-        updatedAt: now,
+        updatedAt: now, // 常に最新の時刻をセットして重複排除で勝つようにする
         isShift: true,
-        isManual: true
+        isManual: true // 手動フラグを確実に立てる
       };
       
-      const sT = normalize(selectedStaff?.name || '');
+      const sT = normalize(selectedStaff.name);
       setRequests((prev: any[]) => {
-        const without = (prev || []).filter((r: any) => r && !( (String(r.staffId) === (selectedStaff?.id || '') || normalize(r.staffName || '') === sT) && r.date === selectedDay ));
+        const without = prev.filter((r: any) => r && !( (String(r.staffId) === selectedStaff.id || normalize(r.staffName) === sT) && r.date === selectedDay ));
         return [newReq, ...without];
       });
       
@@ -201,7 +185,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         }
         // Instead of setting selectedDay to null and closing everything, just update the state
         setSelectedType('出勤');
-        setSelectedHours(0);
+        setSelectedHours(1.0);
         if (showConfirm) Alert.alert('完了', '予定を削除しました。');
       } catch (e) {
         Alert.alert('エラー', '削除に失敗しました。');
@@ -220,8 +204,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     }
   };
 
-  const handlePrint = async () => {
-    if (!selectedStaff) return;
+  const handlePrint = () => {
+    if (Platform.OS !== 'web' || !selectedStaff) return;
     
     try {
       const year = activeDate.getFullYear();
@@ -232,17 +216,17 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       
       let rowsHtml = '';
       monthInfo.forEach((d: MonthDay) => {
-        if (!d || d.empty) return;
+        if (d.empty) return;
         const r = requestMap.get(d.dateStr)?.get(sT);
         
         let type = '';
         if (r) {
-          type = r.type || '';
+          type = r.type;
         } else {
           const dDate = new Date(d.dateStr);
           const dtype = getDayType(dDate);
-          const isNoHoliday = (dtype !== 'weekday') && (selectedStaff?.monthlyNoHoliday?.[currentMonthKey] ?? selectedStaff?.noHoliday);
-          type = (dtype === 'weekday') ? '出勤' : '公休';
+          const isNoHoliday = (dtype !== 'weekday') && (selectedStaff.monthlyNoHoliday?.[currentMonthKey] ?? selectedStaff.noHoliday);
+          type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '日勤' : '公休');
         }
 
         const h = r ? getReqHours(r) : 0;
@@ -255,25 +239,21 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         rowsHtml += `
           <tr style="${style}">
             <td style="text-align: center;">${d.day}</td>
-            <td style="text-align: center;">${dayNames[dayIdx] || ''}</td>
-            <td style="font-weight: bold; text-align: center;">${shiftDisplay || ''}</td>
+            <td style="text-align: center;">${dayNames[dayIdx]}</td>
+            <td style="font-weight: bold; text-align: center;">${shiftDisplay}</td>
             <td>${r?.details?.note || ''}</td>
           </tr>
         `;
       });
 
-      const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>個人別勤務実績表</title><style>@page { size: A4 portrait; margin: 10mm; } body { font-family: sans-serif; padding: 20px; color: #1e293b; } .header { border-bottom: 2px solid #38bdf8; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; } h1 { margin: 0; font-size: 20px; } .meta { font-size: 14px; text-align: right; } table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: center; } th { background-color: #f8fafc; font-size: 13px; font-weight: bold; }</style></head><body><div class="header"><div><h1>個人別勤務実績表 (${month}月)</h1><div style="margin-top: 5px;">氏名: <strong style="font-size: 18px;">${selectedStaff.name}</strong></div></div><div class="meta">${year}年${month}月分<br/>職種: ${selectedStaff.profession}</div></div><table><thead><tr><th style="width: 50px;">日</th><th style="width: 50px;">曜</th><th>勤務実績 / 申請</th><th>特記事項</th></tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
+      const html = `<html><head><title>個人別勤務実績表</title><style>@page { size: A4 portrait; margin: 10mm; } body { font-family: sans-serif; padding: 20px; color: #1e293b; } .header { border-bottom: 2px solid #38bdf8; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; } h1 { margin: 0; font-size: 20px; } .meta { font-size: 14px; text-align: right; } table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: center; } th { background-color: #f8fafc; font-size: 13px; font-weight: bold; }</style></head><body><div class="header"><div><h1>個人別勤務実績表 (${month}月)</h1><div style="margin-top: 5px;">氏名: <strong style="font-size: 18px;">${selectedStaff.name}</strong></div></div><div class="meta">${year}年${month}月分<br/>職種: ${selectedStaff.profession}</div></div><table><thead><tr><th style="width: 50px;">日</th><th style="width: 50px;">曜</th><th>勤務実績 / 申請</th><th>特記事項</th></tr></thead><tbody>${rowsHtml}</tbody></table><script>window.onload=function(){window.print();};<\\/script></body></html>`;
 
-      if (Platform.OS === 'web') {
-        const printWindow = window.open('', '_blank');
-        if (printWindow) {
-          printWindow.document.write(html);
-          printWindow.document.close();
-        } else {
-          Alert.alert('ポップアップ制限', '実績表のプレビューが開けませんでした。ブラウザ設定でポップアップを許可してください。');
-        }
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
       } else {
-        await Print.printAsync({ html });
+        Alert.alert('ポップアップ制限', '実績表のプレビューが開けませんでした。ブラウザ設定でポップアップを許可してください。');
       }
     } catch (e) {
       console.error('Print Error:', e);
@@ -296,7 +276,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           let labelColor = 'white';
           if (req) {
             const h = getReqHours(req);
-            if (['出勤', '日勤', '勤務'].includes(req.type)) {
+            if (['出勤', '日勤'].includes(req.type)) {
               displayLabel = '出勤'; labelColor = '#38bdf8';
             } else if (req.type === '公休') {
               displayLabel = '公休'; labelColor = '#ef4444';
@@ -308,9 +288,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
               displayLabel = '振(全)'; labelColor = '#ef4444';
             } else if (req.type === '半日振替') {
               displayLabel = '振(半)'; labelColor = '#ef4444';
-            } else if (['時間休', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(req.type)) {
-              const displayH = h;
-              displayLabel = `${req.type.charAt(0)}(${displayH}h)`; labelColor = '#ef4444';
+            } else if (['時間休', '時間給', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(req.type)) {
+              displayLabel = `${req.type.charAt(0)}(${h}h)`; labelColor = '#ef4444';
             } else {
               displayLabel = req.type.slice(0, 2);
               if (['公休', '欠勤', '休暇', '全休'].includes(req.type)) labelColor = '#ef4444';
@@ -325,7 +304,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             if (dtype === 'weekday') {
               displayLabel = '出勤'; labelColor = '#38bdf8';
             } else {
-              displayLabel = '公休'; labelColor = '#ef4444';
+              // 休日出勤不可スタッフ（noHoliday）は「日勤」、それ以外は「公休」として表示
+              if (isNoHoliday) {
+                displayLabel = '日勤'; labelColor = '#38bdf8';
+              } else {
+                displayLabel = '公休'; labelColor = '#ef4444';
+              }
             }
           }
 
@@ -344,52 +328,46 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
   const calculateStats = (staff: any) => {
     if (!staff) return { workDays: 0, holidayWorkDays: 0, leaveHours: '0.00' };
-    const sName = normalize(staff?.name || '');
-    if (!sName) return { workDays: 0, holidayWorkDays: 0, leaveHours: '0.00' };
-    
+    const sName = normalize(staff.name);
     const year = activeDate.getFullYear();
     const month = activeDate.getMonth();
+    const targetMonth = year + '-' + String(month + 1).padStart(2, '0');
     
     // 月の日数を取得
     const daysInMonthCount = new Date(year, month + 1, 0).getDate();
     
     let workDays = 0, holidayWorkDays = 0, leaveHours = 0;
-    const attendanceTypes = ['出勤', '日勤', '午前休', '午後休', '時間休', '午前振替', '午後振替', '特休', '看護休暇'];
-    const offTypes = ['公休', '振替', '1日振替', '半日振替', '振替休日', '全休'];
-    const safeRequests = Array.isArray(requests) ? requests : [];
-
+    
     for (let day = 1; day <= daysInMonthCount; day++) {
       const date = new Date(year, month, day);
-      if (isNaN(date.getTime())) continue;
-      
       const dateStr = getDateStr(date);
-      const req = safeRequests.find(r => r && normalize(r?.staffName || r?.staff_name || '') === sName && r.date === dateStr && r.status !== 'deleted');
-      const dtype = getDayType(date);
+      const sT = normalize(staff.name);
+      
+      // requestMapを直接引くか、requestsをフィルタリングする（ここでは正確な算出のためrequestsを使用）
+      const req = requests.find(r => r && normalize(r.staffName) === sT && r.date === dateStr && r.status !== 'deleted');
       
       if (req) {
-        // 出勤系（一部でも出勤していれば日数にカウント）
-        const rType = req?.type || '';
-        if (attendanceTypes.some(at => normalize(at) === normalize(rType))) {
-          if (dtype === 'weekday') workDays++; else holidayWorkDays++;
-          
-          // 時間休などは休暇時間としても加算
-          const h = getReqHours(req);
-          if (h > 0) leaveHours += h;
-        } 
-        // 休暇系
-        else if (!offTypes.some(ot => normalize(ot) === normalize(rType))) {
+        if (['出勤', '日勤'].includes(req.type)) {
+          if (getDayType(date) === 'weekday' && !isHoliday(date)) workDays++; else holidayWorkDays++;
+        } else {
+          // 振替は統計から除外、時間休などは加算
+          if (['振替', '1日振替', '半日振替', '振替休日'].includes(req.type)) continue;
+
           const h = getReqHours(req);
           if (h > 0) {
             leaveHours += h;
-          } else if (['年休', '有給休暇', '夏季休暇', '休暇', '欠勤'].some(lt => normalize(lt) === normalize(rType))) {
+          } else if (['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤'].includes(req.type)) {
             leaveHours += 7.75;
           }
         }
       } else {
-        // デフォルトロジック（カレンダーの表示と同一）
-        // 平日は出勤、土日祝は休み（休日出勤は申請がない限りカウントしない）
+        // デフォルトロジック
+        const dtype = getDayType(date);
+        const isNoHoliday = (dtype !== 'weekday') && (staff.monthlyNoHoliday?.[targetMonth] ?? staff.noHoliday);
         if (dtype === 'weekday') {
           workDays++;
+        } else if (isNoHoliday) {
+          holidayWorkDays++;
         }
       }
     }
@@ -430,34 +408,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         <View style={styles.modalOverlay}>
           <View style={styles.calendarModal}>
             <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }}>
-                <ThemeText variant="h2">{selectedStaff?.name || ''} さんのカレンダー</ThemeText>
-                <ThemeText variant="caption" color={COLORS.textSecondary}>{activeDate.getFullYear()}年 {activeDate.getMonth() + 1}月</ThemeText>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                {/* 保護（ロック）ボタン */}
-                <TouchableOpacity 
-                  style={[styles.lockBtn, isMonthLocked && styles.lockBtnActive]}
-                  onPress={async () => {
-                    if (!selectedStaff || !setStaffLocks) return;
-                    
-                    const newAllLocks = { ...(staffLocks || {}) };
-                    const staffId = String(selectedStaff.id);
-                    const staffMonthLocks = { ...(newAllLocks[staffId] || {}) };
-                    
-                    staffMonthLocks[currentMonthKey] = !isMonthLocked;
-                    newAllLocks[staffId] = staffMonthLocks;
-                    
-                    try {
-                      await setStaffLocks(newAllLocks);
-                    } catch (e) {
-                      console.error('Lock save error:', e);
-                    }
-                  }}
-                >
-                  {isMonthLocked ? <Lock size={18} color="white" /> : <Unlock size={18} color={COLORS.textSecondary} />}
-                </TouchableOpacity>
-                <TouchableOpacity onPress={handlePrint} style={styles.iconBtn}><Printer size={22} color="#38bdf8" /></TouchableOpacity>
+              <View style={{ flex: 1 }}><ThemeText variant="h2">{selectedStaff?.name || ''}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{activeDate.getFullYear()}年 {activeDate.getMonth() + 1}月</ThemeText></View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                {Platform.OS === 'web' && ( <TouchableOpacity onPress={handlePrint} style={styles.iconBtn}><Printer size={22} color="#38bdf8" /></TouchableOpacity> )}
                 <TouchableOpacity onPress={() => setIsCalendarModalVisible(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity>
               </View>
             </View>
@@ -538,6 +491,4 @@ const styles = StyleSheet.create({
   placeholderSection: { height: 100, justifyContent: 'center', alignItems: 'center' },
   addStaffBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   deleteBtn: { borderWidth: 1, borderColor: '#ef4444', padding: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  lockBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  lockBtnActive: { backgroundColor: '#ef4444', borderColor: '#ef4444' },
 });

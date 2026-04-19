@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Alert, Platform } from 'react-native';
+import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Alert } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
@@ -28,7 +28,6 @@ const getSeasonalTheme = (month: number) => {
 interface CalendarScreenProps {
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
-  updateRequests: (requests: any[] | ((prev: any[]) => any[])) => Promise<void>;
   weekdayLimit: number;
   holidayLimit: number;
   saturdayLimit: number;
@@ -44,35 +43,24 @@ interface CalendarScreenProps {
   onDeleteRequest: (id: string) => void;
   onDeleteRequests?: (ids: string[]) => void;
   approveRequest?: (id: string, status: string) => void;
-  onForceSave?: () => Promise<void>;
-  onForceFetch?: () => Promise<void>;
-  isSyncing?: boolean;
 }
 
 export const CalendarScreen: React.FC<CalendarScreenProps> = ({ 
   requests, setRequests, weekdayLimit, holidayLimit, 
   saturdayLimit, sundayLimit, publicHolidayLimit,
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,
-  currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest,
-  onForceSave, onForceFetch, isSyncing = false, updateRequests
+  currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest
 }) => {
-  const [selectedDate, setSelectedDate] = useState(currentDate || new Date());
+  const [selectedDate, setSelectedDate] = useState(currentDate);
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
   const [selectedStaffToAdd, setSelectedStaffToAdd] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState('出勤');
-  const [hourlyDuration, setHourlyDuration] = useState(0);
+  const [hourlyDuration, setHourlyDuration] = useState(1.0);
   const [isTypeModalVisible, setIsTypeModalVisible] = useState(false);
 
   React.useEffect(() => {
-    // Safety check for currentDate
-    if (!currentDate || !(currentDate instanceof Date) || isNaN(currentDate.getTime())) {
-      console.warn('CalendarScreen: Invalid currentDate provided', currentDate);
-      return;
-    }
-    
     // If current selected date is not in the active month, reset it to the 1st of that month
-    const validSelectedDate = (selectedDate instanceof Date && !isNaN(selectedDate.getTime())) ? selectedDate : new Date();
-    if (validSelectedDate.getMonth() !== currentDate.getMonth() || validSelectedDate.getFullYear() !== currentDate.getFullYear()) {
+    if (selectedDate.getMonth() !== currentDate.getMonth() || selectedDate.getFullYear() !== currentDate.getFullYear()) {
       setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
     }
   }, [currentDate]);
@@ -80,80 +68,84 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   // Optimization: Index requests to avoid O(N^2) scans in getDetailedDayInfo
   const requestMap = React.useMemo(() => {
     const map = new Map<string, Map<string, any[]>>();
-    if (!Array.isArray(requests)) return map;
-    
     requests.forEach((r: any) => {
-      if (!r || !r.date) return;
-      
-      // Fallback for legacy snake_case data
-      const sName = r.staffName || r.staff_name;
-      if (!sName || typeof sName !== 'string') return;
-      
-      const sT = normalizeName(sName);
+      if (!r || !r.date || !r.staffName || typeof r.staffName !== 'string') return;
+      const sT = r.staffName.trim();
       if (!map.has(r.date)) map.set(r.date, new Map<string, any[]>());
-      const dateMap = map.get(r.date);
-      if (dateMap) {
-        if (!dateMap.has(sT)) dateMap.set(sT, []);
-        dateMap.get(sT)!.push(r);
-      }
+      if (!map.get(r.date)!.has(sT)) map.get(r.date)!.set(sT, []);
+      map.get(r.date)!.get(sT)!.push(r);
     });
     return map;
   }, [requests]);
 
-  const isPrivileged = ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
+  const isPrivileged = ((profile.role?.includes('シフト管理者') || profile.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
 
   const getDetailedDayInfo = (date: Date) => {
     const dateStr = getDateStr(date);
     const dayType = getDayType(date);
+    const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
     const working: any[] = [];
     const off: any[] = [];
-    const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '午前振替', '午後振替', '特休', '看護休暇'];
 
     (staffList || []).forEach(staff => {
       if (!staff || !staff.name) return;
-      const rDateStr = dateStr;
       
-      const isOut = normalizeName(staff.status || '') === normalizeName('長期休暇') || normalizeName(staff.placement || '') === normalizeName('長期休暇') || normalizeName(staff.position || '') === normalizeName('長期休暇') || normalizeName(staff.status || '') === normalizeName('入職前');
-      const isHomeVisit = normalizeName(staff.placement || '') === normalizeName('訪問');
-      const isAssistant = normalizeName(staff.profession || '') === normalizeName('助手') || normalizeName(staff.placement || '') === normalizeName('助手');
+      const isOut = staff.status?.trim() === '長期休暇' || staff.placement?.trim() === '長期休暇' || staff.position?.trim() === '長期休暇' || staff.status?.trim() === '入職前';
+      const isHomeVisit = staff.placement === '訪問';
+      const isAssistant = staff.profession === '助手' || staff.placement === '助手';
       
-      if (isOut) return;
+      // 除外条件: 長期休暇、入職前、訪問担当
+      if (isOut || isHomeVisit) return;
 
-      const userRequests = (requestMap && rDateStr ? requestMap.get(rDateStr)?.get(normalizeName(staff.name || '')) : []) || [];
-      const approvedReqs = userRequests.filter((r: any) => r && r.status === 'approved');
-      const pendingReqs = userRequests.filter((r: any) => r && r.status === 'pending');
+      const userRequests = requestMap.get(dateStr)?.get(staff.name.trim()) || [];
+      const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
+      
+      // 休暇申請（公休含む）を優先的に探す
+      const leaveRequest = userRequests.find(r => !attendanceTypes.includes(r.type) && r.status === 'approved');
+      const workRequest = userRequests.find(r => attendanceTypes.includes(r.type) && r.status === 'approved');
+      const pendingRequest = userRequests.find(r => r.status === 'pending');
+
       const isNoHoliday = (dayType !== 'weekday') && (staff.monthlyNoHoliday?.[monthStr] ?? staff.noHoliday);
 
-      if (approvedReqs.length > 0) {
-        approvedReqs.forEach((req: any) => {
-          if (!req) return;
-          const isAtt = attendanceTypes.some(at => normalizeName(at) === normalizeName(req?.type || ''));
-          if (isAtt) {
-            working.push({ staff, type: req?.type, requestId: req?.id, isManual: true, isHomeVisit, isAssistant, status: 'approved', details: req?.details });
-
-            if (req?.type !== '出勤') {
-              off.push({ staff, type: req?.type, requestId: req?.id, isManual: true, isHomeVisit, status: 'approved', details: req?.details });
-            }
-          } else {
-            off.push({ staff, type: req?.type, requestId: req?.id, isManual: true, isHomeVisit, status: 'approved', details: req?.details });
+      // ロジックの優先順位: 1. 休暇申請 2. 出勤申請 3. デフォルト（平日: 出勤 / 休日: 公休）
+      if (leaveRequest) {
+        off.push({ staff, type: leaveRequest.type, requestId: leaveRequest.id, isManual: true, isHomeVisit, status: 'approved', details: leaveRequest.details });
+      } else if (workRequest) {
+        if (isAssistant) {
+          // 助手の場合、「出勤」以外の特殊な勤怠（午前休、特休など）なら休暇リストに表示して把握可能にする
+          if (workRequest.type !== '出勤') {
+            off.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, status: 'approved', details: workRequest.details });
           }
-        });
-      } else if (pendingReqs.length > 0) {
-        pendingReqs.forEach((req: any) => {
-          if (!req) return;
-          const list = attendanceTypes.some(at => normalizeName(at) === normalizeName(req?.type || '')) ? working : off;
-          list.push({ staff, type: req?.type, requestId: req?.id, isManual: true, isHomeVisit, status: 'pending', details: req?.details });
-          if (list === working && req?.type !== '出勤') {
-            off.push({ staff, type: req?.type, requestId: req?.id, isManual: true, isHomeVisit, status: 'pending', details: req?.details });
-          }
-        });
-      } else {
-        const isScheduledToWork = dayType === 'weekday';
-        if (isScheduledToWork) {
-          working.push({ staff, type: '出勤', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant });
         } else {
-          off.push({ staff, type: isNoHoliday ? '休日出勤不要' : '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, status: 'approved' });
+          working.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, status: 'approved', details: workRequest.details });
+          // 時間休などは出勤しつつ休暇扱いとなるため、休暇・休日リスト（off）にも表示させる
+          if (workRequest.type !== '出勤') {
+            off.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, status: 'approved', details: workRequest.details });
+          }
+        }
+      } else if (pendingRequest) {
+        // Show pending on the side they apply to
+        const list = attendanceTypes.includes(pendingRequest.type) ? working : off;
+        if (isAssistant) {
+          if (pendingRequest.type !== '出勤') {
+            off.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, status: 'pending', details: pendingRequest.details });
+          }
+        } else {
+          list.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, status: 'pending', details: pendingRequest.details });
+          // ペンディングであっても「出勤」以外なら両方に表示させる
+          if (list === working && pendingRequest.type !== '出勤') {
+            off.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, status: 'pending', details: pendingRequest.details });
+          }
+        }
+      } else {
+        if (!isAssistant) {
+          const isScheduledToWork = dayType === 'weekday';
+          if (isScheduledToWork) {
+            working.push({ staff, type: '出勤', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, status: 'approved' });
+          } else {
+            off.push({ staff, type: isNoHoliday ? '休日出勤不要' : '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, status: 'approved' });
+          }
         }
       }
     });
@@ -161,32 +153,10 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     return { working, off };
   };
 
-  // その月の全日分の情報を事前計算する（描画高速化のため）
-  const monthDataMap = React.useMemo(() => {
-    const dataMap = new Map();
-    const safeDate = currentDate || new Date();
-    const daysInMonthCnt = new Date(safeDate.getFullYear(), safeDate.getMonth() + 1, 0).getDate();
-    
-    for (let day = 1; day <= daysInMonthCnt; day++) {
-      const d = new Date(safeDate.getFullYear(), safeDate.getMonth(), day);
-      if (isNaN(d.getTime())) continue; // Skip invalid dates
-      const info = getDetailedDayInfo(d);
-      const dayType = getDayType(d);
-      
-      dataMap.set(day, {
-        workingCount: (info.working || []).length,
-        holidayWorkers: dayType !== 'weekday' ? (info.working || []).map(w => w.staff?.name).filter(Boolean) : [],
-        dayType
-      });
-    }
-    return dataMap;
-  }, [currentDate, staffList, requestMap, monthlyLimits, weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit]);
-
-  const { working: workingStaff, off: offStaff } = getDetailedDayInfo((selectedDate instanceof Date && !isNaN(selectedDate.getTime())) ? selectedDate : new Date());
-  const currentDayType = getDayType((selectedDate instanceof Date && !isNaN(selectedDate.getTime())) ? selectedDate : new Date());
-  const safeSelectedDate = (selectedDate instanceof Date && !isNaN(selectedDate.getTime())) ? selectedDate : new Date();
-  const monthStr = `${safeSelectedDate.getFullYear()}-${String(safeSelectedDate.getMonth() + 1).padStart(2, '0')}`;
-  const currentMonthly = (monthlyLimits && monthlyLimits[monthStr]) || { weekday: weekdayLimit || 0, sat: saturdayLimit || 0, sun: sundayLimit || 0, pub: publicHolidayLimit || 0 };
+  const { working: workingStaff, off: offStaff } = getDetailedDayInfo(selectedDate);
+  const currentDayType = getDayType(selectedDate);
+  const monthStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`;
+  const currentMonthly = monthlyLimits[monthStr] || { weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit };
   const currentLimit = currentDayType === 'weekday' ? currentMonthly.weekday : 
                        currentDayType === 'sat' ? currentMonthly.sat :
                        currentDayType === 'sun' ? currentMonthly.sun :
@@ -205,9 +175,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             const dateStr = getDateStr(selectedDate);
             const dayType = getDayType(selectedDate);
             
-            // 1. 対象スタッフ・対象日のリクエストをすべて特定 (手動/自動問わず削除対象とする)
+            // 1. 対象スタッフ・対象日の「手動リクエスト」をすべて特定
             const manualRequestIds = requests
-              .filter(r => normalizeName(r.staffName) === normalizeName(staffName) && r.date === dateStr)
+              .filter(r => r.staffName?.trim() === staffName.trim() && r.date === dateStr && !String(r.id).startsWith('auto-'))
               .map(r => r.id);
 
             // 2. クラウド/グローバルステートから一括削除
@@ -221,27 +191,22 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               }
             }
 
-            // 3. ローカルおよびクラウドステートの更新と「状態保持（公休化）」
-            // 決定論的ID (m-スタッフ名-日付) を使用することで、DB内での重複を防ぎ、確実に上書きされるようにします
-            const deterministicId = `m-${normalizeName(staffName)}-${dateStr}`;
-
-            await updateRequests((prev: any[]) => {
-              // 重複を避けるため、既存の同一日のデータをフィルタリング
-              const filtered = prev.filter(r => !(normalizeName(r.staffName || r.staff_name) === normalizeName(staffName) && r.date === dateStr));
+            // 3. ローカルステートの更新と「状態保持（公休化）」
+            setRequests((prev: any[]) => {
+              // まず対象の全リクエストをフィルタリング
+              const filtered = prev.filter(r => !(r.staffName?.trim() === staffName.trim() && r.date === dateStr));
               
               // 平日で「出勤」を削除した場合のみ、「公休（休み）」として状態を上書き保持する
               if (wasWorking && dayType === 'weekday') {
                 const offRequest = {
-                  id: deterministicId,
+                  id: `off-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                   staffName: staffName,
                   date: dateStr,
                   type: '公休',
                   status: 'approved',
                   reason: '調整',
-                  isManual: true,
                   createdAt: new Date().toISOString(),
                   updatedAt: new Date().toISOString(),
-                  details: { priority: 100 } // 管理者操作を最優先にする
                 };
                 return [...filtered, offRequest];
               }
@@ -260,7 +225,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
 
     if (selectedType === '空欄') {
       const idsToDelete = requests
-        .filter(r => r.date === dateStr && staffNames.map(n => normalizeName(n)).includes(normalizeName(r.staffName)))
+        .filter(r => r.date === dateStr && staffNames.includes(r.staffName?.trim()) && !String(r.id).startsWith('auto-'))
         .map(r => r.id);
       
       if (idsToDelete.length > 0) {
@@ -272,7 +237,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
           }
         }
         
-        await updateRequests((prev: any[]) => prev.filter(r => !idsToDelete.includes(r.id)));
+        setRequests((prev: any[]) => prev.filter(r => !idsToDelete.includes(r.id)));
         Alert.alert('完了', 'シフトをクリアしました。');
       }
       setIsAddStaffModalVisible(false);
@@ -282,22 +247,19 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     }
 
     const newReqs = staffNames.map(name => ({
-      id: `m-${normalizeName(name)}-${dateStr}`, // Deterministic ID
+      id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       staffName: name,
       date: dateStr,
       type: selectedType,
       status: 'approved',
       reason: '管理者による調整',
-      isManual: true,
       details: { 
         note: '手動割当',
-        priority: 100, // 管理者操作を最優先
-        duration: (selectedType === '時間休' || selectedType === '特休' || selectedType === '看護休暇') ? hourlyDuration : undefined
+        duration: (selectedType === '時間休' || selectedType === '時間給' || selectedType === '特休' || selectedType === '看護休暇') ? hourlyDuration : undefined
       },
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     }));
-    await updateRequests((prev: any[]) => [...prev, ...newReqs]);
+    setRequests((prev: any[]) => [...prev, ...newReqs]);
     setIsAddStaffModalVisible(false);
     setIsTypeModalVisible(false);
     setSelectedStaffToAdd([]);
@@ -307,9 +269,8 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
   const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
 
-  const safeCurrentDate = currentDate || new Date();
-  const daysInMonth = getDaysInMonth(safeCurrentDate.getFullYear(), safeCurrentDate.getMonth());
-  const firstDayOfMonth = getFirstDayOfMonth(safeCurrentDate.getFullYear(), safeCurrentDate.getMonth());
+  const daysInMonth = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
+  const firstDayOfMonth = getFirstDayOfMonth(currentDate.getFullYear(), currentDate.getMonth());
 
   const days: (number | null)[] = [];
   for (let i = 0; i < firstDayOfMonth; i++) days.push(null);
@@ -325,14 +286,14 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
         cells = [];
       }
 
-      const isSelected = day === safeSelectedDate.getDate() && safeCurrentDate.getMonth() === safeSelectedDate.getMonth() && safeCurrentDate.getFullYear() === safeSelectedDate.getFullYear();
+      const isSelected = day === selectedDate.getDate() && currentDate.getMonth() === selectedDate.getMonth() && currentDate.getFullYear() === selectedDate.getFullYear();
       const isToday = day === new Date().getDate() && 
-                      safeCurrentDate.getMonth() === new Date().getMonth() && 
-                      safeCurrentDate.getFullYear() === new Date().getFullYear();
+                      currentDate.getMonth() === new Date().getMonth() && 
+                      currentDate.getFullYear() === new Date().getFullYear();
       
-      const dayData = day ? monthDataMap.get(day) : null;
-      const dayType = dayData?.dayType || getDayType(new Date(safeCurrentDate.getFullYear(), safeCurrentDate.getMonth(), day || 1));
-      const monthly = (monthlyLimits && monthlyLimits[monthStr]) || { weekday: weekdayLimit || 0, sat: saturdayLimit || 0, sun: sundayLimit || 0, pub: publicHolidayLimit || 0 };
+      const d = day ? new Date(currentDate.getFullYear(), currentDate.getMonth(), day) : null;
+      const dayType = d ? getDayType(d) : 'weekday';
+      const monthly = monthlyLimits[monthStr] || { weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit };
       const limit = dayType === 'weekday' ? monthly.weekday : 
                     dayType === 'sat' ? monthly.sat :
                     dayType === 'sun' ? monthly.sun :
@@ -342,8 +303,16 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       if (dayType === 'sun' || dayType === 'holiday') dateColor = '#ef4444';
       if (dayType === 'sat') dateColor = '#3b82f6';
 
-      const workingCount = dayData ? dayData.workingCount : 0;
-      const holidayWorkers = dayData ? dayData.holidayWorkers : [];
+      let workingCount = 0;
+      let holidayWorkers: any[] = [];
+      if (day) {
+        const info = getDetailedDayInfo(d!);
+        workingCount = info.working.filter(w => !w.isHomeVisit).length;
+        if (dayType !== 'weekday') {
+          holidayWorkers = info.working.filter(w => !w.isHomeVisit).map(w => w.staff.name);
+        }
+      }
+
       const isUnderLimit = workingCount < limit;
 
       cells.push(
@@ -355,7 +324,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             isToday && !isSelected && styles.todayCell,
             (!isSelected && !!day && isUnderLimit) ? { backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: BORDER_RADIUS.sm } : null
           ]}
-          onPress={() => day && setSelectedDate(new Date(safeCurrentDate.getFullYear(), safeCurrentDate.getMonth(), day))}
+          onPress={() => day && setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), day))}
           disabled={!day}
         >
           {day && (
@@ -379,7 +348,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
 
               {holidayWorkers.length > 0 && (
                 <View style={styles.holidayWorkersBox}>
-                  {holidayWorkers.slice(0, 3).map((name: string, idx: number) => (
+                  {holidayWorkers.slice(0, 3).map((name, idx) => (
                     <ThemeText 
                       key={idx} 
                       style={[styles.holidayWorkerName, isSelected && { color: 'white' }]} 
@@ -411,63 +380,39 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     <SafeAreaView style={styles.container}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 160 }} showsVerticalScrollIndicator={true}>
         <View style={styles.header}>
-          <ThemeText variant="h1">カレンダー</ThemeText>
-          <ThemeText variant="caption">シフト・稼働予定の確認</ThemeText>
+        <ThemeText variant="h1">カレンダー</ThemeText>
+        <ThemeText variant="caption">シフト・稼働予定の確認</ThemeText>
+      </View>
+
+      <ThemeCard style={styles.calendarContainer}>
+        <View style={styles.monthHeader}>
+          <TouchableOpacity onPress={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}>
+            <ChevronLeft color={COLORS.text} size={24} />
+          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <ThemeText style={{ fontSize: 24 }}>{getSeasonalTheme(currentDate.getMonth()).icon}</ThemeText>
+            <ThemeText variant="h2">{currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月</ThemeText>
+          </View>
+          <TouchableOpacity onPress={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}>
+            <ChevronRight color={COLORS.text} size={24} />
+          </TouchableOpacity>
         </View>
 
-        <ThemeCard style={styles.calendarContainer}>
-          <View style={styles.monthHeader}>
-            <TouchableOpacity onPress={() => currentDate && setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}>
-              <ChevronLeft color={COLORS.text} size={24} />
-            </TouchableOpacity>
-            
-            <View style={{ flex: 1, alignItems: 'center' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <ThemeText style={{ fontSize: 24 }}>{getSeasonalTheme(currentDate?.getMonth() || 0).icon}</ThemeText>
-                <ThemeText variant="h2">{currentDate?.getFullYear() || 2026}年 {(currentDate?.getMonth() || 0) + 1}月</ThemeText>
-              </View>
+        <View style={styles.weekDays}>
+          {['日', '月', '火', '水', '木', '金', '土'].map((d, i) => (
+            <ThemeText key={d} variant="caption" style={[styles.weekDayText, i === 0 && { color: '#ef4444' }, i === 6 && { color: '#3b82f6' }]}>{d}</ThemeText>
+          ))}
+        </View>
 
-              {/* 同期・更新ボタン */}
-              <View style={[styles.syncContainer, { marginTop: 12 }]}>
-                {isPrivileged && (
-                  <TouchableOpacity 
-                    style={[styles.syncBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 16 }, isSyncing && { opacity: 0.5 }]}
-                    disabled={isSyncing}
-                    onPress={() => onForceSave && onForceSave()}
-                  >
-                    <ThemeText variant="caption" color={COLORS.primary} bold>{isSyncing ? '保存中...' : 'クラウドに保存'}</ThemeText>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity 
-                  style={[styles.syncBtn, { borderColor: COLORS.textSecondary, backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingHorizontal: 16 }, isSyncing && { opacity: 0.5 }]}
-                  disabled={isSyncing}
-                  onPress={() => onForceFetch && onForceFetch()}
-                >
-                  <ThemeText variant="caption" color={COLORS.textSecondary} bold>{isSyncing ? '更新中...' : 'クラウドから更新'}</ThemeText>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <TouchableOpacity onPress={() => currentDate && setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}>
-              <ChevronRight color={COLORS.text} size={24} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.weekDays}>
-            {['日', '月', '火', '水', '木', '金', '土'].map((d, i) => (
-              <ThemeText key={d} variant="caption" style={[styles.weekDayText, i === 0 && { color: '#ef4444' }, i === 6 && { color: '#3b82f6' }]}>{d}</ThemeText>
-            ))}
-          </View>
-
-          <View style={styles.calendarGrid}>
-            {renderCalendar()}
-          </View>
-        </ThemeCard>
+        <View style={styles.calendarGrid}>
+          {renderCalendar()}
+        </View>
+      </ThemeCard>
 
       <View style={styles.detailScroll}>
         <ThemeCard style={styles.detailCard}>
           <View style={styles.detailHeader}>
-            <ThemeText variant="h2">{safeSelectedDate.getMonth() + 1}月{safeSelectedDate.getDate()}日の詳細</ThemeText>
+            <ThemeText variant="h2">{selectedDate.getMonth() + 1}月{selectedDate.getDate()}日の詳細</ThemeText>
             {isPrivileged && (
               <TouchableOpacity 
                 style={styles.addStaffBtn} 
@@ -482,7 +427,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             <View style={styles.detailItem}>
               <View style={styles.detailTitleRow}><Users size={16} color={COLORS.primary} /><ThemeText variant="label" style={{ marginLeft: 8 }}>現在の出勤数</ThemeText></View>
               <ThemeText variant="h1">
-                {workingStaff.length}
+                {workingStaff.filter(w => !w.isHomeVisit).length}
                 <ThemeText variant="caption"> 名</ThemeText>
               </ThemeText>
             </View>
@@ -499,22 +444,20 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               {workingStaff.length > 0 ? workingStaff.map((item, idx) => (
                 <View key={idx} style={styles.leafItem}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                    <ThemeText variant="caption" bold>{item?.staff?.name || '不明'}</ThemeText>
-                    {item?.isHomeVisit && <View style={[styles.badgeTiny, { backgroundColor: '#ec4899' }]}><ThemeText style={styles.badgeTinyText}>訪問</ThemeText></View>}
-                    {(item?.staff?.profession === '助手' || item?.staff?.placement === '助手') && <View style={[styles.badgeTiny, { backgroundColor: '#8b5cf6' }]}><ThemeText style={styles.badgeTinyText}>助手</ThemeText></View>}
+                    <ThemeText variant="caption" bold>{item.staff.name}</ThemeText>
                     <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginLeft: 8 }} numberOfLines={1}>
-                      ({item?.type || '不明'})
-                      {item?.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
-                      {(!item?.details?.startTime && item?.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.duration}h</ThemeText>}
-                      {item?.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
+                      ({item.type}{item.isHomeVisit ? ' / 訪問' : ''})
+                      {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
+                      {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.duration}h</ThemeText>}
+                      {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-                  {(isPrivileged || (profile && item?.staff && normalizeName(profile.name || '') === normalizeName(item.staff.name || ''))) && (
+                  {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
                     <View style={{ flexDirection: 'row', gap: 8 }}>
-                      {item?.status === 'pending' && (
+                      {item.status === 'pending' && (
                         <TouchableOpacity 
                           style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
-                          onPress={() => item?.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
+                          onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
                         >
                           <Check size={14} color={COLORS.primary} />
                         </TouchableOpacity>
@@ -534,22 +477,20 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             {offStaff.length > 0 ? offStaff.map((item, idx) => (
                 <View key={idx} style={styles.leafItem}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                    <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>{item?.staff?.name || '不明'}</ThemeText>
-                    {item?.isHomeVisit && <View style={[styles.badgeTiny, { backgroundColor: '#ec4899' }]}><ThemeText style={styles.badgeTinyText}>訪問</ThemeText></View>}
-                    {(item?.staff?.profession === '助手' || item?.staff?.placement === '助手') && <View style={[styles.badgeTiny, { backgroundColor: '#8b5cf6' }]}><ThemeText style={styles.badgeTinyText}>助手</ThemeText></View>}
+                    <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>{item.staff.name}</ThemeText>
                     <ThemeText variant="caption" style={{ marginLeft: 8, color: COLORS.textSecondary }} numberOfLines={1}>
-                      ({item?.type || '不明'})
-                      {item?.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
-                      {(!item?.details?.startTime && item?.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.duration}h</ThemeText>}
-                      {item?.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
+                      ({item.type})
+                      {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
+                      {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.duration}h</ThemeText>}
+                      {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>
-                  {(isPrivileged || (profile?.name && item?.staff && normalizeName(profile.name || '') === normalizeName(item.staff.name || ''))) && (
+                  {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
                     <View style={{ flexDirection: 'row', gap: 8 }}>
-                      {item?.status === 'pending' && (
+                      {item.status === 'pending' && (
                         <TouchableOpacity 
                           style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
-                          onPress={() => item?.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
+                          onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
                         >
                           <Check size={14} color={COLORS.primary} />
                         </TouchableOpacity>
@@ -573,7 +514,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             <View style={styles.modalHeader}>
               <View>
                 <ThemeText variant="h2">スタッフを出勤に割り当て</ThemeText>
-                <ThemeText variant="caption">{formatDate(safeSelectedDate)}</ThemeText>
+                <ThemeText variant="caption">{formatDate(selectedDate)}</ThemeText>
               </View>
               <TouchableOpacity onPress={() => setIsAddStaffModalVisible(false)}>
                 <XCircle color={COLORS.textSecondary} size={24} />
@@ -581,13 +522,12 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             </View>
 
             <ScrollView style={{ maxHeight: 400 }}>
-              {(staffList || [])
+              {staffList
                 .filter(s => {
-                  const safeDateForModal = currentDate || new Date();
-                  const mStr = `${safeDateForModal.getFullYear()}-${String(safeDateForModal.getMonth() + 1).padStart(2, '0')}`;
-                  const isLongTerm = normalizeName(s.status) === normalizeName('長期休暇') || normalizeName(s.placement) === normalizeName('長期休暇') || normalizeName(s.position) === normalizeName('長期休暇') || normalizeName(s.status) === normalizeName('入職前');
-                  const isNoHoliday = (getDayType(safeSelectedDate) !== 'weekday') && (s.monthlyNoHoliday?.[mStr] ?? s.noHoliday);
-                  const alreadyHasRequest = requests && Array.isArray(requests) && requests.some(r => normalizeName(r.staffName) === normalizeName(s.name) && r.date === getDateStr(safeSelectedDate) && r.status === 'approved');
+                  const mStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+                  const isLongTerm = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
+                  const isNoHoliday = (getDayType(selectedDate) !== 'weekday') && (s.monthlyNoHoliday?.[mStr] ?? s.noHoliday);
+                  const alreadyHasRequest = requests.some(r => r.staffName.trim() === s.name.trim() && r.date === getDateStr(selectedDate) && r.status === 'approved');
                   
                   return !isLongTerm && !isNoHoliday && !alreadyHasRequest;
                 })
@@ -658,7 +598,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               ))}
             </View>
 
-            {(selectedType === '時間休' || selectedType === '特休' || selectedType === '看護休暇') && (
+            {(selectedType === '時間休' || selectedType === '時間給' || selectedType === '特休' || selectedType === '看護休暇') && (
               <View style={{ marginBottom: 20 }}>
                 <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
@@ -692,8 +632,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: { padding: SPACING.md, marginTop: SPACING.md },
   calendarContainer: { margin: SPACING.md, padding: SPACING.md },
-  monthHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.lg, flexWrap: 'wrap', gap: 10 },
-  syncContainer: { flexDirection: 'row', gap: 12, marginVertical: 4 },
+  monthHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.lg },
   weekDays: { flexDirection: 'row', marginBottom: SPACING.sm },
   weekDayText: { flex: 1, textAlign: 'center', color: COLORS.textSecondary },
   calendarGrid: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)' },
@@ -728,7 +667,4 @@ const styles = StyleSheet.create({
   modalSubmitButton: { backgroundColor: COLORS.primary },
   smallActionBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: 'rgba(239, 68, 68, 0.05)', zIndex: 10 },
   finishBtn: { backgroundColor: COLORS.primary, height: 54, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4, zIndex: 20 },
-  badgeTiny: { paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 4, marginLeft: 6, marginBottom: 1 },
-  badgeTinyText: { color: 'white', fontSize: 9.5, fontWeight: 'bold' },
-  syncBtn: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8, borderWidth: 1, backgroundColor: 'rgba(255,255,255,0.02)' },
 });

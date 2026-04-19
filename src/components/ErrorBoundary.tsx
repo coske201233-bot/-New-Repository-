@@ -1,19 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { View, StyleSheet, TouchableOpacity, SafeAreaView, ScrollView, Platform } from 'react-native';
-import { ThemeText } from './ThemeText';
-import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { AlertTriangle, RefreshCcw, ShieldAlert } from 'lucide-react-native';
-
-const reloadApp = () => {
-  if (Platform.OS === 'web') {
-    window.location.reload();
-  } else {
-    // For Native, we can't easily reload without expo-updates.
-    // We'll just reset the state and hope for the best, or suggest manual restart.
-    return false;
-  }
-  return true;
-};
+import { View, StyleSheet, TouchableOpacity, SafeAreaView, ScrollView, Platform, Text } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface Props {
   children: ReactNode;
@@ -22,26 +9,44 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+  errorInfo: ErrorInfo | null;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
+    errorInfo: null,
   };
 
   public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
+    return { hasError: true, error, errorInfo: null };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Uncaught error:', error, errorInfo);
+    console.error('--- [CRITICAL UI CRASH] ---');
+    console.error(error);
+    console.error(errorInfo);
+    this.setState({ errorInfo });
   }
 
+  private handleReset = async () => {
+    try {
+      console.log('Emergency Reset: Clearing all storage...');
+      await AsyncStorage.clear();
+      if (Platform.OS === 'web') {
+        window.location.href = window.location.origin; // 強制リロード
+      }
+    } catch (e) {
+      console.error('Reset failed:', e);
+    }
+  };
+
   private handleReload = () => {
-    const success = reloadApp();
-    if (!success) {
-      this.setState({ hasError: false, error: null });
+    if (Platform.OS === 'web') {
+      window.location.reload();
+    } else {
+      this.setState({ hasError: false, error: null, errorInfo: null });
     }
   };
 
@@ -50,111 +55,140 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <SafeAreaView style={styles.container}>
           <ScrollView contentContainerStyle={styles.content}>
-            <View style={styles.iconContainer}>
-              <ShieldAlert size={80} color="#ef4444" />
+            <View style={styles.header}>
+              <Text style={styles.icon}>💀</Text>
+              <Text style={styles.title}>アプリケーションが停止しました</Text>
+              <Text style={styles.subtitle}>
+                致命的なエラーをキャッチしました。以下の情報が解決のヒントになります。
+              </Text>
             </View>
-            
-            <ThemeText variant="h1" style={styles.title}>
-              致命的な問題が発生しました
-            </ThemeText>
-            
-            <ThemeText variant="body" style={styles.message}>
-              アプリケーションの一部でエラーが発生し、動作を継続できなくなりました。以下の情報が開発の助けになります。
-            </ThemeText>
 
             <View style={styles.errorCard}>
-              <View style={styles.errorHeader}>
-                <AlertTriangle size={16} color="#ef4444" />
-                <ThemeText bold color="#ef4444" style={{ marginLeft: 8 }}>Error Message</ThemeText>
-              </View>
-              <ThemeText variant="caption" color={COLORS.textSecondary} style={styles.errorText}>
-                {this.state.error?.message || 'Unknown Error'}
-              </ThemeText>
+              <Text style={styles.errorLabel}>ERROR MESSAGE:</Text>
+              <Text style={styles.errorText}>
+                {this.state.error?.toString() || 'Unknown Error'}
+              </Text>
+              
+              <Text style={[styles.errorLabel, { marginTop: 15 }]}>STACK TRACE:</Text>
+              <ScrollView style={styles.stackBox}>
+                <Text style={styles.stackText}>
+                  {this.state.errorInfo?.componentStack || 'No stack trace available'}
+                </Text>
+              </ScrollView>
             </View>
 
             <View style={styles.actionContainer}>
               <TouchableOpacity style={styles.reloadButton} onPress={this.handleReload}>
-                <RefreshCcw size={20} color="white" />
-                <ThemeText bold color="white" style={{ marginLeft: 10 }}>アプリを再起動する</ThemeText>
+                <Text style={styles.buttonText}>再読み込みを試行</Text>
               </TouchableOpacity>
               
-              <TouchableOpacity 
-                style={styles.retryButton} 
-                onPress={() => this.setState({ hasError: false, error: null })}
-              >
-                <ThemeText variant="caption" color={COLORS.textSecondary}>
-                  エラーを無視して再試行（非推奨）
-                </ThemeText>
+              <TouchableOpacity style={styles.resetButton} onPress={this.handleReset}>
+                <Text style={styles.buttonText}>アプリを初期化して再起動 (推奨)</Text>
               </TouchableOpacity>
+              
+              <Text style={styles.hint}>
+                ※「初期化」を行うと、保存されていないデータや設定が消去されますが、
+                起動できない問題はほぼ確実に解決します。
+              </Text>
             </View>
           </ScrollView>
         </SafeAreaView>
       );
     }
 
-    return this.children;
+    return this.props.children;
   }
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#0a0a0a',
   },
   content: {
-    padding: SPACING.xl,
+    padding: 24,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: '100%',
   },
-  iconContainer: {
-    marginBottom: 24,
-    padding: 24,
-    borderRadius: 100,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  header: {
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  icon: {
+    fontSize: 60,
+    marginBottom: 15,
   },
   title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 10,
   },
-  message: {
+  subtitle: {
+    fontSize: 14,
+    color: '#888',
     textAlign: 'center',
-    color: COLORS.textSecondary,
-    marginBottom: 32,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   errorCard: {
     width: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: 16,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.2)',
-    marginBottom: 40,
+    borderColor: '#333',
+    marginBottom: 30,
   },
-  errorHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
+  errorLabel: {
+    color: '#ff4444',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 5,
   },
   errorText: {
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#eee',
+    fontSize: 14,
+    fontFamily: Platform.OS === 'web' ? 'monospace' : undefined,
+  },
+  stackBox: {
+    maxHeight: 150,
+    backgroundColor: '#000',
+    borderRadius: 6,
+    padding: 10,
+  },
+  stackText: {
+    color: '#666',
+    fontSize: 11,
+    lineHeight: 16,
   },
   actionContainer: {
     width: '100%',
-    gap: 16,
+    gap: 15,
   },
   reloadButton: {
-    backgroundColor: COLORS.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#333',
     padding: 18,
-    borderRadius: 16,
-    width: '100%',
-  },
-  retryButton: {
+    borderRadius: 12,
     alignItems: 'center',
-    padding: 12,
+  },
+  resetButton: {
+    backgroundColor: '#ff4444',
+    padding: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  hint: {
+    color: '#555',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 16,
   },
 });

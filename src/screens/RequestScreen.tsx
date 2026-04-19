@@ -10,7 +10,6 @@ import { normalizeName } from '../utils/staffUtils';
 interface RequestScreenProps {
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
-  updateRequests: (requests: any[] | ((prev: any[]) => any[])) => Promise<void>;
   onDeleteRequest?: (id: string) => void;
   approveRequest: (id: string, status: string) => void;
   profile: any;
@@ -18,7 +17,7 @@ interface RequestScreenProps {
   onForceCloudSync?: () => Promise<boolean>;
 }
 
-export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setRequests, updateRequests, onDeleteRequest, approveRequest, profile, isAdminAuthenticated, onForceCloudSync }) => {
+export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setRequests, onDeleteRequest, approveRequest, profile, isAdminAuthenticated, onForceCloudSync }) => {
   const [showForm, setShowForm] = useState(false);
   const [isDateModalVisible, setIsDateModalVisible] = useState(false);
   const [newRequest, setNewRequest] = useState({
@@ -68,7 +67,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     
     const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated;
     const nameStr = profile?.name || '不明な職員';
-    const isFiscalYear = (profile?.position?.trim() === '会計年度');
+    const isFiscalYear = (profile.position?.trim() === '会計年度');
     const MORNING_H = 4.0;
     const AFTERNOON_H = isFiscalYear ? 3.5 : 3.75;
     
@@ -85,15 +84,14 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
 
     try {
       const now = new Date().toISOString();
-      const requestId = `m-${normalizeName(nameStr)}-${newRequest.date}`;
       const request = {
-        id: requestId,
+        id: `m-${Date.now()}`,
         staffId: profile.id,
         type: newRequest.type,
         date: newRequest.date,
         reason: newRequest.reason,
         status: isManager ? 'approved' : 'pending',
-        staffName: normalizeName(nameStr),
+        staffName: nameStr,
         createdAt: now,
         updatedAt: now,
         hours: duration,
@@ -104,7 +102,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
         } : null
       };
 
-      await updateRequests(prev => [request, ...prev]);
+      setRequests(prev => [request, ...prev]);
       setShowForm(false);
       setNewRequest({ type: '年休', date: '', reason: '', startTime: '08:30', endTime: '17:15', hours: 1.0 });
       
@@ -163,11 +161,8 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 return true;
               })
               .sort((a, b) => {
-                const dateA = a.date ? new Date(String(a.date).replace(/-/g, '/')).getTime() : 0;
-                const dateB = b.date ? new Date(String(b.date).replace(/-/g, '/')).getTime() : 0;
-                
-                if (dateB !== dateA) return dateB - dateA;
-                
+                const dateDiff = new Date(b.date.replace(/-/g, '/')).getTime() - new Date(a.date.replace(/-/g, '/')).getTime();
+                if (dateDiff !== 0) return dateDiff;
                 const timeA = new Date(a.updatedAt || a.createdAt || a.created_at || 0).getTime();
                 const timeB = new Date(b.updatedAt || b.createdAt || b.created_at || 0).getTime();
                 return timeB - timeA;
@@ -203,10 +198,10 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   <View style={styles.infoRow}>
                     <CalendarIcon size={14} color={COLORS.textSecondary} />
                     <ThemeText variant="body" style={styles.infoText}>{formatDate(item.date)}</ThemeText>
-                    {item.hours !== undefined && (
+                    {item.details?.duration && (
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 12 }}>
                         <Clock size={14} color={COLORS.accent} />
-                        <ThemeText variant="caption" style={{ marginLeft: 4, color: COLORS.accent }} bold>{item.hours}時間</ThemeText>
+                        <ThemeText variant="caption" style={{ marginLeft: 4, color: COLORS.accent }} bold>{item.details.duration}時間</ThemeText>
                       </View>
                     )}
                   </View>
@@ -280,7 +275,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 </View>
               </View>
   
-              {(newRequest.type === '時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '特休' || newRequest.type === '看護休暇') && (
+              {(newRequest.type === '時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '看護休暇') && (
                 <View style={styles.timeSelectionArea}>
                   <ThemeText variant="label" style={{ marginBottom: 12 }}>時間設定 (0.25h単位)</ThemeText>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>

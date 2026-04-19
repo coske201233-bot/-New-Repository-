@@ -1,16 +1,11 @@
 {
-  "routes": [
+  "cleanUrls": true,
+  "headers": [
     {
-      "src": "/api/ai-shift",
-      "dest": "/api/ai-shift.ts"
-    },
-    {
-      "src": "/api/admin-reset-password",
-      "dest": "/api/admin-reset-password.ts"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/dist/$1"
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, max-age=0" }
+      ]
     }
   ]
 }

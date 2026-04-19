@@ -36,7 +36,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const currentMonth = currentDate.getMonth();
   const currentMonthStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
   
-  const limits = (monthlyLimits && monthlyLimits[currentMonthStr]) || { weekday: 12, sat: 1, sun: 0, pub: 1 };
+  const limits = monthlyLimits[currentMonthStr] || { weekday: 12, sat: 1, sun: 0, pub: 1 };
 
   const handleAuth = () => {
     if (!adminPassword) {

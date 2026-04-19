@@ -16,7 +16,6 @@ interface AdminScreenProps {
   setProfile: (p: any) => void;
   staffList: any[];
   setStaffList: (staff: any[] | ((prev: any[]) => any[])) => void;
-  updateStaffList: (staff: any[] | ((prev: any[]) => any[])) => Promise<void>;
   updateLimits: (type: string, val: number, monthStr?: string) => void;
   updatePassword: (pass: string) => void;
   adminPassword?: string;
@@ -31,19 +30,12 @@ interface AdminScreenProps {
   canUndoAutoAssign: boolean;
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
-  updateRequests: (requests: any[] | ((prev: any[]) => any[])) => Promise<void>;
-  onForceSave?: () => void;
-  onForceFetch?: () => void;
-  isSyncing?: boolean;
-  handleUpdateAuthPassword?: (pass: string) => Promise<{ success: boolean }>;
-  handleResetStaffPassword?: (userId: string, pass: string) => Promise<{ success: boolean }>;
 }
+
 export const AdminScreen: React.FC<AdminScreenProps> = ({
-  profile, setProfile, staffList = [], setStaffList, updateStaffList,
+  profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
-  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign,
-  isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests, updateRequests,
-  onForceSave, onForceFetch, isSyncing = false, handleUpdateAuthPassword, handleResetStaffPassword
+  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests
 }) => {
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
   const [adminAuthInput, setAdminAuthInput] = useState('');
@@ -65,28 +57,16 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const [editRole, setEditRole] = useState(['スタッフ']);
   
   const [isAssigning, setIsAssigning] = useState(false);
-  
-  // New States for Password Management
-  const [showOwnPassModal, setShowOwnPassModal] = useState(false);
-  const [ownPass1, setOwnPass1] = useState('');
-  const [ownPass2, setOwnPass2] = useState('');
-  const [isUpdatingOwnPass, setIsUpdatingOwnPass] = useState(false);
-
-  const [staffToReset, setStaffToReset] = useState<any>(null);
-  const [showStaffResetModal, setShowStaffResetModal] = useState(false);
-  const [resetPass1, setResetPass1] = useState('');
-  const [resetPass2, setResetPass2] = useState('');
-  const [isResettingStaff, setIsResettingStaff] = useState(false);
 
   // Safeguard: Ensure currentDate exists
   const safeDate = currentDate || new Date();
   const currentYear = safeDate.getFullYear();
   const currentMonth = safeDate.getMonth();
   const currentMonthStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-  const limits = (monthlyLimits && monthlyLimits[currentMonthStr]) || { weekday: 12, sat: 1, sun: 0, pub: 1, saturday: 1, sunday: 0, publicHoliday: 1 };
+  const limits = (monthlyLimits && monthlyLimits[currentMonthStr]) || { weekday: 12, sat: 1, sun: 0, pub: 1 };
 
   // --- Approvals Filtering with safeguards and logical fixes ---
-  const pendingStaff = Array.isArray(staffList) ? staffList.filter(s => s && s.isApproved === false && (s.name || s.staff_name)) : [];
+  const pendingStaff = Array.isArray(staffList) ? staffList.filter(s => s && s.isApproved === false) : [];
   const pendingRequests = Array.isArray(requests) ? requests.filter(r => r && (r.status === 'pending' || !r.status)) : [];
 
   // --- Constant Options ---
@@ -98,43 +78,26 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const ROLE_OPTS = [{ label: '一般スタッフ', value: ['スタッフ'] }, { label: 'シフト管理者', value: ['管理者', 'スタッフ'] }];
 
   // --- Handlers ---
-  const handleApproveStaff = async (id: string) => {
-    if (!id) return;
-    try {
-      await updateStaffList(prev => Array.isArray(prev) ? prev.map(s => s && s.id === id ? { ...s, isApproved: true } : s) : []);
-      if (Platform.OS === 'web') window.alert('✅ 登録を承認しました');
-      else Alert.alert('完了', '登録を承認しました。');
-    } catch (e) {
-      if (Platform.OS === 'web') window.alert('❌ 承認に失敗しました');
-      else Alert.alert('エラー', '承認に失敗しました');
-    }
+  const handleApproveStaff = (id: string) => {
+    setStaffList(prev => prev.map(s => s.id === id ? { ...s, isApproved: true } : s));
+    Alert.alert('完了', '登録を承認しました。');
   };
 
   const handleApproveRequest = async (req: any) => {
-    if (!req || !req.id) return;
-    try {
-      const updatedReq = { ...req, status: 'approved' };
-      await updateRequests(prev => Array.isArray(prev) ? prev.map(r => r && r.id === req.id ? updatedReq : r) : []);
-      Alert.alert('完了', '申請を承認しました。');
-    } catch (e: any) {
-      console.error('Approve request error:', e);
-      Alert.alert('エラー', '申請の承認に失敗しました: ' + (e.message || ''));
-    }
+    const updatedReq = { ...req, status: 'approved' };
+    setRequests(prev => prev.map(r => r.id === req.id ? updatedReq : r));
+    await cloudStorage.upsertRequests([updatedReq]);
+    Alert.alert('完了', '申請を承認しました。');
   };
 
   const handleRejectRequest = async (id: string) => {
-    if (!id) return;
-    try {
-      await updateRequests(prev => Array.isArray(prev) ? prev.filter(r => r && r.id !== id) : []);
-      await cloudStorage.deleteRequests([id]); // Ensure cloud deletion
-      Alert.alert('却下', '申請を却下し、削除しました。');
-    } catch (e: any) {
-      console.error('Reject request error:', e);
-      Alert.alert('エラー', '申請の却下に失敗しました: ' + (e.message || ''));
-    }
+    setRequests(prev => prev.filter(r => r.id !== id));
+    Alert.alert('却下', '申請を却下し、削除しました。');
   };
 
-  const handlePrintAttendanceReport = async () => {
+  const handlePrintAttendanceReport = () => {
+    if (Platform.OS !== 'web') return;
+    
     try {
       // データの準備
       const year = currentYear;
@@ -143,55 +106,40 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
       const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
       
-      // ヘッダーの初期化
+      // ヘッダー
       let headerHtml = '<th style="width: 80px;">氏名</th><th style="width: 40px;">職種</th>';
-      
-      // 日付ヘッダーの生成
       monthInfoArr.forEach((d: any) => {
-        if (d && !d.empty) {
-          const dDate = d?.dateStr ? new Date(d.dateStr) : null;
-          const dayIdx = (!dDate || isNaN(dDate.getTime())) ? 0 : dDate.getDay();
-          const style = (d?.isH || dayIdx === 0) ? 'color: #ef4444; background-color: #fef2f2;' : (dayIdx === 6 ? 'color: #3b82f6; background-color: #eff6ff;' : '');
-          headerHtml += `<th style="${style}">${d.day || ''}<br/><small>${dayNames[dayIdx]}</small></th>`;
+        if (!d.empty) {
+          const dDate = new Date(d.dateStr);
+          const dayIdx = isNaN(dDate.getTime()) ? 0 : dDate.getDay();
+          const style = (d.isH || dayIdx === 0) ? 'color: #ef4444; background-color: #fef2f2;' : (dayIdx === 6 ? 'color: #3b82f6; background-color: #eff6ff;' : '');
+          headerHtml += `<th style="${style}">${d.day}<br/><small>${dayNames[dayIdx]}</small></th>`;
         }
       });
 
-      // 行データの生成
+      // 行データ
       let rowsHtml = '';
-      const listToPrint = Array.isArray(staffList) ? staffList.filter(s => s && s.isApproved) : [];
+      const listToPrint = staffList.filter(s => s && s.isApproved);
       listToPrint.forEach(s => {
-        if (!s) return;
-        const normalizedStaffName = normalizeName(s.name || s.staff_name || '');
-        let row = `<tr><td style="text-align: left; padding-left: 5px; font-weight: bold;">${s.name || s.staff_name || ''}</td><td>${s.profession || ''}</td>`;
+        let row = `<tr><td style="text-align: left; padding-left: 5px; font-weight: bold;">${s.name}</td><td>${s.profession || ''}</td>`;
         monthInfoArr.forEach((d: any) => {
-          if (d && !d.empty) {
-            const req = Array.isArray(requests) ? requests.find(r => r && r.date === d.dateStr && (String(r.staffId) === s.id || normalizeName(r.staffName || r.staff_name || '') === normalizedStaffName)) : null;
+          if (!d.empty) {
+            const sT = normalizeName(s.name);
+            const req = requests.find(r => r && r.date === d.dateStr && (String(r.staffId) === s.id || normalizeName(r.staffName) === sT));
             
             let type = '';
             if (req) {
-              type = req.type || '不明';
+              type = req.type;
             } else {
-              const dDate = d?.dateStr ? new Date(d.dateStr) : null;
-              if (dDate && !isNaN(dDate.getTime())) {
-                const dtype = getDayType(dDate);
-                const currentStaffLimits = s?.monthlyNoHoliday || {};
-                const isNoHoliday = (dtype !== 'weekday') && (currentStaffLimits[currentMonthKey] ?? s?.noHoliday);
-                type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '公休' : '公休');
-              } else {
-                type = '不明';
-              }
+              const dDate = new Date(d.dateStr);
+              const dtype = getDayType(dDate);
+              const isNoHoliday = (dtype !== 'weekday') && (s.monthlyNoHoliday?.[currentMonthKey] ?? s.noHoliday);
+              type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '日勤' : '公休');
             }
 
-            const offTypesArr = ['公休', '年休', '特休', '休暇', '欠勤'];
-            const isOff = offTypesArr.some(ot => normalizeName(ot) === normalizeName(type));
+            const isOff = ['公休', '年休', '特休', '休暇', '欠勤'].includes(type);
             const style = isOff ? 'background-color: #fef2f2; color: #ef4444;' : '';
-            const normalizedType = normalizeName(type);
-            const label = normalizedType === normalizeName('公休') ? '公' : 
-                          (normalizedType === normalizeName('出勤') ? '出' : 
-                          (normalizedType === normalizeName('夜勤') ? '夜' : 
-                          (normalizedType === normalizeName('早番') ? '早' : 
-                          (normalizedType === normalizeName('遅番') ? '遅' : 
-                          (type ? String(type).charAt(0) : '')))));
+            const label = type === '公休' ? '公' : (type === '日勤' || type === '出勤' ? '日' : (type === '夜勤' ? '夜' : (type === '早番' ? '早' : (type === '遅番' ? '遅' : (type ? type.charAt(0) : '')))));
             row += `<td style="${style}">${label}</td>`;
           }
         });
@@ -202,40 +150,34 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       const html = `
         <html>
           <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
             <title>勤務実績表</title>
             <style>
               @page { size: A4 landscape; margin: 5mm; }
               body { font-family: sans-serif; padding: 10px; color: #1e293b; }
               .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; border-bottom: 2px solid #38bdf8; padding-bottom: 5px; }
               table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 2px solid #334155; }
-              th, td { border: 1px solid #94a3b8; padding: 2px 1px; text-align: center; font-size: 8px; overflow: hidden; white-space: nowrap; }
+              th, td { border: 1px solid #94a3b8; padding: 2px 1px; text-align: center; font-size: 9px; }
               th { background-color: #f1f5f9; font-weight: bold; }
-              td { height: 20px; }
+              td { height: 22px; }
             </style>
           </head>
           <body>
             <div class="header">
-              <h1 style="margin:0; font-size:16px;">勤務実績表（${year}年${month}月）</h1>
-              <div style="font-size: 10px;">印刷日: ${new Date().toLocaleDateString('ja-JP')}</div>
+              <h1 style="margin:0; font-size:18px;">勤務実績表（${year}年${month}月）</h1>
+              <div style="font-size: 11px;">印刷日: ${new Date().toLocaleDateString('ja-JP')}</div>
             </div>
             <table><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>
+            <script>window.onload=function(){window.print();};<\\/script>
           </body>
         </html>
       `;
 
-      if (Platform.OS === 'web') {
-        const printWindow = window.open('', '_blank');
-        if (printWindow) {
-          printWindow.document.write(html);
-          printWindow.document.close();
-          // モバイルブラウザでの動作を考慮し、少し遅らせて実行するか、PrintOptionsを使用
-        } else {
-          Alert.alert('ポップアップ制限', 'ブラウザのポップアップ設定を許可してください。');
-        }
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
       } else {
-        // モバイル環境（iOS/Android）では expo-print を使用
-        await Print.printAsync({ html });
+        Alert.alert('ポップアップ制限', 'ブラウザのポップアップ設定を許可してください。');
       }
     } catch (err) {
       console.error('Print logic error:', err);
@@ -246,8 +188,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const DropdownSelector = ({ label, value, options, onSelect, style }: any) => {
     const [isVisible, setIsVisible] = useState(false);
     const displayValue = typeof value === 'boolean' 
-      ? (options.find((o:any) => o?.value === value)?.label || 'なし')
-      : (Array.isArray(value) ? (options.find((o:any) => JSON.stringify(o?.value) === JSON.stringify(value))?.label || (value && value[0]) || '未選択') : value);
+      ? (options.find((o:any) => o.value === value)?.label || 'なし')
+      : (Array.isArray(value) ? (options.find((o:any) => JSON.stringify(o.value) === JSON.stringify(value))?.label || value[0]) : value);
     const isSimpleArray = options.length > 0 && typeof options[0] !== 'object';
     return (
       <View style={[{ marginBottom: 16 }, style]}>
@@ -276,95 +218,20 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   };
 
   const handleAdminAuth = () => {
-    const DEFAULT_PASS = '0000';
-    const isValid = (adminAuthInput === DEFAULT_PASS) || (adminPassword && adminAuthInput === adminPassword);
-    
-    if (isValid) { 
-      setIsAdminAuthenticated(true); 
-      setShowAdminAuthModal(false); 
-      setAdminAuthInput(''); 
-    } else { 
-      console.error('Admin auth failure: Invalid password');
-      Alert.alert('エラー', '管理用パスワードが違います。'); 
-    }
+    if (adminAuthInput === adminPassword) { setIsAdminAuthenticated(true); setShowAdminAuthModal(false); setAdminAuthInput(''); }
+    else { Alert.alert('エラー', '管理用パスワードが違います。'); }
   };
 
-  const handleStaffUpdate = async () => {
+  const handleStaffUpdate = () => {
     if (!editStaff) return;
-    try {
-      // Normalize all fields before saving to ensure strict matching
-      const normalizedNameVal = normalizeName(editName);
-      const normalizedProfession = editProfession?.trim() || '';
-      const normalizedPlacement = editPlacement?.trim() || '';
-      const normalizedPosition = editPosition?.trim() || '';
-      const normalizedStatus = editStatus?.trim() || '常勤';
-
-      // Update staff list
-      await updateStaffList(prev => prev.map(s => s && s.id === editStaff.id ? { 
-        ...s, 
-        name: normalizedNameVal, 
-        profession: normalizedProfession, 
-        placement: normalizedPlacement, 
-        position: normalizedPosition, 
-        status: normalizedStatus, 
-        noHoliday: editNoHoliday, 
-        role: editRole 
-      } : s));
-
-      const oldName = editStaff.name;
-      const isNameChanged = normalizeName(oldName) !== normalizedNameVal;
-
-      // If name changed, we MUST update all existing requests for this staff member
-      // to avoid mapping errors on the calendar and personal screens.
-      if (isNameChanged) {
-        await updateRequests(prev => {
-          return prev.map(r => {
-            if (normalizeName(r.staffName || r.staff_name) === normalizeName(oldName)) {
-              return { ...r, staffName: normalizedNameVal };
-            }
-            return r;
-          });
-        });
-      }
-
-      setShowStaffEditModal(false);
-      if (Platform.OS === 'web') window.alert('✅ 情報を更新しました');
-      else Alert.alert('完了', `${normalizedNameVal}さんの情報を更新しました。`);
-    } catch (e: any) {
-      console.error('Staff update error:', e);
-      if (Platform.OS === 'web') window.alert('❌ 更新に失敗しました: ' + (e.message || ''));
-      else Alert.alert('エラー', '情報の更新に失敗しました\n' + (e.message || ''));
-    }
+    setStaffList(prev => prev.map(s => s && s.id === editStaff.id ? { ...s, name: editName, profession: editProfession, placement: editPlacement, position: editPosition, status: editStatus, noHoliday: editNoHoliday, role: editRole } : s));
+    setShowStaffEditModal(false);
+    Alert.alert('完了', `${editName}さんの情報を更新しました。`);
   };
 
   const handleDeleteStaff = (id: string, name: string) => {
-    const performDelete = async () => {
-      try {
-        await cloudStorage.deleteStaff(id);
-        if (updateStaffList) {
-          await updateStaffList(prev => prev.filter(s => s && s.id !== id));
-        } else {
-          setStaffList(prev => prev.filter(s => s && s.id !== id));
-        }
-        setShowStaffEditModal(false);
-        if (Platform.OS === 'web') window.alert('✅ 削除しました');
-        else Alert.alert('完了', '削除しました');
-      } catch (e) {
-        if (Platform.OS === 'web') window.alert('❌ 削除に失敗しました');
-        else Alert.alert('エラー', '削除に失敗しました');
-      }
-    };
-
-    if (Platform.OS === 'web') {
-      if (window.confirm(`${name}さんを削除しますか？`)) performDelete();
-    } else {
-      Alert.alert('職員削除', `${name}さんを削除しますか？`, [
-        { text: 'キャンセル', style: 'cancel' },
-        { text: '削除', style: 'destructive', onPress: performDelete }
-      ]);
-    }
+    Alert.alert('職員削除', `${name}さんを削除しますか？`, [{ text: 'キャンセル', style: 'cancel' }, { text: '削除', style: 'destructive', onPress: () => { setStaffList(prev => prev.filter(s => s.id !== id)); setShowStaffEditModal(false); }}]);
   };
-
 
   return (
     <SafeAreaView style={styles.container}>
@@ -375,13 +242,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           <ThemeCard style={styles.itemRow}>
             <View style={styles.iconCircle}><User size={20} color="#38bdf8" /></View>
             <View style={{ flex: 1, marginLeft: 12 }}><ThemeText bold>{profile?.name}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{profile?.profession} | {profile?.placement} {profile?.position ? `[${profile.position}]` : ''}</ThemeText></View>
-            <TouchableOpacity 
-              style={[styles.staffMiniEdit, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]} 
-              onPress={() => setShowOwnPassModal(true)}
-            >
-              <Key size={16} color="#38bdf8" />
-              <ThemeText bold color="#38bdf8" style={{ marginLeft: 6 }}>変更</ThemeText>
-            </TouchableOpacity>
           </ThemeCard>
           {!isAdminAuthenticated && (
             <TouchableOpacity style={styles.adminLoginEntry} onPress={() => setShowAdminAuthModal(true)}>
@@ -395,7 +255,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 <ThemeText bold variant="h2">🛡️ 管理者モード</ThemeText>
                 <TouchableOpacity onPress={() => setIsAdminAuthenticated(false)}><ThemeText color="#ef4444" style={{ fontSize: 12 }}>解除</ThemeText></TouchableOpacity>
               </View>
-              
 
               <ThemeText bold style={{ color: '#ef4444', marginBottom: 12, marginTop: 12 }}>🔔 承認が必要な申請</ThemeText>
               
@@ -460,12 +319,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                     if (isAssigning) return;
                     setIsAssigning(true);
                     try {
-                      console.log('Starting Auto Assign for:', currentYear, currentMonth + 1);
                       await onAutoAssign(currentYear, currentMonth + 1, limits);
                       Alert.alert('完了', 'シフトの自動割り当てが完了しました。');
-                    } catch (e: any) {
-                      console.error('Auto assign error UI:', e);
-                      Alert.alert('エラー', '自動割り当て中にエラーが発生しました。\n' + (e.message || String(e)));
+                    } catch (e) {
+                      console.error('Auto assign error:', e);
+                      Alert.alert('エラー', '自動割り当て中にエラーが発生しました。');
                     } finally {
                       setIsAssigning(false);
                     }
@@ -504,29 +362,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </TouchableOpacity>
               </ThemeCard>
 
-
               <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>👥 職員の属性・役割管理</ThemeText>
               <View style={styles.staffAdminList}>
                 {staffList.filter(s => s && s.isApproved).map(s => (
                   <ThemeCard key={s.id} style={styles.staffAdminItem}>
                     <View style={{ flex: 1 }}><ThemeText bold>{s.name}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{s.placement} | {s.profession} ({s.status}) {s.position ? `[${s.position}]` : ''}</ThemeText></View>
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                      <TouchableOpacity 
-                        style={[styles.staffMiniEdit, { backgroundColor: 'rgba(168, 85, 247, 0.1)' }]} 
-                        onPress={() => {
-                          if (!s.user_id) {
-                            Alert.alert('エラー', 'このスタッフには認証用ユーザーIDが設定されていないためリセットできません。');
-                            return;
-                          }
-                          setStaffToReset(s);
-                          setShowStaffResetModal(true);
-                        }}
-                      >
-                        <Key size={14} color="#a855f7" />
-                        <ThemeText bold color="#a855f7" style={{marginLeft:4, fontSize: 12}}>リセット</ThemeText>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.staffMiniEdit} onPress={() => { setEditStaff(s); setEditName(s.name); setEditProfession(s.profession); setEditPlacement(s.placement); setEditPosition(s.position || ''); setEditStatus(s.status || '常勤'); setEditNoHoliday(!!s.noHoliday); setEditRole(s.role || ['スタッフ']); setShowStaffEditModal(true); }}><Edit3 size={16} color="#38bdf8" /><ThemeText bold color="#38bdf8" style={{marginLeft:4}}>編集</ThemeText></TouchableOpacity>
-                    </View>
+                    <TouchableOpacity style={styles.staffMiniEdit} onPress={() => { setEditStaff(s); setEditName(s.name); setEditProfession(s.profession); setEditPlacement(s.placement); setEditPosition(s.position || ''); setEditStatus(s.status || '常勤'); setEditNoHoliday(!!s.noHoliday); setEditRole(s.role || ['スタッフ']); setShowStaffEditModal(true); }}><Edit3 size={16} color="#38bdf8" /><ThemeText bold color="#38bdf8" style={{marginLeft:4}}>編集</ThemeText></TouchableOpacity>
                   </ThemeCard>
                 ))}
               </View>
@@ -544,58 +385,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               </View>
             </View>
           ) : null}
-          {isAdminAuthenticated && (
-            <View style={{ marginTop: 24, paddingBottom: 20 }}>
-              <ThemeText bold style={{ color: COLORS.primary, marginBottom: 12 }}>🔄 【管理者用】クラウド完全同期</ThemeText>
-              <ThemeCard style={{ padding: 16 }}>
-                <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginBottom: 16 }}>
-                  PCで修正したスケジュールを確実にスマホへ反映させるための機能です。
-                </ThemeText>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <TouchableOpacity 
-                    style={[styles.syncFullBtn, { backgroundColor: COLORS.primary }, isSyncing && { opacity: 0.5 }]}
-                    disabled={isSyncing}
-                    onPress={() => {
-                      if (!onForceSave) return;
-                      if (Platform.OS === 'web') {
-                        if (window.confirm('現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？')) onForceSave();
-                      } else {
-                        Alert.alert(
-                          'クラウドに保存',
-                          '現在のこの端末の状態をクラウドに強制保存します。スマホなど他の端末の内容はこの内容で上書きされますが、よろしいですか？',
-                          [{ text: 'キャンセル', style: 'cancel' }, { text: '保存する', onPress: onForceSave }]
-                        );
-                      }
-                    }}
-                  >
-                    <Save size={18} color="white" />
-                    <ThemeText bold color="white" style={{ marginLeft: 8 }}>{isSyncing ? '保存中...' : 'クラウドに保存'}</ThemeText>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={[styles.syncFullBtn, { backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: COLORS.border }, isSyncing && { opacity: 0.5 }]}
-                    disabled={isSyncing}
-                    onPress={() => {
-                      if (!onForceFetch) return;
-                      if (Platform.OS === 'web') {
-                        if (window.confirm('クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？')) onForceFetch();
-                      } else {
-                        Alert.alert(
-                          'クラウドから更新',
-                          'クラウドから最新のデータを取得します。現在のローカルの変更は破棄されますが、よろしいですか？',
-                          [{ text: 'キャンセル', style: 'cancel' }, { text: '更新する', onPress: onForceFetch }]
-                        );
-                      }
-                    }}
-                  >
-                    <Clock size={18} color={COLORS.text} />
-                    <ThemeText bold color={COLORS.text} style={{ marginLeft: 8 }}>{isSyncing ? '更新中...' : 'クラウドから更新'}</ThemeText>
-                  </TouchableOpacity>
-                </View>
-              </ThemeCard>
-            </View>
-          )}
-
           <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}><LogOut size={20} color="#ef4444" /><ThemeText bold color="#ef4444" style={{ marginLeft: 10 }}>アプリからログアウト</ThemeText></TouchableOpacity>
         </View>
       </ScrollView>
@@ -603,155 +392,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       {/* --- モーダル群 --- */}
       <Modal visible={showStaffEditModal} transparent animationType="slide">
         <View style={styles.modalOverlay}><View style={[styles.detailModal, {maxHeight: '90%'}]}><View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:20}}><ThemeText variant="h2">職員情報の編集</ThemeText><TouchableOpacity onPress={() => setShowStaffEditModal(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity></View><ScrollView showsVerticalScrollIndicator={false}><ThemeText bold style={{marginBottom:8, fontSize:13, color:COLORS.textSecondary}}>氏名</ThemeText><TextInput style={styles.modalInput} value={editName} onChangeText={setEditName} placeholder="氏名を入力" placeholderTextColor={COLORS.textSecondary} /><DropdownSelector label="職種" value={editProfession} options={PROFESSION_OPTS} onSelect={setEditProfession} /><DropdownSelector label="役割(ポジション)" value={editPosition} options={POSITION_OPTS} onSelect={setEditPosition} /><DropdownSelector label="配置" value={editPlacement} options={PLACEMENT_OPTS} onSelect={setEditPlacement} /><DropdownSelector label="ステータス" value={editStatus} options={STATUS_OPTS} onSelect={setEditStatus} /><DropdownSelector label="休日設定 (自動割当条件)" value={editNoHoliday} options={HOLIDAY_SETTING_OPTS} onSelect={setEditNoHoliday} /><DropdownSelector label="アプリ権限" value={editRole} options={ROLE_OPTS} onSelect={setEditRole} /><View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}><TouchableOpacity style={styles.cancelBtn} onPress={() => setShowStaffEditModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={styles.confirmBtn} onPress={handleStaffUpdate}><ThemeText bold color="white">保存する</ThemeText></TouchableOpacity></View><TouchableOpacity style={{ marginTop: 24, padding: 12, alignItems: 'center' }} onPress={() => editStaff && handleDeleteStaff(editStaff.id, editStaff.name)}><ThemeText color="#ef4444">職員を削除する</ThemeText></TouchableOpacity></ScrollView></View></View></Modal>
-      <Modal visible={showAdminAuthModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.detailModal}>
-            <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:20}}>
-              <ThemeText variant="h2">管理者モードへログイン</ThemeText>
-              <TouchableOpacity onPress={() => setShowAdminAuthModal(false)}>
-                <X size={24} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <ThemeText variant="body" color={COLORS.textSecondary} style={{marginBottom:16}}>
-              管理者機能を利用するには管理用パスワードを入力してください。
-            </ThemeText>
-            <TextInput 
-              style={styles.modalInput} 
-              placeholder="管理用パスワード" 
-              secureTextEntry 
-              value={adminAuthInput} 
-              onChangeText={setAdminAuthInput} 
-              placeholderTextColor={COLORS.textSecondary}
-              autoFocus={true}
-            />
-            <View style={{flexDirection:'row', gap:12, marginTop:24}}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setShowAdminAuthModal(false); setAdminAuthInput(''); }}>
-                <ThemeText bold>キャンセル</ThemeText>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.confirmBtn} onPress={handleAdminAuth}>
-                <ThemeText bold color="white">ログイン</ThemeText>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={showAdminPassChangeModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>管理者パスワード変更</ThemeText><TextInput style={styles.modalInput} placeholder="新しいパスワード" secureTextEntry value={newAdminPassInput} onChangeText={setNewAdminPassInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowAdminPassChangeModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#38bdf8'}]} onPress={() => { updatePassword(newAdminPassInput); setShowAdminPassChangeModal(false); setNewAdminPassInput(''); Alert.alert('完了', 'パスワードを変更しました。'); }}><ThemeText bold color="white">変更する</ThemeText></TouchableOpacity></View></View></View></Modal>
-
-      {/* 1. 自身のパスワード変更モーダル */}
-      <Modal visible={showOwnPassModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.detailModal}>
-            <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:20}}>
-              <ThemeText variant="h2">パスワードの変更</ThemeText>
-              <TouchableOpacity onPress={() => { setShowOwnPassModal(false); setOwnPass1(''); setOwnPass2(''); }}>
-                <X size={24} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <ThemeText variant="body" color={COLORS.textSecondary} style={{marginBottom:16}}>新しいログインパスワードを2回入力してください。</ThemeText>
-            <TextInput style={styles.modalInput} placeholder="新パスワード" secureTextEntry value={ownPass1} onChangeText={setOwnPass1} placeholderTextColor={COLORS.textSecondary} />
-            <TextInput style={styles.modalInput} placeholder="新パスワード (確認)" secureTextEntry value={ownPass2} onChangeText={setOwnPass2} placeholderTextColor={COLORS.textSecondary} />
-            <View style={{flexDirection:'row', gap:12, marginTop:24}}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setShowOwnPassModal(false); setOwnPass1(''); setOwnPass2(''); }}>
-                <ThemeText bold>キャンセル</ThemeText>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.confirmBtn, isUpdatingOwnPass && { opacity: 0.5 }]} 
-                disabled={isUpdatingOwnPass}
-                onPress={async () => {
-                  if (!ownPass1 || ownPass1 !== ownPass2) {
-                    Alert.alert('エラー', 'パスワードが一致しません。');
-                    return;
-                  }
-                  if (ownPass1.length < 6) {
-                    Alert.alert('エラー', 'パスワードは6文字以上で設定してください。');
-                    return;
-                  }
-                  setIsUpdatingOwnPass(true);
-                  try {
-                    await handleUpdateAuthPassword?.(ownPass1);
-                    Alert.alert('成功', 'パスワードを変更しました。次回ログイン時から有効です。');
-                    setShowOwnPassModal(false);
-                    setOwnPass1(''); setOwnPass2('');
-                  } catch (e: any) {
-                    Alert.alert('エラー', 'パスワード変更に失敗しました。\n' + (e.message || ''));
-                  } finally {
-                    setIsUpdatingOwnPass(false);
-                  }
-                }}
-              >
-                {isUpdatingOwnPass ? <ActivityIndicator size="small" color="white" /> : <ThemeText bold color="white">変更する</ThemeText>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* 2. スタッフのパスワードリセットモーダル */}
-      <Modal visible={showStaffResetModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.detailModal}>
-            <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:20}}>
-              <ThemeText variant="h2">パスワードのリセット</ThemeText>
-              <TouchableOpacity onPress={() => { setShowStaffResetModal(false); setResetPass1(''); setResetPass2(''); }}>
-                <X size={24} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <ThemeText variant="body" color={COLORS.textSecondary} style={{marginBottom:16}}>
-              {staffToReset?.name}さんの新しいパスワードを設定します。
-            </ThemeText>
-            <TextInput style={styles.modalInput} placeholder="新パスワード" secureTextEntry value={resetPass1} onChangeText={setResetPass1} placeholderTextColor={COLORS.textSecondary} />
-            <TextInput style={styles.modalInput} placeholder="新パスワード (確認)" secureTextEntry value={resetPass2} onChangeText={setResetPass2} placeholderTextColor={COLORS.textSecondary} />
-            <View style={{flexDirection:'row', gap:12, marginTop:24}}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setShowStaffResetModal(false); setResetPass1(''); setResetPass2(''); }}>
-                <ThemeText bold>キャンセル</ThemeText>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.confirmBtn, { backgroundColor: '#a855f7' }, isResettingStaff && { opacity: 0.5 }]} 
-                disabled={isResettingStaff}
-                onPress={async () => {
-                  if (!resetPass1 || resetPass1 !== resetPass2) {
-                    Alert.alert('エラー', 'パスワードが一致しません。');
-                    return;
-                  }
-                  if (resetPass1.length < 6) {
-                    Alert.alert('エラー', 'パスワードは6文字以上で設定してください。');
-                    return;
-                  }
-                  setIsResettingStaff(true);
-                  try {
-                    await handleResetStaffPassword?.(staffToReset.user_id, resetPass1);
-                    Alert.alert('成功', `${staffToReset.name}さんのパスワードをリセットしました。`);
-                    setShowStaffResetModal(false);
-                    setResetPass1(''); setResetPass2('');
-                  } catch (e: any) {
-                    Alert.alert('エラー', 'リセットに失敗しました。\n' + (e.message || ''));
-                  } finally {
-                    setIsResettingStaff(false);
-                  }
-                }}
-              >
-                {isResettingStaff ? <ActivityIndicator size="small" color="white" /> : <ThemeText bold color="white">リセット実行</ThemeText>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-
-      {/* --- Styles for tags --- */}
-      <View style={{display: 'none'}}>
-        <style>
-          {`
-            .miniTag {
-              padding: 4px 10px;
-              border-radius: 6px;
-              border: 1px solid rgba(255,255,255,0.2);
-              margin-right: 6px;
-            }
-          `}
-        </style>
-      </View>
+      <Modal visible={showAdminAuthModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>管理者認証</ThemeText><TextInput style={styles.modalInput} placeholder="管理パスワード" secureTextEntry value={adminAuthInput} onChangeText={setAdminAuthInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowAdminAuthModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#38bdf8'}]} onPress={handleAdminAuth}><ThemeText bold color="white">ログイン</ThemeText></TouchableOpacity></View></View></View></Modal>
     </SafeAreaView>
   );
 };
@@ -778,9 +419,7 @@ const styles = StyleSheet.create({
   cancelBtn: { flex: 1, height: 52, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
   confirmBtn: { flex: 1, height: 52, borderRadius: 12, backgroundColor: '#38bdf8', justifyContent: 'center', alignItems: 'center' },
   pickerContainer: { width: '85%', maxHeight: '70%', backgroundColor: '#0f172a', borderRadius: 24, padding: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  syncFullBtn: { flex: 1, height: 52, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   pickerItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.02)' },
-  pickerItemActive: { backgroundColor: 'rgba(56, 189, 248, 0.05)' },
-  miniTag: { padding: 4, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', marginRight: 6 }
+  pickerItemActive: { backgroundColor: 'rgba(56, 189, 248, 0.05)' }
 });
