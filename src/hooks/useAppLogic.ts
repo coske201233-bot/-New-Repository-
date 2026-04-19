@@ -185,8 +185,8 @@ export const useAppLogic = () => {
     await cloudStorage.saveRequests(newRequests);
   };
 
-  const approveRequest = async (requestId: string) => {
-    const newRequests = req.requests.map(r => r.id === requestId ? { ...r, status: 'approved' } : r);
+  const approveRequest = async (requestId: string, status: string = 'approved') => {
+    const newRequests = req.requests.map(r => r.id === requestId ? { ...r, status } : r);
     req.setRequests(newRequests);
     await cloudStorage.saveRequests(newRequests);
   };

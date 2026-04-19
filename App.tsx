@@ -99,7 +99,7 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: RESTORED TO ea1151d]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 11.0 - CANCEL APPROVAL FIXED]</ThemeText>
         </View>
         {!profile ? (
           showSetup ? (
