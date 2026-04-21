@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, ScrollView, SafeAreaView, TouchableOpacity, Modal } from 'react-native';
+import { StyleSheet, View, ScrollView, SafeAreaView, TouchableOpacity, Modal, Platform, ActivityIndicator } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { Users, Coffee, Briefcase, Building2, MapPin, X, RefreshCw, AlertCircle, ChevronRight } from 'lucide-react-native';
+import { Users, Coffee, Briefcase, Building2, MapPin, X, RefreshCw, AlertCircle, ChevronRight, LogOut } from 'lucide-react-native';
 import { getDayType, getDateStr } from '../utils/dateUtils';
 import { sortStaffByName } from '../utils/staffUtils';
 import { getCurrentLimit } from '../utils/limitUtils';
+
+const hospitalPlacements = ['4F', '5F', '6F', '外来'];
 
 interface HomeScreenProps {
   onNavigateToStaff?: (ward: string) => void;
@@ -23,289 +25,383 @@ interface HomeScreenProps {
   profile?: any;
   isAdminAuthenticated?: boolean;
   onOpenRequests?: () => void;
+  onLogout?: () => void;
+  isInitialized?: boolean;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ 
   onNavigateToStaff, staffList, requests, weekdayLimit, holidayLimit,
   saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, staffViewMode = false,
-  onForceCloudSync, profile, isAdminAuthenticated, onOpenRequests
+  onForceCloudSync, profile, isAdminAuthenticated, onOpenRequests, onLogout,
+  isInitialized
 }) => {
   const [selectedWardDetails, setSelectedWardDetails] = useState<string | null>(null);
   const [syncMsg, setSyncMsg] = useState('');
-  const hospitalPlacements = ['2F', '4F', '外来', 'フォロー', '兼務', '管理'];
+
+  // シニアアーキテクト指令: 厳格な配列検証と防弾レンダリング (VERSION 43.0)
+  const safeStaff = Array.isArray(staffList) ? staffList : [];
   
-  const hospitalCounts = hospitalPlacements.map(label => {
-    return {
-      label,
-      count: staffList.filter(s => {
-        const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
-        return s.placement === label && s.profession !== '助手' && !isOut;
-      }).length
+  // [CRITICAL VERSION 47.2] ANNIHILATED OVERLAY
+  // The global spinner block has been completely disabled.
+  // The component MUST return actual content immediately.
+  /*
+  const isMasterAdmin = isAdminAuthenticated || profile?.email === 'admin@reha.local';
+  if ((!isInitialized || !Array.isArray(staffList)) && !isMasterAdmin) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <ThemeText variant="h2" style={{ marginTop: 20 }}>同期完了を待機中...</ThemeText>
+        <ThemeText variant="caption" style={{ marginTop: 10, color: COLORS.textSecondary }}>データ初期化中</ThemeText>
+      </SafeAreaView>
+    );
+  }
+  */
+  
+  try {
+    // ---------------------------------------------------------
+    // 1. 正規化データアクセスヘルパー (日英両対応)
+    // ---------------------------------------------------------
+    const getStaffData = (s: any) => {
+      if (!s) return { job: '', role: '', placement: '', status: '通常' };
+      return {
+        job: s?.職種 || s?.jobType || s?.profession || s?.job_type || '',
+        role: s?.役割 || s?.role || s?.position || '',
+        placement: s?.配置 || s?.placement || '',
+        status: s?.ステータス || s?.status || '通常',
+      };
     };
-  });
 
-  const outStaffCount = staffList.filter(s => s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前').length;
-  const assistantCount = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
-    return (s.profession === '助手' || s.placement === '助手') && !isOut;
-  }).length;
-  const totalVisits = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
-    return s.placement === '訪問' && !isOut;
-  }).length;
+    const isExcluded = (s: any) => {
+      const data = getStaffData(s);
+      // これらの役割は、通常の院内PT/OT/ST集計から除外する
+      return ['訪問リハ', '包括', '排尿', '排尿支援'].includes(data.role);
+    };
 
-  const hospitalEligible = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
-    return hospitalPlacements.includes(s.placement) && !isOut && s.profession !== '助手';
-  });
-  
-  const ptCount = hospitalEligible.filter(s => s.profession === 'PT').length;
-  const otCount = hospitalEligible.filter(s => s.profession === 'OT').length;
-  const stCount = hospitalEligible.filter(s => s.profession === 'ST').length;
-  const hokatsuCount = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
-    return s.placement === '包括' && !isOut;
-  }).length;
-  const hainyoCount = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
-    return s.placement === '排尿支援' && !isOut;
-  }).length;
+    // ---------------------------------------------------------
+    // 2. 統計情報の計算 (React.useMemoで最適化)
+    // ---------------------------------------------------------
+    const stats = React.useMemo(() => {
+      const activeStaff = safeStaff.filter(s => s && s.isApproved !== false);
+      
+      const ptCount = activeStaff.filter(s => {
+        const data = getStaffData(s);
+        return data.job === 'PT' && data.status === '通常' && !isExcluded(s);
+      }).length;
 
-  const totalHospital = ptCount + otCount + stCount + hokatsuCount + hainyoCount;
-  
-  const today = new Date();
-  const dayType = getDayType(today);
-  
-  // Helper to determine if a staff member is working today based on shift requests
-  const isWorkingToday = (staffName: string) => {
-    const todayStr = getDateStr(new Date());
-    const shift = requests.find(r => r.staffName?.trim() === staffName.trim() && r.date === todayStr && r.status === 'approved');
-    if (shift) {
-      return shift.type === '出勤';
-    }
-    // If no explicit shift exists, standard staff default to Working on weekdays, Off on weekends.
-    // However, since we now have full auto-assignment, we rely solely on what is marked.
-    // But as a fallback for missing shifts on weekdays:
-    return false;
-  };
+      const otCount = activeStaff.filter(s => {
+        const data = getStaffData(s);
+        return data.job === 'OT' && data.status === '通常' && !isExcluded(s);
+      }).length;
 
-  // Today's attendance counts based on shifts
-  const hospitalAttending = staffList.filter(s => {
-    const isOut = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
-    return isWorkingToday(s.name) && 
-           (hospitalPlacements.includes(s.placement) || ['包括', '排尿支援'].includes(s.placement)) &&
-           s.profession !== '助手' &&
-           !isOut;
-  }).length;
+      const stCount = activeStaff.filter(s => {
+        const data = getStaffData(s);
+        return data.job === 'ST' && data.status === '通常' && !isExcluded(s);
+      }).length;
 
+      const hospital = ptCount + otCount + stCount;
 
-  const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  const currentMonthly = monthlyLimits[monthStr] || { 
-    weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit 
-  };
+      const visit = activeStaff.filter(s => {
+        const data = getStaffData(s);
+        return data.status === '通常' && (data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ');
+      }).length;
 
-  const currentLimit = dayType === 'weekday' ? currentMonthly.weekday : 
-                       dayType === 'sat' ? currentMonthly.sat :
-                       dayType === 'sun' ? currentMonthly.sun :
-                       currentMonthly.pub;
-  const isOverLimit = hospitalAttending > currentLimit;
-  const isUnderLimit = hospitalAttending < currentLimit;
-  
-  const professionCounts = [
-    { label: 'PT', count: ptCount, color: '#0ea5e9' },
-    { label: 'OT', count: otCount, color: '#f59e0b' },
-    { label: 'ST', count: stCount, color: '#10b981' },
-    { label: '助手', count: assistantCount, color: '#6366f1' },
-    { label: '長期休暇/入職前', count: outStaffCount, color: '#a855f7' },
-    { label: '包括', count: hokatsuCount, color: '#ec4899' },
-    { label: '排尿支援', count: hainyoCount, color: '#f43f5e' },
-    { label: 'その他', count: hospitalEligible.filter(s => !['PT', 'OT', 'ST'].includes(s.profession)).length, color: COLORS.textSecondary },
-  ];
+      const assistant = activeStaff.filter(s => {
+        const data = getStaffData(s);
+        return data.status === '通常' && (data.job === '助手' || data.role === '助手');
+      }).length;
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={[styles.header, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
-          <ThemeText variant="h1">ダッシュボード</ThemeText>
-          {onForceCloudSync && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              {syncMsg ? <ThemeText variant="caption" style={{ color: COLORS.primary }}>{syncMsg}</ThemeText> : null}
-              <TouchableOpacity onPress={async () => {
-                setSyncMsg('更新中...');
-                const success = await onForceCloudSync();
-                setSyncMsg(success ? '更新しました' : 'エラー');
-                setTimeout(() => setSyncMsg(''), 3000);
-              }} style={{ padding: 8, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 12 }}>
-                <RefreshCw size={20} color={COLORS.primary} />
-              </TouchableOpacity>
+      const inactive = activeStaff.filter(s => {
+        const data = getStaffData(s);
+        return data.status === '長期休暇' || data.status === '入職前';
+      }).length;
+
+      const hokatsuCount = activeStaff.filter(s => {
+        const data = getStaffData(s);
+        return data.status === '通常' && data.role === '包括';
+      }).length;
+
+      const hainyoCount = activeStaff.filter(s => {
+        const data = getStaffData(s);
+        return data.status === '通常' && (data.role === '排尿' || data.role === '排尿支援');
+      }).length;
+      
+      return { inactive, assistant, visit, hospital, ptCount, otCount, stCount, hokatsuCount, hainyoCount };
+    }, [safeStaff]);
+
+    // ---------------------------------------------------------
+    // 3. 部署別集計 (院内内訳)
+    // ---------------------------------------------------------
+    const hospitalCounts = hospitalPlacements.map(label => {
+      return {
+        label,
+        count: safeStaff.filter(s => {
+          const data = getStaffData(s);
+          const isInactive = data.status === '長期休暇' || data.status === '入職前';
+          if (isInactive) return false;
+          
+          const isExclSub = ['訪問リハ', '包括', '排尿', '排尿支援'].includes(data.role);
+          const isAssistant = data.job === '助手' || data.role === '助手';
+          const isVisit = data.placement === '訪問' || data.placement === '訪問リハ' || data.role === '訪問リハ';
+          const isPTOTST = ['PT', 'OT', 'ST'].includes(data.job);
+          
+          return (data.placement === label || (label === '外来' && data.placement === '院内')) && 
+                 !isAssistant && !isVisit && isPTOTST && !isExclSub;
+        }).length
+      };
+    });
+
+    // ---------------------------------------------------------
+    // 4. 出勤状況の判定
+    // ---------------------------------------------------------
+    const isWorkingToday = (staffName: string) => {
+      const todayStr = getDateStr(new Date());
+      const shift = (requests || []).find(r => r.staffName?.trim() === staffName.trim() && r.date === todayStr && r.status === 'approved');
+      return !!shift && shift.type === '出勤';
+    };
+
+    const hospitalAttending = safeStaff.filter(s => {
+      const data = getStaffData(s);
+      const isOut = data.status === '長期休暇' || data.status === '入職前';
+      return isWorkingToday(s.name) && 
+             (hospitalPlacements.includes(data.placement) || data.placement === '院内' || ['包括', '排尿', '排尿支援'].includes(data.placement)) &&
+             data.job !== '助手' &&
+             !isOut;
+    }).length;
+
+    // ---------------------------------------------------------
+    // 5. 制限人数の算出
+    // ---------------------------------------------------------
+    const today = new Date();
+    const dayType = getDayType(today);
+    const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const currentMonthly = monthlyLimits[monthStr] || { 
+      weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit 
+    };
+
+    const currentLimit = dayType === 'weekday' ? currentMonthly.weekday : 
+                         dayType === 'sat' ? currentMonthly.sat :
+                         dayType === 'sun' ? currentMonthly.sun :
+                         currentMonthly.pub;
+
+    // ---------------------------------------------------------
+    // 6. 表示用配列の構築
+    // ---------------------------------------------------------
+    const professionCounts = [
+      { label: 'PT', count: stats.ptCount, color: COLORS.primary },
+      { label: 'OT', count: stats.otCount, color: '#10b981' },
+      { label: 'ST', count: stats.stCount, color: '#f59e0b' },
+      { label: '助手', count: stats.assistant, color: '#3b82f6' },
+      { label: '長期休暇/入職前', count: stats.inactive, color: '#a855f7' },
+      { label: '包括', count: stats.hokatsuCount, color: '#ec4899' },
+      { label: '排尿支援', count: stats.hainyoCount, color: '#f43f5e' },
+      { label: 'その他', count: safeStaff.filter(s => {
+          const data = getStaffData(s);
+          return data.status === '通常' && 
+                 !['PT', 'OT', 'ST', '助手'].includes(data.job) && 
+                 !['訪問リハ', '包括', '排尿', '排尿支援'].includes(data.role) &&
+                 !(data.placement === '訪問' || data.placement === '訪問リハ');
+        }).length, color: COLORS.textSecondary },
+    ];
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <ThemeCard style={styles.personalAccountBar}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={styles.avatarMini}><ThemeText color="white" bold>{profile?.name ? profile.name.charAt(0) : 'A'}</ThemeText></View>
+              <View style={{ marginLeft: 12 }}>
+                <ThemeText bold>{profile?.name || '管理者'} 先生</ThemeText>
+                <ThemeText variant="caption" color={isAdminAuthenticated ? COLORS.primary : COLORS.textSecondary}>
+                  {isAdminAuthenticated ? '管理者権限でログイン中' : '一般スタッフ権限でログイン中'}
+                </ThemeText>
+              </View>
             </View>
-          )}
-        </View>
-        
-        {/* Pending Approval Notification for Managers */}
-        {((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated) && (
-          (() => {
-            const pendingCount = requests.filter(r => r.status === 'pending').length;
-            if (pendingCount > 0) {
-              return (
-                <TouchableOpacity 
-                  onPress={onOpenRequests}
-                  style={styles.notificationBanner}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.notificationIcon}>
-                    <AlertCircle color="#ffffff" size={20} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <ThemeText bold style={{ color: '#ffffff' }}>承認待ちの申請があります</ThemeText>
-                    <ThemeText variant="caption" style={{ color: 'rgba(255,255,255,0.8)' }}>
-                      現在 {pendingCount} 件の申請が入っています
-                    </ThemeText>
-                  </View>
-                  <ChevronRight color="#ffffff" size={20} />
-                </TouchableOpacity>
-              );
-            }
-            return null;
-          })()
-        )}
-
-        {/* Top Summary Cards */}
-        <View style={styles.summaryRow}>
-          <ThemeCard style={styles.summaryCard}>
-            <View style={styles.summaryIcon}>
-              <Users color={COLORS.primary} size={20} />
-            </View>
-            <ThemeText variant="label">院内合計</ThemeText>
-            <ThemeText variant="h2" style={{ color: COLORS.text }}>
-              {totalHospital}<ThemeText variant="caption" color={COLORS.textSecondary}> 名</ThemeText>
-            </ThemeText>
-          </ThemeCard>
-
-          <ThemeCard style={[styles.summaryCard, { borderColor: COLORS.accent, borderWidth: 1 }]}>
-            <View style={[styles.summaryIcon, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
-              <MapPin color={COLORS.accent} size={20} />
-            </View>
-            <ThemeText variant="label">訪問合計</ThemeText>
-            <ThemeText variant="h2">{totalVisits}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
-          </ThemeCard>
-        </View>
-
-        <View style={styles.summaryRow}>
-          <ThemeCard style={[styles.summaryCard, { borderColor: '#10b981', borderWidth: 1 }]}>
-            <View style={[styles.summaryIcon, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
-              <Briefcase color="#10b981" size={20} />
-            </View>
-            <ThemeText variant="label">助手合計</ThemeText>
-            <ThemeText variant="h2">{assistantCount}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
-          </ThemeCard>
-
-          <ThemeCard style={[styles.summaryCard, { borderColor: '#a855f7', borderWidth: 1 }]}>
-            <View style={[styles.summaryIcon, { backgroundColor: 'rgba(168, 85, 247, 0.1)' }]}>
-              <Coffee color="#a855f7" size={20} />
-            </View>
-            <ThemeText variant="label">長期休暇/入職前</ThemeText>
-            <ThemeText variant="h2">{outStaffCount}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
-          </ThemeCard>
-        </View>
-
-        {/* Profession Stats Section */}
-        <View style={styles.sectionHeader}>
-          <View style={styles.sectionTitleRow}>
-            <Users color={COLORS.primary} size={18} />
-            <ThemeText variant="h2">職種別人数（院内主要部署）</ThemeText>
-          </View>
-        </View>
-        <ThemeCard style={styles.professionsContainer}>
-          {professionCounts.map((item) => (
-            <View key={item.label} style={styles.professionItem}>
-              <View style={[styles.profIndicator, { backgroundColor: item.color }]} />
-              <ThemeText variant="body" bold style={{ flex: 1, marginRight: 8 }} adjustsFontSizeToFit numberOfLines={1}>{item.label}</ThemeText>
-              <ThemeText variant="h2">{item.count}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
-            </View>
-          ))}
-        </ThemeCard>
-
-        {/* Hospital Breakdown */}
-        <View style={styles.sectionHeader}>
-          <View style={styles.sectionTitleRow}>
-            <Building2 color={COLORS.primary} size={18} />
-            <ThemeText variant="h2">院内内訳</ThemeText>
-          </View>
-        </View>
-        
-        <View style={styles.grid}>
-          {hospitalCounts.map((item) => (
-            <TouchableOpacity 
-              key={item.label} 
-              style={styles.gridCardWrapper} 
-              onPress={() => setSelectedWardDetails(item.label)}
-              activeOpacity={0.7}
-            >
-              <ThemeCard style={styles.gridCard}>
-                <ThemeText variant="label" style={styles.cardLabel}>{item.label}</ThemeText>
-                <View style={styles.valueRow}>
-                  <ThemeText variant="h2">{item.count}</ThemeText>
-                  <ThemeText variant="caption" style={{ marginLeft: 4 }}>名在籍</ThemeText>
-                </View>
-              </ThemeCard>
+            <TouchableOpacity style={styles.iconBtn} onPress={onLogout}>
+              <LogOut size={20} color="#ef4444" />
+              <ThemeText color="#ef4444" bold style={{ marginLeft: 6, fontSize: 13 }}>ログアウト</ThemeText>
             </TouchableOpacity>
-          ))}
-        </View>
+          </ThemeCard>
 
-        {/* Drill-down Modal */}
-        <Modal
-          visible={!!selectedWardDetails}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setSelectedWardDetails(null)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <View style={styles.modalTitleRow}>
-                  <Building2 color={COLORS.primary} size={20} />
-                  <ThemeText variant="h2" style={{ marginLeft: 8 }}>{selectedWardDetails} 出勤スタッフ</ThemeText>
-                </View>
-                <TouchableOpacity onPress={() => setSelectedWardDetails(null)}>
-                  <X color={COLORS.textSecondary} size={24} />
+          <View style={[styles.header, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+            <ThemeText variant="h1">ダッシュボード</ThemeText>
+            {onForceCloudSync && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                {syncMsg ? <ThemeText variant="caption" style={{ color: COLORS.primary }}>{syncMsg}</ThemeText> : null}
+                <TouchableOpacity 
+                  onPress={async () => {
+                    console.log("[SYNC_BUTTON] Manual trigger started");
+                    setSyncMsg('更新中...');
+                    const success = await onForceCloudSync();
+                    setSyncMsg(success ? '更新完了' : 'エラー');
+                    console.log("[SYNC_BUTTON] Manual trigger finished, success:", success);
+                    setTimeout(() => setSyncMsg(''), 3000);
+                  }} 
+                  style={{ padding: 10, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 14 }}
+                  activeOpacity={0.7}
+                >
+                  <RefreshCw size={22} color={COLORS.primary} />
                 </TouchableOpacity>
               </View>
-
-              <ScrollView style={styles.staffListScroll}>
-                {sortStaffByName(staffList
-                  .filter(s => s.placement === selectedWardDetails && isWorkingToday(s.name)))
-                  .map((staff, idx) => (
-                    <View key={staff.id || idx} style={styles.staffListItem}>
-                      <View style={styles.staffAvatar}>
-                        <ThemeText bold color={COLORS.primary}>{staff.name[0]}</ThemeText>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <ThemeText variant="body" bold adjustsFontSizeToFit numberOfLines={1}>{staff.name}</ThemeText>
-                        <ThemeText variant="caption" color={COLORS.textSecondary} adjustsFontSizeToFit numberOfLines={1}>{staff.position} / {staff.profession}</ThemeText>
-                      </View>
+            )}
+          </View>
+          
+          {/* 申請承認通知（管理者のみ） */}
+          {((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated) && (
+            (() => {
+              const pendingCount = (requests || []).filter(r => r.status === 'pending').length;
+              if (pendingCount > 0) {
+                return (
+                  <TouchableOpacity onPress={onOpenRequests} style={styles.notificationBanner} activeOpacity={0.8}>
+                    <View style={styles.notificationIcon}><AlertCircle color="#ffffff" size={20} /></View>
+                    <View style={{ flex: 1 }}>
+                      <ThemeText bold style={{ color: '#ffffff' }}>承認待ちの申請があります</ThemeText>
+                      <ThemeText variant="caption" style={{ color: 'rgba(255,255,255,0.8)' }}>現在 {pendingCount} 件の申請が入っています</ThemeText>
                     </View>
-                  ))}
-                {staffList.filter(s => s.placement === selectedWardDetails && isWorkingToday(s.name)).length === 0 && (
-                  <View style={{ padding: 40, alignItems: 'center' }}>
-                    <ThemeText color={COLORS.textSecondary}>現在、出勤予定の職員はいません</ThemeText>
-                  </View>
-                )}
-              </ScrollView>
+                    <ChevronRight color="#ffffff" size={20} />
+                  </TouchableOpacity>
+                );
+              }
+              return null;
+            })()
+          )}
 
-              <TouchableOpacity 
-                style={styles.closeBtn} 
-                onPress={() => setSelectedWardDetails(null)}
-              >
-                <ThemeText color={COLORS.primary} bold>閉じる</ThemeText>
-              </TouchableOpacity>
+          {/* サマリーカード */}
+          <View style={styles.summaryRow}>
+            <ThemeCard style={styles.summaryCard}>
+              <View style={styles.summaryIcon}><Users color={COLORS.primary} size={20} /></View>
+              <ThemeText variant="label">院内合計</ThemeText>
+              <ThemeText variant="h2">{stats.hospital}<ThemeText variant="caption" color={COLORS.textSecondary}> 名</ThemeText></ThemeText>
+            </ThemeCard>
+            <ThemeCard style={[styles.summaryCard, { borderColor: COLORS.accent, borderWidth: 1 }]}>
+              <View style={[styles.summaryIcon, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}><MapPin color={COLORS.accent} size={20} /></View>
+              <ThemeText variant="label">訪問合計</ThemeText>
+              <ThemeText variant="h2">{stats.visit}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
+            </ThemeCard>
+          </View>
+
+          <View style={styles.summaryRow}>
+            <ThemeCard style={[styles.summaryCard, { borderColor: '#10b981', borderWidth: 1 }]}>
+              <View style={[styles.summaryIcon, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}><Briefcase color="#10b981" size={20} /></View>
+              <ThemeText variant="label">助手合計</ThemeText>
+              <ThemeText variant="h2">{stats.assistant}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
+            </ThemeCard>
+            <ThemeCard style={[styles.summaryCard, { borderColor: '#a855f7', borderWidth: 1 }]}>
+              <View style={[styles.summaryIcon, { backgroundColor: 'rgba(168, 85, 247, 0.1)' }]}><Coffee color="#a855f7" size={20} /></View>
+              <ThemeText variant="label">長期休暇/入職前</ThemeText>
+              <ThemeText variant="h2">{stats.inactive}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
+            </ThemeCard>
+          </View>
+
+          {/* 職種別人数 */}
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleRow}>
+              <Users color={COLORS.primary} size={18} />
+              <ThemeText variant="h2">職種別人数（院内主要部署）</ThemeText>
             </View>
           </View>
-        </Modal>
+          <ThemeCard style={styles.professionsContainer}>
+            {professionCounts.map((item) => (
+              <View key={item.label} style={styles.professionItem}>
+                <View style={[styles.profIndicator, { backgroundColor: item.color }]} />
+                <ThemeText variant="body" bold style={{ flex: 1, marginRight: 8 }} adjustsFontSizeToFit numberOfLines={1}>{item.label}</ThemeText>
+                <ThemeText variant="h2">{item.count}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
+              </View>
+            ))}
+          </ThemeCard>
 
-      </ScrollView>
-    </SafeAreaView>
-  );
+          {/* 院内内訳グリッド */}
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleRow}>
+              <Building2 color={COLORS.primary} size={18} />
+              <ThemeText variant="h2">院内内訳</ThemeText>
+            </View>
+          </View>
+          <View style={styles.grid}>
+            {hospitalCounts.map((item) => (
+              <TouchableOpacity key={item.label} style={styles.gridCardWrapper} onPress={() => setSelectedWardDetails(item.label)} activeOpacity={0.7}>
+                <ThemeCard style={styles.gridCard}>
+                  <ThemeText variant="label" style={styles.cardLabel}>{item.label}</ThemeText>
+                  <View style={styles.valueRow}>
+                    <ThemeText variant="h2">{item.count}</ThemeText>
+                    <ThemeText variant="caption" style={{ marginLeft: 4 }}>名在籍</ThemeText>
+                  </View>
+                </ThemeCard>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* 詳細（ドリルダウン）モーダル */}
+          <Modal visible={!!selectedWardDetails} transparent animationType="fade" onRequestClose={() => setSelectedWardDetails(null)}>
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <View style={styles.modalHeader}>
+                  <View style={styles.modalTitleRow}>
+                    <Building2 color={COLORS.primary} size={20} />
+                    <ThemeText variant="h2" style={{ marginLeft: 8 }}>{selectedWardDetails} 出勤スタッフ</ThemeText>
+                  </View>
+                  <TouchableOpacity onPress={() => setSelectedWardDetails(null)}><X color={COLORS.textSecondary} size={24} /></TouchableOpacity>
+                </View>
+                <ScrollView style={styles.staffListScroll}>
+                  {sortStaffByName(safeStaff.filter(s => {
+                    const data = getStaffData(s);
+                    return (data.placement === selectedWardDetails || (selectedWardDetails === '外来' && data.placement === '院内')) && isWorkingToday(s.name);
+                  })).map((staff, idx) => (
+                      <View style={{ flex: 1 }}>
+                        <ThemeText variant="body" bold adjustsFontSizeToFit numberOfLines={1}>{staff.name}{staff.placement === '訪問' ? ' (訪問リハ)' : ''}</ThemeText>
+                        <ThemeText variant="caption" color={COLORS.textSecondary} adjustsFontSizeToFit numberOfLines={1}>
+                          {getStaffData(staff).role} / {getStaffData(staff).job}
+                        </ThemeText>
+                      </View>
+                    ))}
+                  {safeStaff.filter(s => getStaffData(s).placement === selectedWardDetails && isWorkingToday(s.name)).length === 0 && (
+                    <View style={{ padding: 40, alignItems: 'center' }}><ThemeText color={COLORS.textSecondary}>現在、出勤予定の職員はいません</ThemeText></View>
+                  )}
+                </ScrollView>
+                <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedWardDetails(null)}><ThemeText color={COLORS.primary} bold>閉じる</ThemeText></TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  } catch (error) {
+    console.error("HomeScreen Critical Failure:", error);
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background, padding: 20, justifyContent: 'center' }}>
+        <ThemeCard style={{ padding: 24, borderColor: '#ef4444', borderWidth: 2, borderRadius: 24 }}>
+          <ThemeText variant="h2" style={{ color: '#ef4444', marginBottom: 16 }}>レンダリングエラーが発生しました</ThemeText>
+          <ThemeText style={{ marginBottom: 24, lineHeight: 22 }}>
+            データの不整合により画面を表示できません。以下のボタンでクラウドから最新データを強制取得して復旧を試みてください。
+          </ThemeText>
+          
+          <TouchableOpacity 
+            onPress={async () => {
+              console.log("[RECOVERY_BUTTON] Triggered");
+              if (onForceCloudSync) {
+                await onForceCloudSync();
+                if (Platform.OS === 'web') window.location.reload();
+              }
+            }} 
+            style={{ backgroundColor: COLORS.primary, padding: 18, borderRadius: 16, alignItems: 'center', marginBottom: 12 }}
+          >
+            <ThemeText bold color="white">クラウドから最新データを強制取得</ThemeText>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            onPress={() => {
+              if (Platform.OS === 'web') {
+                localStorage.clear();
+                window.location.reload();
+              }
+            }} 
+            style={{ backgroundColor: '#ef4444', padding: 18, borderRadius: 16, alignItems: 'center' }}
+          >
+            <ThemeText bold color="white">キャッシュを全消去して初期化</ThemeText>
+          </TouchableOpacity>
+        </ThemeCard>
+      </SafeAreaView>
+    );
+  }
 };
 
 const styles = StyleSheet.create({
@@ -323,7 +419,7 @@ const styles = StyleSheet.create({
   cardLabel: { color: COLORS.textSecondary, marginBottom: 4 },
   valueRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 4 },
   professionsContainer: { padding: SPACING.md, marginBottom: SPACING.xl },
-  professionItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  professionItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   profIndicator: { width: 12, height: 12, borderRadius: 6, marginRight: 12 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: COLORS.card, borderRadius: 24, padding: 24, width: '100%', maxHeight: '80%', borderWidth: 1, borderColor: COLORS.border },
@@ -355,4 +451,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  iconBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239, 68, 68, 0.1)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
+  personalAccountBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', margin: SPACING.md, padding: 12, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  avatarMini: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
 });

@@ -11,8 +11,6 @@ export const useStaffData = () => {
     const load = async () => {
       const ls = await loadData(STORAGE_KEYS.STAFF_LIST);
       if (ls) setStaffList(sortStaffByName(ls));
-      const cl = await cloudStorage.fetchConfig('staff_locks');
-      if (cl) setStaffLocks(cl);
     };
     load();
   }, []);
@@ -44,7 +42,6 @@ export const useStaffData = () => {
 
   const updateStaffLocks = useCallback(async (l: any) => {
     setStaffLocks(l);
-    await cloudStorage.saveConfig('staff_locks', l).catch(console.error);
   }, []);
 
   const syncStaffWithCloud = useCallback(async () => {

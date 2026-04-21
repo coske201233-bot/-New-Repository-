@@ -91,61 +91,47 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     (staffList || []).forEach(staff => {
       if (!staff || !staff.name) return;
       
-      const isOut = staff.status?.trim() === '長期休暇' || staff.placement?.trim() === '長期休暇' || staff.position?.trim() === '長期休暇' || staff.status?.trim() === '入職前';
-      const isHomeVisit = staff.placement === '訪問';
-      const isAssistant = staff.profession === '助手' || staff.placement === '助手';
+      const status = staff.status?.trim() || '通常';
+      const isInactive = status === '長期休暇' || status === '入職前';
       
-      // 除外条件: 長期休暇、入職前、訪問担当
-      if (isOut || isHomeVisit) return;
+      // 完全に除外するのは休職者/入職前のみ
+      if (isInactive) return;
+
+      const jobType = staff.jobType || staff.profession || '';
+      const placement = staff.placement || '';
+      const role = staff.role || staff.position || '';
+
+      const isHomeVisit = placement === '訪問' || placement === '訪問リハ' || role === '訪問リハ';
+      const isAssistant = jobType === '助手' || role === '助手';
 
       const userRequests = requestMap.get(dateStr)?.get(staff.name.trim()) || [];
       const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
       
-      // 休暇申請（公休含む）を優先的に探す
       const leaveRequest = userRequests.find(r => !attendanceTypes.includes(r.type) && r.status === 'approved');
       const workRequest = userRequests.find(r => attendanceTypes.includes(r.type) && r.status === 'approved');
       const pendingRequest = userRequests.find(r => r.status === 'pending');
 
       const isNoHoliday = (dayType !== 'weekday') && (staff.monthlyNoHoliday?.[monthStr] ?? staff.noHoliday);
 
-      // ロジックの優先順位: 1. 休暇申請 2. 出勤申請 3. デフォルト（平日: 出勤 / 休日: 公休）
       if (leaveRequest) {
-        off.push({ staff, type: leaveRequest.type, requestId: leaveRequest.id, isManual: true, isHomeVisit, status: 'approved', details: leaveRequest.details });
+        off.push({ staff, type: leaveRequest.type, requestId: leaveRequest.id, isManual: true, isHomeVisit, isAssistant, status: 'approved', details: leaveRequest.details });
       } else if (workRequest) {
-        if (isAssistant) {
-          // 助手の場合、「出勤」以外の特殊な勤怠（午前休、特休など）なら休暇リストに表示して把握可能にする
-          if (workRequest.type !== '出勤') {
-            off.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, status: 'approved', details: workRequest.details });
-          }
-        } else {
-          working.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, status: 'approved', details: workRequest.details });
-          // 時間休などは出勤しつつ休暇扱いとなるため、休暇・休日リスト（off）にも表示させる
-          if (workRequest.type !== '出勤') {
-            off.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, status: 'approved', details: workRequest.details });
-          }
+        working.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, isAssistant, status: 'approved', details: workRequest.details });
+        if (workRequest.type !== '出勤') {
+          off.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, isAssistant, status: 'approved', details: workRequest.details });
         }
       } else if (pendingRequest) {
-        // Show pending on the side they apply to
         const list = attendanceTypes.includes(pendingRequest.type) ? working : off;
-        if (isAssistant) {
-          if (pendingRequest.type !== '出勤') {
-            off.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, status: 'pending', details: pendingRequest.details });
-          }
-        } else {
-          list.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, status: 'pending', details: pendingRequest.details });
-          // ペンディングであっても「出勤」以外なら両方に表示させる
-          if (list === working && pendingRequest.type !== '出勤') {
-            off.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, status: 'pending', details: pendingRequest.details });
-          }
+        list.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', details: pendingRequest.details });
+        if (list === working && pendingRequest.type !== '出勤') {
+          off.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', details: pendingRequest.details });
         }
       } else {
-        if (!isAssistant) {
-          const isScheduledToWork = dayType === 'weekday';
-          if (isScheduledToWork) {
-            working.push({ staff, type: '出勤', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, status: 'approved' });
-          } else {
-            off.push({ staff, type: isNoHoliday ? '休日出勤不要' : '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, status: 'approved' });
-          }
+        const isScheduledToWork = dayType === 'weekday';
+        if (isScheduledToWork) {
+          working.push({ staff, type: '出勤', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
+        } else {
+          off.push({ staff, type: isNoHoliday ? '休日出勤不要' : '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
         }
       }
     });
@@ -307,9 +293,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       let holidayWorkers: any[] = [];
       if (day) {
         const info = getDetailedDayInfo(d!);
-        workingCount = info.working.filter(w => !w.isHomeVisit).length;
+        workingCount = info.working.filter(w => !w.isHomeVisit && !w.isAssistant).length;
         if (dayType !== 'weekday') {
-          holidayWorkers = info.working.filter(w => !w.isHomeVisit).map(w => w.staff.name);
+          holidayWorkers = info.working.filter(w => !w.isHomeVisit && !w.isAssistant).map(w => w.staff.name);
         }
       }
 
@@ -413,27 +399,14 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
         <ThemeCard style={styles.detailCard}>
           <View style={styles.detailHeader}>
             <ThemeText variant="h2">{selectedDate.getMonth() + 1}月{selectedDate.getDate()}日の詳細</ThemeText>
-            {isPrivileged && (
-              <TouchableOpacity 
-                style={styles.addStaffBtn} 
-                onPress={() => setIsAddStaffModalVisible(true)}
-              >
-                <Plus size={16} color={COLORS.primary} />
-                <ThemeText variant="caption" color={COLORS.primary} bold style={{ marginLeft: 4 }}>スタッフ追加</ThemeText>
-              </TouchableOpacity>
-            )}
           </View>
           <View style={styles.detailRow}>
             <View style={styles.detailItem}>
-              <View style={styles.detailTitleRow}><Users size={16} color={COLORS.primary} /><ThemeText variant="label" style={{ marginLeft: 8 }}>現在の出勤数</ThemeText></View>
+              <View style={styles.detailTitleRow}><Users size={16} color={COLORS.primary} /><ThemeText variant="label" style={{ marginLeft: 8 }}>現在の出勤数 (全員)</ThemeText></View>
               <ThemeText variant="h1">
-                {workingStaff.filter(w => !w.isHomeVisit).length}
+                {workingStaff.length}
                 <ThemeText variant="caption"> 名</ThemeText>
               </ThemeText>
-            </View>
-            <View style={styles.detailItem}>
-              <View style={styles.detailTitleRow}><Shield size={16} color={COLORS.accent} /><ThemeText variant="label" style={{ marginLeft: 8 }}>目標・制限数</ThemeText></View>
-              <ThemeText variant="h1" color={COLORS.accent}>{currentLimit}<ThemeText variant="caption" color={COLORS.accent}> 名</ThemeText></ThemeText>
             </View>
           </View>
 
@@ -444,9 +417,11 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               {workingStaff.length > 0 ? workingStaff.map((item, idx) => (
                 <View key={idx} style={styles.leafItem}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                    <ThemeText variant="caption" bold>{item.staff.name}</ThemeText>
+                    <ThemeText variant="caption" bold>
+                      {item.staff.name} {item.isHomeVisit ? '[訪問リハ]' : (item.isAssistant ? '[助手]' : `[${item.staff.jobType || item.staff.profession}]`)}
+                    </ThemeText>
                     <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginLeft: 8 }} numberOfLines={1}>
-                      ({item.type}{item.isHomeVisit ? ' / 訪問' : ''})
+                      ({item.type}{item.isHomeVisit ? ' / 訪問' : (item.isAssistant ? ' / 助手' : '')})
                       {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
                       {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.duration}h</ThemeText>}
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
@@ -477,7 +452,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
             {offStaff.length > 0 ? offStaff.map((item, idx) => (
                 <View key={idx} style={styles.leafItem}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                    <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>{item.staff.name}</ThemeText>
+                    <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>
+                      {item.staff.name} {item.isHomeVisit ? '[訪問リハ]' : (item.isAssistant ? '[助手]' : `[${item.staff.jobType || item.staff.profession}]`)}
+                    </ThemeText>
                     <ThemeText variant="caption" style={{ marginLeft: 8, color: COLORS.textSecondary }} numberOfLines={1}>
                       ({item.type})
                       {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
@@ -525,9 +502,9 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
               {staffList
                 .filter(s => {
                   const mStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-                  const isLongTerm = s.status?.trim() === '長期休暇' || s.placement?.trim() === '長期休暇' || s.position?.trim() === '長期休暇' || s.status?.trim() === '入職前';
+                  const isLongTerm = s.status === '長期休暇' || s.status === '入職前';
                   const isNoHoliday = (getDayType(selectedDate) !== 'weekday') && (s.monthlyNoHoliday?.[mStr] ?? s.noHoliday);
-                  const alreadyHasRequest = requests.some(r => r.staffName.trim() === s.name.trim() && r.date === getDateStr(selectedDate) && r.status === 'approved');
+                  const alreadyHasRequest = requests.some(r => r && r.staffName?.trim() === s.name?.trim() && r.date === getDateStr(selectedDate) && r.status === 'approved');
                   
                   return !isLongTerm && !isNoHoliday && !alreadyHasRequest;
                 })
@@ -547,7 +524,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
                     >
                       <View style={{ flex: 1 }}>
                         <ThemeText variant="body" bold={!isSelected} color={isSelected ? 'white' : COLORS.text}>{staff.name}</ThemeText>
-                        <ThemeText variant="caption" color={isSelected ? 'white' : COLORS.textSecondary}>{staff.placement} / {staff.profession}</ThemeText>
+                        <ThemeText variant="caption" color={isSelected ? 'white' : COLORS.textSecondary}>{staff.placement} / {staff.jobType || staff.profession}</ThemeText>
                       </View>
                       {isSelected && <Check color="white" size={20} />}
                     </TouchableOpacity>

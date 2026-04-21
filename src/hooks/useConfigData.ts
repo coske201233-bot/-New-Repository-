@@ -39,15 +39,8 @@ export const useConfigData = () => {
         try {
           const lv = await loadData(key);
           if (lv !== null) setter(lv);
-          
-          const cv = await Promise.race([
-            cloudStorage.fetchConfig(key),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
-          ]).catch(() => null);
-
-          if (cv !== undefined && cv !== null) setter(cv);
         } catch (e) {
-          console.warn(`Config background load failed for key: ${key}`);
+          console.warn(`Config load failed for key: ${key}`);
         }
       };
 
@@ -69,7 +62,6 @@ export const useConfigData = () => {
 
       // 保存処理
       await saveData(key, val);
-      await cloudStorage.saveConfig(key, val);
     } catch (e) {
       console.error('Config update error:', e);
       throw e;

@@ -13,8 +13,8 @@ interface SetupScreenProps {
 export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete, onBack }) => {
   const [name, setName] = useState('');
   const [placement, setPlacement] = useState('外来');
-  const [profession, setProfession] = useState('PT');
-  const [position, setPosition] = useState('主事');
+  const [jobType, setJobType] = useState('PT');
+  const [role, setRole] = useState('主事');
   const [selectedRoles, setSelectedRoles] = useState<string[]>(['一般職員']);
   const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
@@ -65,8 +65,8 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete, onBack }) 
       id: Date.now().toString(),
       name: name.trim(),
       placement,
-      profession,
-      position,
+      jobType,
+      role,
       status: '常勤',
       role: selectedRoles.join(','),
       isApproved: isYoshidaAdmin,
@@ -111,8 +111,8 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete, onBack }) 
           <TextInput style={styles.input} placeholder="例: 山田 太郎" placeholderTextColor={COLORS.textSecondary} value={name} onChangeText={setName} />
         </View>
 
-        <SelectionGroup label="職種" icon={Briefcase} options={professions} value={profession} onChange={setProfession} />
-        <SelectionGroup label="役割" icon={Briefcase} options={p_roles} value={position} onChange={setPosition} />
+        <SelectionGroup label="職種" icon={Briefcase} options={professions} value={jobType} onChange={setJobType} />
+        <SelectionGroup label="役割" icon={Briefcase} options={p_roles} value={role} onChange={setRole} />
         <SelectionGroup label="配置" icon={MapPin} options={placements} value={placement} onChange={setPlacement} />
         <SelectionGroup label="アプリ権限" icon={Shield} options={roles} value={selectedRoles} onChange={handleRoleToggle} isMulti />
 

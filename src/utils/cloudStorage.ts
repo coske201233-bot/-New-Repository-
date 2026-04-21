@@ -4,11 +4,12 @@ import { Alert } from 'react-native';
 
 // Helpers to map between camelCase (JS) and snake_case (SQL)
 const mapToSql = (obj: any, mapping: Record<string, string>) => {
+  if (!obj || typeof obj !== 'object') return {};
   const result: any = {};
   for (const key in obj) {
     const sqlKey = mapping[key] || key;
     let val = obj[key];
-    // Ensure 'role' is stored as a string even if passed as an array (data type safety)
+    if (val === undefined) continue;
     if (key === 'role' && Array.isArray(val)) val = val.join(',');
     result[sqlKey] = val;
   }
@@ -16,8 +17,8 @@ const mapToSql = (obj: any, mapping: Record<string, string>) => {
 };
 
 const mapFromSql = (obj: any, mapping: Record<string, string>) => {
+  if (!obj || typeof obj !== 'object') return {};
   const result: any = {};
-  // Reverse the mapping
   const reverseMapping: Record<string, string> = {};
   for (const key in mapping) reverseMapping[mapping[key]] = key;
 
@@ -28,7 +29,18 @@ const mapFromSql = (obj: any, mapping: Record<string, string>) => {
   return result;
 };
 
-const STAFF_MAP = { noHoliday: 'no_holiday', createdAt: 'created_at', isApproved: 'is_approved', pin: 'pin', userId: 'user_id', isLocked: 'is_locked', lockedMonths: 'locked_months' };
+const STAFF_MAP = { 
+  jobType: 'profession',
+  role: 'position',
+  permissions: 'role',
+  noHoliday: 'no_holiday', 
+  createdAt: 'created_at', 
+  isApproved: 'is_approved', 
+  pin: 'pin', 
+  userId: 'user_id', 
+  isLocked: 'is_locked', 
+  lockedMonths: 'locked_months' 
+};
 const REQ_MAP = { staffName: 'staff_name', createdAt: 'created_at' };
 const MSG_MAP = { fromId: 'from_id', fromName: 'from_name', toId: 'to_id', createdAt: 'created_at' };
 
@@ -46,14 +58,18 @@ export const cloudStorage = {
         console.log('Fetched staff from cloud:', result.length);
       }
       return result;
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.message?.includes('stole it') || err?.message?.includes('Lock')) {
+        console.warn('[LOCK_BYPASS] Supabase lock stolen (fetchStaff). Returning [].');
+        return [];
+      }
       console.error('Fetch staff error:', err);
       return [];
     }
   },
   async upsertStaff(staff: any[]) {
     const validKeys = [
-      'id', 'name', 'placement', 'position', 'status', 'profession', 'role', 
+      'id', 'name', 'placement', 'role', 'status', 'jobType', 'permissions', 
       'noHoliday', 'phone', 'password', 'createdAt', 'isApproved', 'pin',
       'isLocked', 'lockedMonths'
     ];
@@ -66,16 +82,17 @@ export const cloudStorage = {
     const { error } = await supabase.from('staff').upsert(filtered, { onConflict: 'id' });
     if (error) {
       console.error('❌ Staff sync error:', error);
-      const msg = `Staff save failed: ${error.message} (${error.code})`;
+      let msg = `Staff save failed: ${error.message} (${error.code})`;
+      if (error.code === '42501') msg = '職員情報の更新権限がありません(RLS制約)。管理者の認証を確認してください。';
       if (typeof window !== 'undefined') {
-        console.warn('%c[STORAGE ERROR]', 'color: red; font-weight: bold;', msg);
+        console.warn('%c[SECURITY ERROR]', 'color: red; font-weight: bold;', msg);
       }
       throw new Error(msg);
     }
     console.log('✅ Staff synced to cloud successfully');
   },
   async upsertSingleStaff(s: any) {
-    const validKeys = ['id', 'name', 'placement', 'position', 'profession', 'status', 'noHoliday', 'isApproved', 'role', 'password', 'isLocked', 'lockedMonths'];
+    const validKeys = ['id', 'name', 'placement', 'role', 'jobType', 'status', 'noHoliday', 'isApproved', 'permissions', 'password', 'isLocked', 'lockedMonths'];
     const obj: any = {};
     validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });
     const { error } = await supabase.from('staff').upsert(mapToSql(obj, STAFF_MAP), { onConflict: 'id' });
@@ -130,8 +147,12 @@ export const cloudStorage = {
       }
       return mapped;
     });
-    } catch (e) {
-      console.warn('[CRITICAL CATCH] fetchRequests failed');
+    } catch (err: any) {
+      if (err?.message?.includes('stole it') || err?.message?.includes('Lock')) {
+        console.warn('[LOCK_BYPASS] Supabase lock stolen (fetchRequests). Returning [].');
+        return [];
+      }
+      console.warn('[CRITICAL CATCH] fetchRequests failed:', err);
       return [];
     }
   },
@@ -189,10 +210,10 @@ export const cloudStorage = {
     const { error } = await supabase.from('requests').upsert(filtered, { onConflict: 'id' });
     if (error) {
        console.error('❌ Requests sync error:', error);
-       // 403 Forbidden (RLS) 等の致命的エラーを検知しやすくする
-       const msg = `Save failed: ${error.message} (${error.code})`;
+       let msg = `Save failed: ${error.message} (${error.code})`;
+       if (error.code === '42501') msg = '申請の更新権限がないか、他人の申請を操作しようとしました(RLS制約)。';
        if (typeof window !== 'undefined') {
-         console.warn('%c[STORAGE ERROR]', 'color: red; font-weight: bold;', msg);
+         console.warn('%c[SECURITY ERROR]', 'color: red; font-weight: bold;', msg);
        }
        throw new Error(msg);
     }
@@ -278,48 +299,5 @@ export const cloudStorage = {
   },
   unsubscribe(channel: any) {
     supabase.removeChannel(channel);
-  },
-
-  // --- Messages ---
-  async fetchMessages() {
-    const { data, error } = await supabase.from('messages').select('*').order('created_at', { ascending: true }).limit(5000);
-    if (error) throw error;
-    return (data || []).map(m => mapFromSql(m, MSG_MAP));
-  },
-  async pushMessage(msg: any) {
-    const validKeys = ['id', 'fromId', 'fromName', 'toId', 'content', 'type', 'attachments', 'createdAt'];
-    const filtered: any = {};
-    validKeys.forEach(k => { if (msg[k] !== undefined) filtered[k] = msg[k]; });
-    const sqlObj = mapToSql(filtered, MSG_MAP);
-    const { error } = await supabase.from('messages').insert([sqlObj]);
-    if (error) {
-      console.error('Message sync error:', error);
-      throw error;
-    }
-  },
-  async deleteMessagesBetween(user1: string, user2: string) {
-    const { error } = await supabase.from('messages').delete()
-      .or(`and(from_name.eq.${user1},to_id.eq.${user2}),and(from_name.eq.${user2},to_id.eq.${user1})`);
-    if (error) throw error;
-  },
-
-  // --- Config ---
-  async fetchConfig(key: string) {
-    try {
-      if (!supabase) return null;
-      const { data, error } = await supabase.from('app_config').select('value').eq('key', key).single();
-      if (error && error.code !== 'PGRST116') {
-        console.warn(`[CONFIG_ERROR Handled] fetchConfig failed for ${key}:`, error.message);
-        return null;
-      }
-      return data?.value;
-    } catch (e) {
-      console.warn(`[CRITICAL CATCH] fetchConfig failed for ${key}`);
-      return null;
-    }
-  },
-  async saveConfig(key: string, value: any) {
-    const { error } = await supabase.from('app_config').upsert({ key, value }, { onConflict: 'key' });
-    if (error) throw error;
   }
 };

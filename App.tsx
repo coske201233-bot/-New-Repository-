@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, TouchableOpacity, SafeAreaView, Alert, Platform, AppState, TextInput, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, SafeAreaView, Alert, Platform, AppState, TextInput, ActivityIndicator, Text as RNText } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Home, Calendar, User, ClipboardList, Users, Shield, RefreshCw } from 'lucide-react-native';
+import { Home, Calendar, User, ClipboardList, Users, Shield, RefreshCw, AlertTriangle } from 'lucide-react-native';
 import { ThemeCard } from './src/components/ThemeCard';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { CalendarScreen } from './src/screens/CalendarScreen';
@@ -18,12 +18,45 @@ import { ThemeText } from './src/components/ThemeText';
 import { COLORS, SPACING } from './src/theme/theme';
 import { getDateStr } from './src/utils/dateUtils';
 import { useAppLogic } from './src/hooks/useAppLogic';
+import { supabase, isSupabaseAuthReady } from './src/utils/supabase';
 
-// deduplicateRequests was moved here from old App.tsx to keep ea1151d logic if needed, 
-// but useAppLogic already handles internal state. 
-// We will use useAppLogic's properties.
+/**
+ * VERSION 44.2 [RESILIENCE]
+ * クリティカル: ホワイトスクリーン (WSOD) 対策
+ * 構文エラーや予期せぬ実行エラーを画面にトラップし、原因を可視化します。
+ */
+function ErrorFallback({ error }: { error: string }) {
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#000', padding: 20, justifyContent: 'center', alignItems: 'center' }}>
+      <AlertTriangle size={64} color="#fca5a5" style={{ marginBottom: 20 }} />
+      <RNText style={{ color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 12 }}>アプリケーションエラー</RNText>
+      <RNText style={{ color: '#fca5a5', fontSize: 14, marginBottom: 32, textAlign: 'center' }}>{error}</RNText>
+      <TouchableOpacity 
+        style={{ backgroundColor: '#fff', padding: 16, borderRadius: 8 }}
+        onPress={() => Platform.OS === 'web' ? window.location.reload() : null}
+      >
+        <RNText style={{ color: '#000', fontWeight: 'bold' }}>再読み込み</RNText>
+      </TouchableOpacity>
+    </SafeAreaView>
+  );
+}
 
 export default function App() {
+  const [fatalError, setFatalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // グローバルエラーキャッチ
+    const errorHandler = (e: any) => {
+      console.error('Fatal App Error:', e);
+      setFatalError(e.message || String(e));
+    };
+    
+    if (Platform.OS === 'web') {
+      window.onerror = (msg) => { setFatalError(String(msg)); return false; };
+      window.onunhandledrejection = (e) => { setFatalError(String(e.reason)); };
+    }
+  }, []);
+
   const logic = useAppLogic();
   
   const {
@@ -47,16 +80,31 @@ export default function App() {
     cancelRequest,
     approveRequest,
     onDeleteRequest,
+    onDeleteStaff,
     onAutoAssign,
     onUndoAutoAssign,
     canUndoAutoAssign,
+    updateStaffList,
+    handleLogin,
   } = logic;
+
+  useEffect(() => {
+    // Connection health check
+    if (isSupabaseAuthReady) {
+      console.log('✅ Supabase Auth: READY');
+    } else {
+      console.warn('⚠️ Supabase Auth: NOT READY (Check .env.local)');
+    }
+  }, []);
+
+  if (fatalError) return <ErrorFallback error={fatalError} />;
 
   const renderContent = () => {
     const commonProps = {
-      staffList, setStaffList,
+      staffList, setStaffList, updateStaffList,
       requests, setRequests,
       onDeleteRequest,
+      onDeleteStaff,
       onDeleteRequests: async (ids: string[]) => {
         for (const id of ids) {
           await onDeleteRequest(id);
@@ -80,6 +128,7 @@ export default function App() {
       onAutoAssign,
       onUndoAutoAssign,
       canUndoAutoAssign,
+      isInitialized,
     };
 
     switch (currentTab) {
@@ -99,16 +148,17 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 11.0 - CANCEL APPROVAL FIXED]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 47.3 - ADMIN ENFORCED]</ThemeText>
         </View>
-        {!profile ? (
+        {(!profile && !logic.user) ? (
           showSetup ? (
             <SetupScreen onComplete={setProfile} onBack={() => setShowSetup(false)} />
           ) : (
-            <LoginScreen staffList={staffList} onLogin={setProfile} onGoToSetup={() => setShowSetup(true)} />
+            <LoginScreen onLogin={handleLogin} />
           )
-        ) : profile.isApproved === false ? (
-          <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        ) : (!profile || (profile.isApproved === false && logic.user?.email !== 'admin@reha.local')) ? (
+          // ロード中または承認待ち (VIP管理者 admin@reha.local はバイパス)
+          <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: SPACING.xl }]}>
             <View style={{ width: '100%', alignItems: 'center' }}>
               <ThemeCard style={{ padding: 40, width: '100%', alignItems: 'center', borderRadius: 32 }}>
                 <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.1)', padding: 24, borderRadius: 100, marginBottom: 24 }}>
@@ -116,10 +166,27 @@ export default function App() {
                 </View>
                 <ThemeText variant="h1" style={{ marginBottom: 12, textAlign: 'center' }}>登録承認待ち</ThemeText>
                 <ThemeText variant="body" color={COLORS.textSecondary} style={{ textAlign: 'center', lineHeight: 24, marginBottom: 32 }}>
-                  {profile.name} さんの登録申請を送信しました。{"\n"}
+                  {profile?.name || 'スタッフ'} さんの登録申請を送信しました。{"\n"}
                   管理者が承認するまで、しばらくお待ちください。{"\n"}
                   （承認後にアプリが利用可能になります）
                 </ThemeText>
+                
+                {logic.user?.email === 'admin@reha.local' && (
+                  <TouchableOpacity 
+                    style={{ marginBottom: 20, padding: 12, backgroundColor: '#fef3c7', borderRadius: 12, borderWidth: 1, borderColor: '#f59e0b', width: '100%' }}
+                    onPress={() => {
+                      console.log('--- [ARCHITECT_BYPASS] Manual force dashboard ---');
+                      setProfile(prev => ({ ...prev, isApproved: true } as any));
+                    }}
+                  >
+                    <ThemeText style={{ color: '#92400e', fontSize: 13, fontWeight: '700', textAlign: 'center' }}>
+                      [ARCHITECT BYPASS: VIP ADMIN DETECTED]
+                    </ThemeText>
+                    <ThemeText style={{ color: '#b45309', fontSize: 11, textAlign: 'center', marginTop: 4 }}>
+                      ここをタップして強制的にダッシュボードへ移動
+                    </ThemeText>
+                  </TouchableOpacity>
+                )}
                 
                 <TouchableOpacity 
                   style={{ backgroundColor: COLORS.primary, paddingHorizontal: 32, paddingVertical: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', opacity: isSyncing ? 0.7 : 1 }}
@@ -158,7 +225,7 @@ export default function App() {
                   { id: 'calendar', icon: Calendar, label: '出勤' },
                   { id: 'staff', icon: Users, label: '職員' },
                   { id: 'requests', icon: ClipboardList, label: '申請' },
-                  { id: 'admin', icon: (profile.role?.includes('管理者') || profile.role?.includes('開発者')) ? Shield : User, label: (profile.role?.includes('管理者') || profile.role?.includes('開発者')) ? '管理・設定' : '設定' }
+                  ...(isAdminAuthenticated ? [{ id: 'admin', icon: Shield, label: '管理・設定' }] : [])
                 ].map(tab => (
                   <TouchableOpacity key={tab.id} style={styles.tabItem} onPress={() => setCurrentTab(tab.id)} activeOpacity={0.7}>
                     <tab.icon size={24} color={currentTab === tab.id ? COLORS.primary : COLORS.textSecondary} />
@@ -183,3 +250,4 @@ const styles = StyleSheet.create({
   tabBar: { flexDirection: 'row', height: 60, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, paddingBottom: 8 },
   tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 8 },
 });
+

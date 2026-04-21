@@ -30,12 +30,15 @@ interface AdminScreenProps {
   canUndoAutoAssign: boolean;
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
+  onDeleteStaff: (id: string) => Promise<boolean>;
+  updateStaffList: (update: any[] | ((prev: any[]) => any[])) => Promise<any>;
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
-  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests
+  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
+  onDeleteStaff, updateStaffList
 }) => {
   const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
   const [adminAuthInput, setAdminAuthInput] = useState('');
@@ -49,12 +52,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const [editStaff, setEditStaff] = useState<any>(null);
   const [showStaffEditModal, setShowStaffEditModal] = useState(false);
   const [editName, setEditName] = useState('');
-  const [editProfession, setEditProfession] = useState('');
+  const [editJobType, setEditJobType] = useState('');
   const [editPlacement, setEditPlacement] = useState('');
-  const [editPosition, setEditPosition] = useState('');
-  const [editStatus, setEditStatus] = useState('常勤');
+  const [editRole, setEditRole] = useState('');
+  const [editStatus, setEditStatus] = useState('通常');
   const [editNoHoliday, setEditNoHoliday] = useState(false);
-  const [editRole, setEditRole] = useState(['スタッフ']);
+  const [editPermissions, setEditPermissions] = useState(['スタッフ']);
   
   const [isAssigning, setIsAssigning] = useState(false);
 
@@ -71,15 +74,15 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   // --- Constant Options ---
   const PROFESSION_OPTS = ['PT', 'OT', 'ST', '助手'];
-  const PLACEMENT_OPTS = ['外来', '２F', '包括', '４F', '排尿', '兼務', 'フォロー', '管理', '事務', '訪問リハ'];
-  const POSITION_OPTS = ['科長', '係長', '主査', '主任', '主事', '会計年度'];
-  const STATUS_OPTS = ['常勤', '時短出勤', '長期休暇'];
+  const PLACEMENT_OPTS = ['院内', '外来', '２F', '包括', '４F', '排尿', '兼務', 'フォロー', '管理', '事務', '訪問リハ'];
+  const POSITION_OPTS = ['助手', '訪問リハ', '科長', '係長', '主査', '主任', '主事', '会計年度'];
+  const STATUS_OPTS = ['通常', '常勤', '時短出勤', '長期休暇', '入職前'];
   const HOLIDAY_SETTING_OPTS = [{ label: '設定なし', value: false }, { label: '土日祝休み', value: true }];
   const ROLE_OPTS = [{ label: '一般スタッフ', value: ['スタッフ'] }, { label: 'シフト管理者', value: ['管理者', 'スタッフ'] }];
 
   // --- Handlers ---
-  const handleApproveStaff = (id: string) => {
-    setStaffList(prev => prev.map(s => s.id === id ? { ...s, isApproved: true } : s));
+  const handleApproveStaff = async (id: string) => {
+    await updateStaffList(prev => prev.map(s => s.id === id ? { ...s, isApproved: true } : s));
     Alert.alert('完了', '登録を承認しました。');
   };
 
@@ -121,7 +124,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       let rowsHtml = '';
       const listToPrint = staffList.filter(s => s && s.isApproved);
       listToPrint.forEach(s => {
-        let row = `<tr><td style="text-align: left; padding-left: 5px; font-weight: bold;">${s.name}</td><td>${s.profession || ''}</td>`;
+        let row = `<tr><td style="text-align: left; padding-left: 5px; font-weight: bold;">${s.name}</td><td>${s.jobType || ''}</td>`;
         monthInfoArr.forEach((d: any) => {
           if (!d.empty) {
             const sT = normalizeName(s.name);
@@ -222,15 +225,68 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     else { Alert.alert('エラー', '管理用パスワードが違います。'); }
   };
 
-  const handleStaffUpdate = () => {
+  const handleStaffUpdate = async () => {
     if (!editStaff) return;
-    setStaffList(prev => prev.map(s => s && s.id === editStaff.id ? { ...s, name: editName, profession: editProfession, placement: editPlacement, position: editPosition, status: editStatus, noHoliday: editNoHoliday, role: editRole } : s));
+    const updatedStaff = { 
+      ...editStaff, 
+      name: editName, 
+      jobType: editJobType, 
+      placement: editPlacement, 
+      role: editRole, 
+      status: editStatus, 
+      noHoliday: editNoHoliday, 
+      permissions: editPermissions 
+    };
+    
+    await updateStaffList(prev => prev.map(s => s && s.id === editStaff.id ? updatedStaff : s));
     setShowStaffEditModal(false);
     Alert.alert('完了', `${editName}さんの情報を更新しました。`);
   };
 
   const handleDeleteStaff = (id: string, name: string) => {
-    Alert.alert('職員削除', `${name}さんを削除しますか？`, [{ text: 'キャンセル', style: 'cancel' }, { text: '削除', style: 'destructive', onPress: () => { setStaffList(prev => prev.filter(s => s.id !== id)); setShowStaffEditModal(false); }}]);
+    // シニアアーキテクト指令: 物理削除と同期のための統合ワイヤリング
+    const confirmMsg = "この職員を削除してもよろしいですか？この操作は取り消せません。";
+    
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${name}さん: ${confirmMsg}`)) {
+        onDeleteStaff(id).then(() => setShowStaffEditModal(false));
+      }
+    } else {
+      Alert.alert('職員削除', `${name}さんを削除しますか？\n\n${confirmMsg}`, [
+        { text: 'キャンセル', style: 'cancel' }, 
+        { text: '削除', style: 'destructive', onPress: async () => { 
+          await onDeleteStaff(id); 
+          setShowStaffEditModal(false); 
+        }}
+      ]);
+    }
+  };
+
+  const handlePersonalPassUpdate = async () => {
+    if (!personalPassInput) {
+      Alert.alert('入力エラー', '新しいパスワードを入力してください。');
+      return;
+    }
+    const updatedProfile = { ...profile, password: personalPassInput };
+    setProfile(updatedProfile);
+    
+    // 同時にスタッフリストも更新して永続化（localStorage sync）をトリガー
+    await updateStaffList((prev: any[]) => prev.map(s => s && s.id === profile.id ? updatedProfile : s));
+    
+    setShowPersonalPassModal(false);
+    setPersonalPassInput('');
+    Alert.alert('完了', '個人パスワードを更新しました。');
+  };
+
+  const handleAdminPassUpdate = () => {
+    if (!newAdminPassInput) {
+      Alert.alert('入力エラー', '新しい管理者パスワードを入力してください。');
+      return;
+    }
+    updatePassword(newAdminPassInput);
+    setShowAdminPassChangeModal(false);
+    setNewAdminPassInput('');
+    Alert.alert('完了', '管理者パスワードを更新しました。');
   };
 
   return (
@@ -263,7 +319,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   <ThemeText variant="caption" bold color={COLORS.textSecondary} style={{marginBottom:8}}>👤 新規登録の承認待ち ({pendingStaff.length}名)</ThemeText>
                   {pendingStaff.map(s => (
                     <ThemeCard key={s.id} style={styles.approvalItem}>
-                      <View style={{ flex: 1 }}><ThemeText bold>{s.name}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{s.profession} | {s.placement}</ThemeText></View>
+                      <View style={{ flex: 1 }}><ThemeText bold>{s.name}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{s.jobType} | {s.placement}</ThemeText></View>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         <TouchableOpacity style={[styles.miniApproveBtn, {backgroundColor: '#10b981'}]} onPress={() => handleApproveStaff(s.id)}><Check size={16} color="white" /></TouchableOpacity>
                         <TouchableOpacity style={[styles.miniApproveBtn, {backgroundColor: '#ef4444'}]} onPress={() => handleDeleteStaff(s.id, s.name)}><X size={16} color="white" /></TouchableOpacity>
@@ -362,12 +418,34 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </TouchableOpacity>
               </ThemeCard>
 
+              <ThemeCard style={styles.itemRow}>
+                <View style={styles.iconCircle}><Key size={20} color="#a855f7" /></View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <ThemeText bold>個人パスワード変更</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>現在のログインユーザーのパスワードを変更します</ThemeText>
+                </View>
+                <TouchableOpacity style={[styles.inlineBtn, { backgroundColor: 'rgba(168, 85, 247, 0.1)' }]} onPress={() => setShowPersonalPassModal(true)}>
+                  <ThemeText bold color="#a855f7">変更</ThemeText>
+                </TouchableOpacity>
+              </ThemeCard>
+
+              <ThemeCard style={styles.itemRow}>
+                <View style={styles.iconCircle}><Shield size={20} color="#f43f5e" /></View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <ThemeText bold>管理者パスワード変更</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>管理モードにログインするためのパスワードを変更します</ThemeText>
+                </View>
+                <TouchableOpacity style={[styles.inlineBtn, { backgroundColor: 'rgba(244, 63, 94, 0.1)' }]} onPress={() => setShowAdminPassChangeModal(true)}>
+                  <ThemeText bold color="#f43f5e">変更</ThemeText>
+                </TouchableOpacity>
+              </ThemeCard>
+
               <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>👥 職員の属性・役割管理</ThemeText>
               <View style={styles.staffAdminList}>
                 {staffList.filter(s => s && s.isApproved).map(s => (
                   <ThemeCard key={s.id} style={styles.staffAdminItem}>
-                    <View style={{ flex: 1 }}><ThemeText bold>{s.name}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{s.placement} | {s.profession} ({s.status}) {s.position ? `[${s.position}]` : ''}</ThemeText></View>
-                    <TouchableOpacity style={styles.staffMiniEdit} onPress={() => { setEditStaff(s); setEditName(s.name); setEditProfession(s.profession); setEditPlacement(s.placement); setEditPosition(s.position || ''); setEditStatus(s.status || '常勤'); setEditNoHoliday(!!s.noHoliday); setEditRole(s.role || ['スタッフ']); setShowStaffEditModal(true); }}><Edit3 size={16} color="#38bdf8" /><ThemeText bold color="#38bdf8" style={{marginLeft:4}}>編集</ThemeText></TouchableOpacity>
+                    <View style={{ flex: 1 }}><ThemeText bold>{s.name}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{s.placement} | {s.jobType} ({s.status}) {s.role ? `[${s.role}]` : ''}</ThemeText></View>
+                    <TouchableOpacity style={styles.staffMiniEdit} onPress={() => { setEditStaff(s); setEditName(s.name); setEditJobType(s.jobType || s.profession || ''); setEditPlacement(s.placement); setEditRole(s.role || s.position || ''); setEditStatus(s.status || '通常'); setEditNoHoliday(!!s.noHoliday); setEditPermissions(s.permissions || s.role || ['スタッフ']); setShowStaffEditModal(true); }}><Edit3 size={16} color="#38bdf8" /><ThemeText bold color="#38bdf8" style={{marginLeft:4}}>編集</ThemeText></TouchableOpacity>
                   </ThemeCard>
                 ))}
               </View>
@@ -376,11 +454,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 <ThemeText bold variant="h2" style={{ marginBottom: 16 }}>📈 {currentMonth + 1}月の必要人数設定</ThemeText>
                 <View style={styles.limitGrid}>
                   <DropdownSelector label="平日" value={limits.weekday} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('weekday', v, currentMonthStr)} style={{flex:1}} />
-                  <DropdownSelector label="土曜" value={limits.sat} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('saturday', v, currentMonthStr)} style={{flex:1}} />
+                  <DropdownSelector label="土曜" value={limits.sat} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('sat', v, currentMonthStr)} style={{flex:1}} />
                 </View>
                 <View style={styles.limitGrid}>
-                  <DropdownSelector label="日曜" value={limits.sun} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('sunday', v, currentMonthStr)} style={{flex:1}} />
-                  <DropdownSelector label="祝日" value={limits.pub} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('publicHoliday', v, currentMonthStr)} style={{flex:1}} />
+                  <DropdownSelector label="日曜" value={limits.sun} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('sun', v, currentMonthStr)} style={{flex:1}} />
+                  <DropdownSelector label="祝日" value={limits.pub} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('pub', v, currentMonthStr)} style={{flex:1}} />
                 </View>
               </View>
             </View>
@@ -391,7 +469,9 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
       {/* --- モーダル群 --- */}
       <Modal visible={showStaffEditModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}><View style={[styles.detailModal, {maxHeight: '90%'}]}><View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:20}}><ThemeText variant="h2">職員情報の編集</ThemeText><TouchableOpacity onPress={() => setShowStaffEditModal(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity></View><ScrollView showsVerticalScrollIndicator={false}><ThemeText bold style={{marginBottom:8, fontSize:13, color:COLORS.textSecondary}}>氏名</ThemeText><TextInput style={styles.modalInput} value={editName} onChangeText={setEditName} placeholder="氏名を入力" placeholderTextColor={COLORS.textSecondary} /><DropdownSelector label="職種" value={editProfession} options={PROFESSION_OPTS} onSelect={setEditProfession} /><DropdownSelector label="役割(ポジション)" value={editPosition} options={POSITION_OPTS} onSelect={setEditPosition} /><DropdownSelector label="配置" value={editPlacement} options={PLACEMENT_OPTS} onSelect={setEditPlacement} /><DropdownSelector label="ステータス" value={editStatus} options={STATUS_OPTS} onSelect={setEditStatus} /><DropdownSelector label="休日設定 (自動割当条件)" value={editNoHoliday} options={HOLIDAY_SETTING_OPTS} onSelect={setEditNoHoliday} /><DropdownSelector label="アプリ権限" value={editRole} options={ROLE_OPTS} onSelect={setEditRole} /><View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}><TouchableOpacity style={styles.cancelBtn} onPress={() => setShowStaffEditModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={styles.confirmBtn} onPress={handleStaffUpdate}><ThemeText bold color="white">保存する</ThemeText></TouchableOpacity></View><TouchableOpacity style={{ marginTop: 24, padding: 12, alignItems: 'center' }} onPress={() => editStaff && handleDeleteStaff(editStaff.id, editStaff.name)}><ThemeText color="#ef4444">職員を削除する</ThemeText></TouchableOpacity></ScrollView></View></View></Modal>
+        <View style={styles.modalOverlay}><View style={[styles.detailModal, {maxHeight: '90%'}]}><View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:20}}><ThemeText variant="h2">職員情報の編集</ThemeText><TouchableOpacity onPress={() => setShowStaffEditModal(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity></View><ScrollView showsVerticalScrollIndicator={false}><ThemeText bold style={{marginBottom:8, fontSize:13, color:COLORS.textSecondary}}>氏名</ThemeText><TextInput style={styles.modalInput} value={editName} onChangeText={setEditName} placeholder="氏名を入力" placeholderTextColor={COLORS.textSecondary} /><DropdownSelector label="職種 (jobType)" value={editJobType} options={PROFESSION_OPTS} onSelect={setEditJobType} /><DropdownSelector label="役割 (role)" value={editRole} options={POSITION_OPTS} onSelect={setEditRole} /><DropdownSelector label="配置 (placement)" value={editPlacement} options={PLACEMENT_OPTS} onSelect={setEditPlacement} /><DropdownSelector label="ステータス (status)" value={editStatus} options={STATUS_OPTS} onSelect={setEditStatus} /><DropdownSelector label="休日設定 (自動割当条件)" value={editNoHoliday} options={HOLIDAY_SETTING_OPTS} onSelect={setEditNoHoliday} /><DropdownSelector label="アプリ権限" value={editPermissions} options={ROLE_OPTS} onSelect={setEditPermissions} /><View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}><TouchableOpacity style={styles.cancelBtn} onPress={() => setShowStaffEditModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={styles.confirmBtn} onPress={handleStaffUpdate}><ThemeText bold color="white">保存する</ThemeText></TouchableOpacity></View><TouchableOpacity style={{ marginTop: 24, padding: 12, alignItems: 'center' }} onPress={() => editStaff && handleDeleteStaff(editStaff.id, editStaff.name)}><ThemeText color="#ef4444">職員を削除する</ThemeText></TouchableOpacity></ScrollView></View></View></Modal>
+      <Modal visible={showPersonalPassModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>個人パスワードの変更</ThemeText><TextInput style={styles.modalInput} placeholder="新しいパスワード" secureTextEntry value={personalPassInput} onChangeText={setPersonalPassInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowPersonalPassModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#a855f7'}]} onPress={handlePersonalPassUpdate}><ThemeText bold color="white">更新する</ThemeText></TouchableOpacity></View></View></View></Modal>
+      <Modal visible={showAdminPassChangeModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>管理者パスワードの変更</ThemeText><TextInput style={styles.modalInput} placeholder="新しい管理者パスワード" secureTextEntry value={newAdminPassInput} onChangeText={setNewAdminPassInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowAdminPassChangeModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#f43f5e'}]} onPress={handleAdminPassUpdate}><ThemeText bold color="white">更新する</ThemeText></TouchableOpacity></View></View></View></Modal>
       <Modal visible={showAdminAuthModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>管理者認証</ThemeText><TextInput style={styles.modalInput} placeholder="管理パスワード" secureTextEntry value={adminAuthInput} onChangeText={setAdminAuthInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowAdminAuthModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#38bdf8'}]} onPress={handleAdminAuth}><ThemeText bold color="white">ログイン</ThemeText></TouchableOpacity></View></View></View></Modal>
     </SafeAreaView>
   );

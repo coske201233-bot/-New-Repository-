@@ -57,10 +57,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [editingStaff, setEditingStaff] = useState<any>(null);
   const [newName, setNewName] = useState('');
-  const [newPosition, setNewPosition] = useState('');
+  const [newRole, setNewRole] = useState('');
   const [newStatus, setNewStatus] = useState('');
-  const [newProfession, setNewProfession] = useState('PT');
-  const [newRole, setNewRole] = useState('一般職員');
+  const [newJobType, setNewJobType] = useState('PT');
+  const [newPermissions, setNewPermissions] = useState('一般職員');
   const [newNoHoliday, setNewNoHoliday] = useState(false);
   const [newIsApproved, setNewIsApproved] = useState(true);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
@@ -104,14 +104,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
   const updateProfileLocal = async (key: string, value: any) => {
     let newProfile = { ...profile, [key]: value, updatedAt: new Date().toISOString() };
-    const wasLongTerm = profile.position === '長期休暇' || profile.status === '長期休暇';
-    const isNowLongTerm = newProfile.position === '長期休暇' || newProfile.status === '長期休暇';
+    const wasLongTerm = (profile.role || profile.position) === '長期休暇' || profile.status === '長期休暇';
+    const isNowLongTerm = (newProfile.role || newProfile.position) === '長期休暇' || newProfile.status === '長期休暇';
     
-    if (wasLongTerm && (key === 'position' || key === 'status') && value !== '長期休暇') {
-      newProfile.position = (key === 'position') ? value : '主査';
-      newProfile.status = (key === 'status') ? value : '出勤';
+    if (wasLongTerm && (key === 'role' || key === 'status') && value !== '長期休暇') {
+      newProfile.role = (key === 'role') ? value : '主査';
+      newProfile.status = (key === 'status') ? value : '通常';
     } else if (isNowLongTerm) {
-      newProfile.position = '長期休暇';
+      newProfile.role = '長期休暇';
       newProfile.status = '長期休暇';
       if (!wasLongTerm) {
         const todayStr = getDateStr(new Date());
@@ -121,16 +121,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     
     setProfile(newProfile);
 
-    const isLongTermSync = newProfile.position === '長期休暇' || newProfile.status === '長期休暇';
+    const isLongTermSync = (newProfile.role || newProfile.position) === '長期休暇' || newProfile.status === '長期休暇';
     setStaffList(prev => prev.map(s => {
       if (s.name === profile.name) {
         let updated = { ...s, [key]: value };
         if (isLongTermSync) {
-          updated.position = '長期休暇';
+          updated.role = '長期休暇';
           updated.status = '長期休暇';
         } else if (wasLongTerm) {
-          if (updated.status === '長期休暇') updated.status = '出勤';
-          if (updated.position === '長期休暇') updated.position = '主査';
+          if (updated.status === '長期休暇') updated.status = '通常';
+          if ((updated.role || updated.position) === '長期休暇') updated.role = '主査';
         }
         return updated;
       }
@@ -171,9 +171,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const switchUser = (staff: any) => {
     const newProfile = {
       name: staff.name,
-      placement: staff.placement || '2F',
-      position: staff.position || '主事',
-      role: staff.role || '一般職員'
+      placement: staff.placement || '院内',
+      role: staff.role || staff.position || '主事',
+      permissions: staff.permissions || staff.role || '一般職員'
     };
     setProfile(newProfile);
     setIsUserSwitchModalVisible(false);
@@ -222,14 +222,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     
     setStaffList(prev => prev.map(s => s.id === editingStaff?.id ? { 
       ...s, 
-      role: newRole,
+      permissions: newPermissions,
       updatedAt: new Date().toISOString()
     } : s));
 
     if (editingStaff.name === profile.name) {
       setProfile({
         ...profile, 
-        role: newRole
+        permissions: newPermissions
       });
     }
 
@@ -421,10 +421,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     onPress={() => { 
                       setEditingStaff(staff); 
                       setNewName(staff.name); 
-                      setNewPosition(staff.position); 
-                      setNewStatus(staff.status); 
-                      setNewProfession(staff.profession || 'PT');
-                      setNewRole(staff.role || '一般職員');
+                      setNewRole(staff.role || staff.position || '主事'); 
+                      setNewStatus(staff.status || '通常'); 
+                      setNewJobType(staff.jobType || staff.profession || 'PT');
+                      setNewPermissions(staff.permissions || staff.role || '一般職員');
                       setNewNoHoliday(staff.noHoliday ?? false);
                       setNewIsApproved(staff.isApproved !== false);
                       setIsEditModalVisible(true); 
@@ -432,7 +432,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   >
                     <ThemeText>{staff.name}</ThemeText>
                     <ThemeText variant="caption" color={COLORS.textSecondary}>
-                      {staff.placement} / {staff.position} {staff.profession ? `(${staff.profession})` : ''}
+                      {staff.placement} / {staff.role || staff.position} {(staff.jobType || staff.profession) ? `(${staff.jobType || staff.profession})` : ''}
                     </ThemeText>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={() => deleteStaff(staff.id)} style={styles.deleteBtn}>
@@ -514,42 +514,42 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 <ThemeText variant="h2" color={COLORS.primary}>{editingStaff?.name}</ThemeText>
               </View>
 
-              <ThemeText variant="label" style={{ marginBottom: 8 }}>権限設定 (Role)</ThemeText>
+              <ThemeText variant="label" style={{ marginBottom: 8 }}>権限設定 (Permissions)</ThemeText>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4, width: '100%' }}>
                 <TouchableOpacity 
                   activeOpacity={0.7}
                   style={[
                     styles.roleCard, 
-                    (newRole === '一般職員' || !newRole) && { borderColor: COLORS.primary, borderWidth: 3, backgroundColor: 'rgba(56, 189, 248, 0.1)' }
+                    (newPermissions === '一般職員' || !newPermissions) && { borderColor: COLORS.primary, borderWidth: 3, backgroundColor: 'rgba(56, 189, 248, 0.1)' }
                   ]} 
-                  onPress={() => setNewRole('一般職員')}
+                  onPress={() => setNewPermissions('一般職員')}
                 >
-                  <User size={20} color={(newRole === '一般職員' || !newRole) ? COLORS.text : COLORS.textSecondary} />
-                  <ThemeText bold={newRole === '一般職員' || !newRole} color={(newRole === '一般職員' || !newRole) ? COLORS.text : COLORS.textSecondary}>一般職員</ThemeText>
+                  <User size={20} color={(newPermissions === '一般職員' || !newPermissions) ? COLORS.text : COLORS.textSecondary} />
+                  <ThemeText bold={newPermissions === '一般職員' || !newPermissions} color={(newPermissions === '一般職員' || !newPermissions) ? COLORS.text : COLORS.textSecondary}>一般職員</ThemeText>
                 </TouchableOpacity>
 
                 <TouchableOpacity 
                   activeOpacity={0.7}
                   style={[
                     styles.roleCard, 
-                    newRole.includes('シフト管理者') && { borderColor: COLORS.primary, borderWidth: 3, backgroundColor: 'rgba(56, 189, 248, 0.2)' }
+                    newPermissions.includes('シフト管理者') && { borderColor: COLORS.primary, borderWidth: 3, backgroundColor: 'rgba(56, 189, 248, 0.2)' }
                   ]} 
                   onPress={() => {
                     checkPassword(() => {
-                      if (newRole.includes('シフト管理者')) {
-                        const next = newRole.split(',').filter(r => r !== 'シフト管理者').join(',');
-                        setNewRole(next || '一般職員');
+                      if (newPermissions.includes('シフト管理者')) {
+                        const next = newPermissions.split(',').filter(r => r !== 'シフト管理者').join(',');
+                        setNewPermissions(next || '一般職員');
                       } else {
-                        const currentRoles = newRole.split(',').filter(r => r !== '一般職員');
+                        const currentRoles = newPermissions.split(',').filter(r => r !== '一般職員');
                         if (!currentRoles.includes('シフト管理者')) {
-                          setNewRole([...currentRoles, 'シフト管理者'].join(','));
+                          setNewPermissions([...currentRoles, 'シフト管理者'].join(','));
                         }
                       }
                     });
                   }}
                 >
-                  <Shield size={20} color={newRole.includes('シフト管理者') ? COLORS.primary : COLORS.textSecondary} />
-                  <ThemeText bold={newRole.includes('シフト管理者')} color={newRole.includes('シフト管理者') ? COLORS.primary : COLORS.textSecondary}>管理者</ThemeText>
+                  <Shield size={20} color={newPermissions.includes('シフト管理者') ? COLORS.primary : COLORS.textSecondary} />
+                  <ThemeText bold={newPermissions.includes('シフト管理者')} color={newPermissions.includes('シフト管理者') ? COLORS.primary : COLORS.textSecondary}>管理者</ThemeText>
                 </TouchableOpacity>
               </View>
             </ScrollView>
