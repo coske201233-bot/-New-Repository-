@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Alert } from 'react-native';
 import { STORAGE_KEYS, saveData, loadData } from '../utils/storage';
-import { cloudStorage } from '../utils/cloudStorage';
+import { cloudStorage, mapToSql, mapFromSql, STAFF_MAP } from '../utils/cloudStorage';
 import { sortStaffByName } from '../utils/staffUtils';
 
 export const useStaffData = () => {
@@ -44,6 +45,31 @@ export const useStaffData = () => {
     setStaffLocks(l);
   }, []);
 
+  const patchStaff = useCallback(async (id: string, updates: any) => {
+    try {
+      const sqlUpdates = mapToSql(updates, STAFF_MAP);
+      const { data, error } = await supabase.from('staff').update(sqlUpdates).eq('id', id).select();
+      if (error) {
+        console.error("UPDATE ERROR:", error);
+        Alert.alert("保存に失敗しました", (error.message || "不明なエラー") + "\n" + (error.details || ""));
+        throw error;
+      }
+      
+      // Update local state
+      const jsUpdated = mapFromSql(data[0], STAFF_MAP);
+      setStaffList(prev => prev.map(s => s.id === id ? { ...s, ...jsUpdated } : s));
+      
+      // Sync to local storage
+      const updatedList = staffList.map(s => s.id === id ? { ...s, ...jsUpdated } : s);
+      await saveData(STORAGE_KEYS.STAFF_LIST, updatedList);
+      
+      return jsUpdated;
+    } catch (e) {
+      console.error('Staff Patch Error:', e);
+      throw e;
+    }
+  }, [staffList]);
+
   const syncStaffWithCloud = useCallback(async () => {
     try {
       const cloudStaff = await cloudStorage.fetchStaff();
@@ -60,6 +86,6 @@ export const useStaffData = () => {
   }, []);
 
   return useMemo(() => ({ 
-    staffList, setStaffList, staffLocks, setStaffLocks, updateStaffList, updateStaffLocks, syncStaffWithCloud 
-  }), [staffList, staffLocks, updateStaffList, updateStaffLocks, syncStaffWithCloud]);
+    staffList, setStaffList, staffLocks, setStaffLocks, updateStaffList, patchStaff, updateStaffLocks, syncStaffWithCloud 
+  }), [staffList, staffLocks, updateStaffList, patchStaff, updateStaffLocks, syncStaffWithCloud]);
 };

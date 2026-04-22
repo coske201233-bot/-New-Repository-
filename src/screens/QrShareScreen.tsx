@@ -47,7 +47,7 @@ export const QrShareScreen: React.FC<QrShareScreenProps> = ({
             <View style={styles.qrBackground}>
               <QRCode
                 value={finalWebUrl}
-                size={width * 0.55}
+                size={250}
                 color="#0f172a"
                 backgroundColor="white"
                 quietZone={10}

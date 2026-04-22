@@ -1,15 +1,16 @@
-import React, { useState, useMemo } from 'react';
-import { StyleSheet, View, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, SafeAreaView, Platform } from 'react-native';
+import React, { useState, useMemo, useEffect } from 'react';
+import { StyleSheet, View, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, SafeAreaView, Platform, Text, Button } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { 
   ChevronLeft, ChevronRight, Calendar, User, 
-  Check, X, Clock, MapPin, Briefcase, Trash2, Settings, Shield, Printer
+  Check, X, Clock, MapPin, Briefcase, Trash2, Settings, Shield, Printer, Plus, Pencil, LogOut
 } from 'lucide-react-native';
 import { getMonthInfo, getDayType, isHoliday, getDateStr } from '../utils/dateUtils';
 import { normalizeName } from '../utils/staffUtils';
 import { cloudStorage } from '../utils/cloudStorage';
+import { supabase } from '../utils/supabase';
 import * as Print from 'expo-print';
 
 interface StaffScreenProps {
@@ -24,6 +25,8 @@ interface StaffScreenProps {
   initialWard?: string;
   currentDate: Date;
   setCurrentDate: (d: Date | ((prev: Date) => Date)) => void;
+  onForceCloudSync?: () => Promise<boolean>;
+  onLogout?: () => void;
 }
 
 interface MonthDay {
@@ -35,6 +38,23 @@ interface MonthDay {
 
 export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const { staffList, requests, setRequests, onDeleteRequest, isPrivileged, profile, currentDate, setCurrentDate } = props;
+
+  // --- [CRITICAL: FALLBACK UI FOR WSOD PREVENTION] ---
+  if (!staffList || !requests) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <ThemeText style={{ marginTop: 24, marginBottom: 8 }} variant="h2">データを読み込み中...</ThemeText>
+        <TouchableOpacity 
+          style={{ marginTop: 40, backgroundColor: 'rgba(239, 68, 68, 0.1)', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#ef4444' }}
+          onPress={() => props.onLogout ? props.onLogout() : supabase.auth.signOut()}
+        >
+          <ThemeText color="#ef4444" bold>ログアウトして戻る</ThemeText>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
   const isAdminAuthenticated = props.isAdminAuthenticated || isPrivileged;
   
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
@@ -46,6 +66,177 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const [selectedType, setSelectedType] = useState('出勤');
   const [selectedHours, setSelectedHours] = useState(1.0);
   const [isSaving, setIsSaving] = useState(false);
+
+  // --- [CRITICAL: FORCE RE-FETCH ON FOCUS & DEBUG] ---
+  // タブが切り替わってこのコンポーネントがマウントされるたびにクラウドから最新データを取得します
+  useEffect(() => {
+    console.log('--- [STAFF_SCREEN] Tab focused, triggering cloud sync & debug fetch... ---');
+    const runDebugFetch = async () => {
+      try {
+        const { data, error } = await supabase.from('staff').select('*');
+
+        if (error) {
+          console.error("FETCH ERROR:", error);
+          setDebugError(error.message);
+        } else {
+          console.log("FETCHED DATA:", data);
+          setDebugStaffList(data || []);
+        }
+      } catch (e: any) {
+        console.error("DEBUG FETCH EXCEPTION:", e);
+        setDebugError(e.message);
+      }
+    };
+
+    runDebugFetch();
+  }, []);
+
+  // Registration Form States
+  const [isRegistrationModalVisible, setIsRegistrationModalVisible] = useState(false);
+  const [regName, setRegName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regAppRole, setRegAppRole] = useState('一般スタッフ');
+  const [regTitle, setRegTitle] = useState('主事');
+  const [regJobType, setRegJobType] = useState('PT');
+  const [regPlacement, setRegPlacement] = useState('4F');
+  const [regStatus, setRegStatus] = useState('常勤');
+  const [editingStaff, setEditingStaff] = useState<any>(null);
+  const [regHolidaySetting, setRegHolidaySetting] = useState(false);
+  const [showHolidayPicker, setShowHolidayPicker] = useState(false);
+
+  // --- [ON-SCREEN DEBUGGING & FAIL-SAFE RENDER] ---
+  const [statusMsg, setStatusMsg] = useState("");
+  const [debugError, setDebugError] = useState<string | null>(null);
+  const [debugStaffList, setDebugStaffList] = useState<any[]>([]);
+  const staff = debugStaffList; // Alias for user requirement snippet
+
+  // Multi-choice options (Custom Hospital Structure)
+  const APP_ROLES = ['管理者', '一般スタッフ'];
+  const JOB_TYPES = ['PT', 'OT', 'ST', '事務'];
+  const TITLES = ['科長', '科長補佐', '係長', '主査', '主任', '主事', '会計年度'];
+  const PLACEMENTS = ['２F', '包括', '4F', '外来', 'フォロー', '兼務', '管理', '事務', '排尿管理'];
+  const STATUSES = ['常勤', '時短勤務', '長期休暇', 'その他'];
+
+  const handleOpenRegistration = (staffToEdit?: any) => {
+    if (staffToEdit) {
+      setEditingStaff(staffToEdit);
+      setRegName(staffToEdit.name || '');
+      setRegEmail(staffToEdit.email || '');
+      setRegAppRole(staffToEdit.permissions?.includes('管理者') ? '管理者' : '一般スタッフ');
+      setRegTitle(staffToEdit.role || '主事');
+      setRegJobType(staffToEdit.jobType || 'PT');
+      setRegPlacement(staffToEdit.placement || '4F');
+      setRegStatus(staffToEdit.status || '常勤');
+      setRegHolidaySetting(!!staffToEdit.noHoliday);
+    } else {
+      setEditingStaff(null);
+      setRegName('');
+      setRegEmail('');
+      // Pre-fill email for master admin if staff list is near empty or contains mock data
+      const isInitialAdminNeeded = (staffList?.length || 0) === 0 || ((staffList?.length || 0) < 5 && !staffList?.find(s => s?.email === 'admin@reha.local'));
+      setRegAppRole(isInitialAdminNeeded ? '管理者' : '一般スタッフ');
+      setRegTitle('主事');
+      setRegJobType('PT');
+      setRegPlacement('4F');
+      setRegStatus('常勤');
+      setRegHolidaySetting(false);
+    }
+    setIsRegistrationModalVisible(true);
+  };
+
+  const fetchStaff = async () => {
+    if (props.onForceCloudSync) {
+      await props.onForceCloudSync();
+    }
+  };
+
+  const handleRegisterStaff = async () => {
+    console.log("SUBMIT CLICKED", { regName, regEmail });
+
+    if (!regName.trim() || !regEmail.trim()) {
+      setStatusMsg('❌ 氏名とメールアドレスを入力してください');
+      return;
+    }
+    setStatusMsg("処理中...");
+
+    const finalEmail = regEmail.trim().toLowerCase();
+    const isMasterAdmin = finalEmail === 'admin@reha.local';
+
+    setIsSaving(true);
+    try {
+      const payload = {
+        name: regName.trim(),
+        email: finalEmail,
+        position: regTitle, // 役職 (Title)
+        role: (isMasterAdmin || regAppRole === '管理者') ? '管理者,スタッフ' : 'スタッフ', // アプリ権限 (permissions)
+        profession: regJobType, // 職種 (jobType)
+        placement: regPlacement,
+        status: regStatus,
+        no_holiday: regHolidaySetting,
+        is_approved: isMasterAdmin || regStatus === '承認済み',
+      };
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('サーバーからの応答が一定時間を超えました。')), 5000)
+      );
+
+      if (editingStaff) {
+        // UPDATE
+        const { error } = await Promise.race([
+          supabase.from('staff').update(payload).eq('id', editingStaff.id),
+          timeoutPromise
+        ]) as any;
+
+        if (error) {
+          console.error("UPDATE ERROR:", error);
+          setStatusMsg("❌ 保存に失敗しました: " + (error.message || "不明なエラー"));
+          setIsSaving(false);
+          return;
+        }
+
+        setStatusMsg('🎉 変更を保存しました！');
+        if (props.onForceCloudSync) {
+          props.onForceCloudSync();
+        }
+      } else {
+        // INSERT
+        const { data: insertedData, error } = await Promise.race([
+          supabase.from('staff').insert([payload]).select().single(),
+          timeoutPromise
+        ]) as any;
+
+        if (error) throw error;
+
+        // Update local state with the returned data from DB (including auto-generated ID)
+        if (insertedData) {
+          const newStaff = {
+            id: insertedData.id,
+            name: insertedData.name,
+            email: insertedData.email,
+            role: insertedData.position,
+            permissions: (insertedData.role || '').split(','),
+            jobType: insertedData.profession,
+            placement: insertedData.placement,
+            status: insertedData.status,
+            isApproved: insertedData.is_approved,
+            createdAt: insertedData.created_at
+          };
+          props.setStaffList(prev => [...prev, newStaff]);
+          setStatusMsg("🎉 登録成功！");
+          if (props.onForceCloudSync) {
+            props.onForceCloudSync(); // リストを最新の状態に更新
+          }
+        }
+      }
+      
+      setIsRegistrationModalVisible(false);
+    } catch (error: any) {
+      console.error("INSERT ERROR:", error);
+      setStatusMsg("❌ エラー: " + (error.message || "不明なエラー"));
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Constants
   const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '空欄'];
@@ -376,28 +567,51 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}><ThemeText variant="h1">職員名簿</ThemeText></View>
+      <View style={styles.header}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <View>
+            <ThemeText variant="h1">[BUILD: VERSION 49.0 - STABLE RELEASE]</ThemeText>
+            <ThemeText variant="caption">職員の出勤状況・管理</ThemeText>
+          </View>
+          <TouchableOpacity 
+            style={{ padding: 8 }} 
+            onPress={() => props.onLogout ? props.onLogout() : supabase.auth.signOut()}
+          >
+            <LogOut size={24} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* --- [CLEANUP] DEBUG RENDER AREA REMOVED --- */}
+
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: SPACING.md, paddingBottom: 100 }}>
         <View style={styles.staffGrid}>
-          {filteredStaff.map(staff => {
+          {(filteredStaff || []).map(staff => {
             if (!staff) return null;
             const stats = calculateStats(staff);
             return (
-              <ThemeCard key={staff.id} style={[styles.staffCard, staff.status === '長期休暇' && { opacity: 0.6 }]}>
+              <ThemeCard key={staff.id} style={[styles.staffCard, staff?.status === '長期休暇' && { opacity: 0.6 }]}>
                 <View style={styles.cardHeader}>
                   <TouchableOpacity style={{ flex: 1 }} onPress={() => { setSelectedStaff(staff); setSelectedDay(null); setIsCalendarModalVisible(true); }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}><ThemeText bold variant="h2" style={{ marginRight: 8 }}>{staff.name}</ThemeText>{(staff.role || staff.position) ? ( <View style={styles.badge}><ThemeText style={styles.badgeText}>{staff.role || staff.position}</ThemeText></View> ) : null}</View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}><ThemeText bold variant="h2" style={{ marginRight: 8 }}>{staff?.name || '無名'}</ThemeText>{(staff?.role || staff?.position) ? ( <View style={styles.badge}><ThemeText style={styles.badgeText}>{staff?.role || staff?.position}</ThemeText></View> ) : null}</View>
                     <View style={{ flexDirection: 'row', marginTop: 4, gap: 12 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}><Briefcase size={12} color={COLORS.textSecondary} /><ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginLeft: 4 }}>{staff.jobType || staff.profession || ''}</ThemeText></View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}><MapPin size={12} color={COLORS.textSecondary} /><ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginLeft: 4 }}>{staff.placement || ''}</ThemeText></View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}><Briefcase size={12} color={COLORS.textSecondary} /><ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginLeft: 4 }}>{staff?.jobType || staff?.profession || ''}</ThemeText></View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}><MapPin size={12} color={COLORS.textSecondary} /><ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginLeft: 4 }}>{staff?.placement || staff?.department || ''}</ThemeText></View>
                     </View>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.miniBtn} onPress={() => { setSelectedStaff(staff); setSelectedDay(null); setIsCalendarModalVisible(true); }}><Calendar size={18} color="#38bdf8" /></TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity style={[styles.miniBtn, { backgroundColor: 'rgba(56, 189, 248, 0.05)' }]} onPress={() => handleOpenRegistration(staff)}>
+                      <Pencil size={18} color="#38bdf8" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.miniBtn} onPress={() => { setSelectedStaff(staff); setSelectedDay(null); setIsCalendarModalVisible(true); }}>
+                      <Calendar size={18} color="#38bdf8" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 <View style={styles.statsGrid}>
-                  <View style={styles.statBox}><ThemeText variant="caption" color={COLORS.textSecondary}>平日</ThemeText><ThemeText bold>{stats.workDays}日</ThemeText></View>
-                  <View style={styles.statBox}><ThemeText variant="caption" color={COLORS.textSecondary}>休出</ThemeText><ThemeText bold color="#f87171">{stats.holidayWorkDays}日</ThemeText></View>
-                  <View style={styles.statBox}><ThemeText variant="caption" color={COLORS.textSecondary}>休暇(h)</ThemeText><ThemeText bold>{stats.leaveHours}</ThemeText></View>
+                  <View style={styles.statBox}><ThemeText variant="caption" color={COLORS.textSecondary}>平日</ThemeText><ThemeText bold>{stats?.workDays || 0}日</ThemeText></View>
+                  <View style={styles.statBox}><ThemeText variant="caption" color={COLORS.textSecondary}>休出</ThemeText><ThemeText bold color="#f87171">{stats?.holidayWorkDays || 0}日</ThemeText></View>
+                  <View style={styles.statBox}><ThemeText variant="caption" color={COLORS.textSecondary}>休暇(h)</ThemeText><ThemeText bold>{stats?.leaveHours || '0.00'}</ThemeText></View>
                 </View>
               </ThemeCard>
             );
@@ -452,13 +666,221 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           </View>
         </View>
       </Modal>
+
+      {/* Staff Registration Modal (Replaced with Custom Absolute View) */}
+      {isRegistrationModalVisible && (
+        <View style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0, bottom: 0,
+          zIndex: 99999,
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          pointerEvents: 'box-none'
+        }}>
+          <View style={{
+            width: '90%', maxWidth: 500, backgroundColor: '#0f172a',
+            padding: 20, borderRadius: 10,
+            pointerEvents: 'auto',
+            elevation: 10,
+            maxHeight: '90%',
+            overflow: 'hidden'
+          }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <View style={{ flex: 1 }}>
+              <ThemeText variant="h2">職員情報の編集</ThemeText>
+              <ThemeText variant="caption" color={COLORS.textSecondary}>
+                {editingStaff ? `${editingStaff.name} さんの情報を更新します` : '新しいメンバーをシステムに追加します'}
+              </ThemeText>
+            </View>
+            <Button title="閉じる" onPress={() => setIsRegistrationModalVisible(false)} color="#ef4444" />
+          </View>
+          
+          <View style={Platform.OS === 'web' ? { flex: 1, overflowY: 'auto' } as any : { flex: 1 }} pointerEvents="auto">
+            <View style={styles.editorSection}>
+              {statusMsg ? <Text style={{ color: '#f87171', fontSize: 16, fontWeight: 'bold', marginVertical: 10, textAlign: 'center' }}>{statusMsg}</Text> : null}
+              <ThemeText variant="label" style={{ marginBottom: 8 }}>氏名</ThemeText>
+              <TextInput
+                style={styles.input}
+                placeholder="例: 山田 太郎"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={regName}
+                onChangeText={setRegName}
+              />
+
+              <ThemeText variant="label" style={{ marginBottom: 8, marginTop: 16 }}>メールアドレス</ThemeText>
+              <TextInput
+                style={styles.input}
+                placeholder="例: yamada@example.com"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={regEmail}
+                onChangeText={setRegEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+
+              <ThemeText variant="label" style={{ marginBottom: 12, marginTop: 16 }}>アプリ権限</ThemeText>
+              <View style={styles.typeGrid}>
+                {APP_ROLES.map(r => (
+                  <TouchableOpacity 
+                    key={r} 
+                    style={[styles.typeBtn, regAppRole === r && styles.typeBtnActive]} 
+                    onPress={() => setRegAppRole(r)}
+                  >
+                    <ThemeText color={regAppRole === r ? 'white' : COLORS.textSecondary}>{r}</ThemeText>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <ThemeText variant="label" style={{ marginBottom: 12, marginTop: 16 }}>職種</ThemeText>
+              <View style={styles.typeGrid}>
+                {JOB_TYPES.map(jt => (
+                  <TouchableOpacity 
+                    key={jt} 
+                    style={[styles.typeBtn, regJobType === jt && styles.typeBtnActive]} 
+                    onPress={() => setRegJobType(jt)}
+                  >
+                    <ThemeText color={regJobType === jt ? 'white' : COLORS.textSecondary}>{jt}</ThemeText>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <ThemeText variant="label" style={{ marginBottom: 12, marginTop: 16 }}>役職</ThemeText>
+              <View style={styles.typeGrid}>
+                {TITLES.map(t => (
+                  <TouchableOpacity 
+                    key={t} 
+                    style={[styles.typeBtn, regTitle === t && styles.typeBtnActive]} 
+                    onPress={() => setRegTitle(t)}
+                  >
+                    <ThemeText color={regTitle === t ? 'white' : COLORS.textSecondary}>{t}</ThemeText>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <ThemeText variant="label" style={{ marginBottom: 12, marginTop: 16 }}>配置</ThemeText>
+              <View style={styles.typeGrid}>
+                {PLACEMENTS.map(p => (
+                  <TouchableOpacity 
+                    key={p} 
+                    style={[styles.typeBtn, regPlacement === p && styles.typeBtnActive]} 
+                    onPress={() => setRegPlacement(p)}
+                  >
+                    <ThemeText color={regPlacement === p ? 'white' : COLORS.textSecondary}>{p}</ThemeText>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <ThemeText variant="label" style={{ marginBottom: 12, marginTop: 16 }}>ステータス</ThemeText>
+              <View style={styles.typeGrid}>
+                {STATUSES.map(s => (
+                  <TouchableOpacity 
+                    key={s} 
+                    style={[styles.typeBtn, regStatus === s && styles.typeBtnActive]} 
+                    onPress={() => setRegStatus(s)}
+                  >
+                    <ThemeText color={regStatus === s ? 'white' : COLORS.textSecondary}>{s}</ThemeText>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <ThemeText variant="label" style={{ marginBottom: 12, marginTop: 16 }}>休日設定 (自動割当条件)</ThemeText>
+              <TouchableOpacity 
+                style={{ 
+                  flexDirection: 'row', 
+                  alignItems: 'center', 
+                  justifyContent: 'space-between', 
+                  backgroundColor: 'rgba(255,255,255,0.05)', 
+                  borderRadius: 12, 
+                  height: 52, 
+                  paddingHorizontal: 16,
+                  marginBottom: 16
+                }} 
+                onPress={() => setShowHolidayPicker(true)}
+              >
+                <ThemeText color="white">{regHolidaySetting ? '土日祝休み' : '設定なし'}</ThemeText>
+                <ChevronRight size={20} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+
+              <View style={{ marginTop: 30, marginBottom: 20 }}>
+                <TouchableOpacity 
+                  style={[
+                    { 
+                      height: 52, 
+                      borderRadius: 12, 
+                      backgroundColor: COLORS.primary, 
+                      justifyContent: 'center', 
+                      alignItems: 'center',
+                      flexDirection: 'row'
+                    },
+                    isSaving && { opacity: 0.7 }
+                  ]} 
+                  onPress={handleRegisterStaff}
+                  disabled={isSaving}
+                >
+                  {isSaving ? (
+                    <ActivityIndicator color="white" style={{ marginRight: 8 }} />
+                  ) : (
+                    <Check size={20} color="white" style={{ marginRight: 8 }} />
+                  )}
+                  <ThemeText bold color="white">
+                    {isSaving ? '保存中...' : (editingStaff ? '変更を保存する' : '登録する')}
+                  </ThemeText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+          </View>
+        </View>
+      )}
+
+      {/* Holiday Setting Selection Modal */}
+      <Modal visible={showHolidayPicker} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ width: '85%', backgroundColor: '#0f172a', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+            <ThemeText variant="h2" style={{ marginBottom: 20 }}>休日設定 (自動割当条件)</ThemeText>
+            
+            <TouchableOpacity 
+              style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }} 
+              onPress={() => { setRegHolidaySetting(false); setShowHolidayPicker(false); }}
+            >
+              <ThemeText color={!regHolidaySetting ? '#38bdf8' : 'white'} style={{ fontSize: 18 }}>設定なし</ThemeText>
+              {!regHolidaySetting && <Check size={20} color="#38bdf8" />}
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16 }} 
+              onPress={() => { setRegHolidaySetting(true); setShowHolidayPicker(false); }}
+            >
+              <ThemeText color={regHolidaySetting ? '#38bdf8' : 'white'} style={{ fontSize: 18 }}>土日祝休み</ThemeText>
+              {regHolidaySetting && <Check size={20} color="#38bdf8" />}
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={{ marginTop: 24, height: 52, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' }} 
+              onPress={() => setShowHolidayPicker(false)}
+            >
+              <ThemeText bold>キャンセル</ThemeText>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: { padding: SPACING.md, paddingTop: 10 },
+  header: { padding: SPACING.md, paddingTop: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  input: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 14,
+    color: 'white',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)'
+  },
   wardScroll: { paddingVertical: 10 },
   wardTab: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', marginRight: 8 },
   wardTabActive: { backgroundColor: '#38bdf8' },

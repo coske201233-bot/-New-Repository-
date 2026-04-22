@@ -3,7 +3,7 @@ import { deduplicateRequests } from './requestUtils';
 import { Alert } from 'react-native';
 
 // Helpers to map between camelCase (JS) and snake_case (SQL)
-const mapToSql = (obj: any, mapping: Record<string, string>) => {
+export const mapToSql = (obj: any, mapping: Record<string, string>) => {
   if (!obj || typeof obj !== 'object') return {};
   const result: any = {};
   for (const key in obj) {
@@ -16,7 +16,7 @@ const mapToSql = (obj: any, mapping: Record<string, string>) => {
   return result;
 };
 
-const mapFromSql = (obj: any, mapping: Record<string, string>) => {
+export const mapFromSql = (obj: any, mapping: Record<string, string>) => {
   if (!obj || typeof obj !== 'object') return {};
   const result: any = {};
   const reverseMapping: Record<string, string> = {};
@@ -29,7 +29,7 @@ const mapFromSql = (obj: any, mapping: Record<string, string>) => {
   return result;
 };
 
-const STAFF_MAP = { 
+export const STAFF_MAP = { 
   jobType: 'profession',
   role: 'position',
   permissions: 'role',
@@ -92,11 +92,20 @@ export const cloudStorage = {
     console.log('✅ Staff synced to cloud successfully');
   },
   async upsertSingleStaff(s: any) {
-    const validKeys = ['id', 'name', 'placement', 'role', 'jobType', 'status', 'noHoliday', 'isApproved', 'permissions', 'password', 'isLocked', 'lockedMonths'];
+    const validKeys = ['id', 'name', 'email', 'placement', 'role', 'jobType', 'status', 'noHoliday', 'isApproved', 'permissions', 'password', 'isLocked', 'lockedMonths'];
     const obj: any = {};
     validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });
-    const { error } = await supabase.from('staff').upsert(mapToSql(obj, STAFF_MAP), { onConflict: 'id' });
-    if (error) throw error;
+    
+    try {
+      const { error } = await supabase.from('staff').upsert(mapToSql(obj, STAFF_MAP), { onConflict: 'id' });
+      if (error) {
+        console.error('SUPABASE INSERT ERROR (upsertSingleStaff):', error);
+        throw error;
+      }
+    } catch (err: any) {
+      console.error('CRITICAL: cloudStorage.upsertSingleStaff failed:', err);
+      throw err;
+    }
   },
   async deleteStaff(id: number | string) {
     const { error } = await supabase.from('staff').delete().eq('id', id);

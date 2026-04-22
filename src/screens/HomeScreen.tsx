@@ -41,7 +41,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   // シニアアーキテクト指令: 厳格な配列検証と防弾レンダリング (VERSION 43.0)
   const safeStaff = Array.isArray(staffList) ? staffList : [];
   
-  // [CRITICAL VERSION 47.2] ANNIHILATED OVERLAY
+  // [CRITICAL VERSION 48.20] ANNIHILATED OVERLAY
   // The global spinner block has been completely disabled.
   // The component MUST return actual content immediately.
   /*
@@ -206,43 +206,41 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return (
       <SafeAreaView style={styles.container}>
         <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          <ThemeCard style={styles.personalAccountBar}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={styles.avatarMini}><ThemeText color="white" bold>{profile?.name ? profile.name.charAt(0) : 'A'}</ThemeText></View>
-              <View style={{ marginLeft: 12 }}>
-                <ThemeText bold>{profile?.name || '管理者'} 先生</ThemeText>
-                <ThemeText variant="caption" color={isAdminAuthenticated ? COLORS.primary : COLORS.textSecondary}>
-                  {isAdminAuthenticated ? '管理者権限でログイン中' : '一般スタッフ権限でログイン中'}
-                </ThemeText>
-              </View>
-            </View>
-            <TouchableOpacity style={styles.iconBtn} onPress={onLogout}>
-              <LogOut size={20} color="#ef4444" />
-              <ThemeText color="#ef4444" bold style={{ marginLeft: 6, fontSize: 13 }}>ログアウト</ThemeText>
-            </TouchableOpacity>
-          </ThemeCard>
-
           <View style={[styles.header, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
-            <ThemeText variant="h1">ダッシュボード</ThemeText>
-            {onForceCloudSync && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                {syncMsg ? <ThemeText variant="caption" style={{ color: COLORS.primary }}>{syncMsg}</ThemeText> : null}
-                <TouchableOpacity 
-                  onPress={async () => {
-                    console.log("[SYNC_BUTTON] Manual trigger started");
-                    setSyncMsg('更新中...');
-                    const success = await onForceCloudSync();
-                    setSyncMsg(success ? '更新完了' : 'エラー');
-                    console.log("[SYNC_BUTTON] Manual trigger finished, success:", success);
-                    setTimeout(() => setSyncMsg(''), 3000);
-                  }} 
-                  style={{ padding: 10, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 14 }}
-                  activeOpacity={0.7}
-                >
-                  <RefreshCw size={22} color={COLORS.primary} />
-                </TouchableOpacity>
-              </View>
-            )}
+            <View>
+              <ThemeText variant="h1">ダッシュボード</ThemeText>
+              <ThemeText variant="caption" color={isAdminAuthenticated ? COLORS.primary : COLORS.textSecondary}>
+                {profile?.name || 'スタッフ'} - {isAdminAuthenticated ? '管理者権限' : '一般権限'}
+              </ThemeText>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              {onForceCloudSync && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  {syncMsg ? <ThemeText variant="caption" style={{ color: COLORS.primary }}>{syncMsg}</ThemeText> : null}
+                  <TouchableOpacity 
+                    onPress={async () => {
+                      console.log("[SYNC_BUTTON] Manual trigger started");
+                      setSyncMsg('更新中...');
+                      const success = await onForceCloudSync();
+                      setSyncMsg(success ? '更新完了' : 'エラー');
+                      console.log("[SYNC_BUTTON] Manual trigger finished, success:", success);
+                      setTimeout(() => setSyncMsg(''), 3000);
+                    }} 
+                    style={{ padding: 10, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 14 }}
+                    activeOpacity={0.7}
+                  >
+                    <RefreshCw size={22} color={COLORS.primary} />
+                  </TouchableOpacity>
+                </View>
+              )}
+              <TouchableOpacity 
+                onPress={onLogout}
+                style={{ padding: 10, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 14 }}
+                activeOpacity={0.7}
+              >
+                <LogOut size={22} color="#ef4444" />
+              </TouchableOpacity>
+            </View>
           </View>
           
           {/* 申請承認通知（管理者のみ） */}

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Alert } from 'react-native';
+import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Alert, ActivityIndicator } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Check, Trash2 } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Check, Trash2, LogOut } from 'lucide-react-native';
 import { getDayType, formatDate, getDateStr, normalizeName } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
+import { supabase } from '../utils/supabase';
 
 const getSeasonalTheme = (month: number) => {
   const themes: Record<number, { icon: string, color: string }> = {
@@ -43,13 +44,15 @@ interface CalendarScreenProps {
   onDeleteRequest: (id: string) => void;
   onDeleteRequests?: (ids: string[]) => void;
   approveRequest?: (id: string, status: string) => void;
+  onLogout?: () => void;
 }
 
 export const CalendarScreen: React.FC<CalendarScreenProps> = ({ 
   requests, setRequests, weekdayLimit, holidayLimit, 
   saturdayLimit, sundayLimit, publicHolidayLimit,
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,
-  currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest
+  currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest,
+  onLogout
 }) => {
   const [selectedDate, setSelectedDate] = useState(currentDate);
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
@@ -78,7 +81,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     return map;
   }, [requests]);
 
-  const isPrivileged = ((profile.role?.includes('シフト管理者') || profile.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
+  const isPrivileged = ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
 
   const getDetailedDayInfo = (date: Date) => {
     const dateStr = getDateStr(date);
@@ -362,13 +365,41 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
     return rows;
   };
 
+  if (!profile) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <ThemeText style={{ marginTop: 24, marginBottom: 8 }} variant="h2">プロフィールを取得中...</ThemeText>
+        <ThemeText style={{ marginBottom: 40, color: COLORS.textSecondary, textAlign: 'center' }}>
+          名簿情報との照合を行っています。{"\n"}しばらくお待ちください。
+        </ThemeText>
+        <TouchableOpacity 
+          style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#ef4444' }}
+          onPress={() => onLogout ? onLogout() : supabase.auth.signOut()}
+        >
+          <ThemeText color="#ef4444" bold>ログアウトして戻る</ThemeText>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 160 }} showsVerticalScrollIndicator={true}>
         <View style={styles.header}>
-        <ThemeText variant="h1">カレンダー</ThemeText>
-        <ThemeText variant="caption">シフト・稼働予定の確認</ThemeText>
-      </View>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View>
+              <ThemeText variant="h1">カレンダー</ThemeText>
+              <ThemeText variant="caption">シフト・稼働予定の確認</ThemeText>
+            </View>
+            <TouchableOpacity 
+              style={{ padding: 8 }} 
+              onPress={() => onLogout ? onLogout() : supabase.auth.signOut()}
+            >
+              <LogOut size={24} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
 
       <ThemeCard style={styles.calendarContainer}>
         <View style={styles.monthHeader}>

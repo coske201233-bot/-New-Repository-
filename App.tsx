@@ -85,6 +85,7 @@ export default function App() {
     onUndoAutoAssign,
     canUndoAutoAssign,
     updateStaffList,
+    patchStaff,
     handleLogin,
   } = logic;
 
@@ -101,7 +102,7 @@ export default function App() {
 
   const renderContent = () => {
     const commonProps = {
-      staffList, setStaffList, updateStaffList,
+      staffList, setStaffList, updateStaffList, patchStaff,
       requests, setRequests,
       onDeleteRequest,
       onDeleteStaff,
@@ -148,74 +149,24 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 47.3 - ADMIN ENFORCED]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 49.0 - STABLE RELEASE]</ThemeText>
         </View>
-        {(!profile && !logic.user) ? (
+
+        {/* --- [STRICT BINARY ROUTING] --- */}
+        {(!logic.isInitialized) ? (
+          <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+            <ActivityIndicator size="large" color={COLORS.primary || '#0ea5e9'} />
+            <ThemeText style={{ marginTop: 16 }}>初期化中...</ThemeText>
+          </SafeAreaView>
+        ) : (!logic.user) ? (
+          /* --- [AUTH FLOW] --- */
           showSetup ? (
             <SetupScreen onComplete={setProfile} onBack={() => setShowSetup(false)} />
           ) : (
-            <LoginScreen onLogin={handleLogin} />
+            <LoginScreen onLogin={logic.handleLogin} />
           )
-        ) : (!profile || (profile.isApproved === false && logic.user?.email !== 'admin@reha.local')) ? (
-          // ロード中または承認待ち (VIP管理者 admin@reha.local はバイパス)
-          <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: SPACING.xl }]}>
-            <View style={{ width: '100%', alignItems: 'center' }}>
-              <ThemeCard style={{ padding: 40, width: '100%', alignItems: 'center', borderRadius: 32 }}>
-                <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.1)', padding: 24, borderRadius: 100, marginBottom: 24 }}>
-                  <Shield size={48} color={COLORS.primary} />
-                </View>
-                <ThemeText variant="h1" style={{ marginBottom: 12, textAlign: 'center' }}>登録承認待ち</ThemeText>
-                <ThemeText variant="body" color={COLORS.textSecondary} style={{ textAlign: 'center', lineHeight: 24, marginBottom: 32 }}>
-                  {profile?.name || 'スタッフ'} さんの登録申請を送信しました。{"\n"}
-                  管理者が承認するまで、しばらくお待ちください。{"\n"}
-                  （承認後にアプリが利用可能になります）
-                </ThemeText>
-                
-                {logic.user?.email === 'admin@reha.local' && (
-                  <TouchableOpacity 
-                    style={{ marginBottom: 20, padding: 12, backgroundColor: '#fef3c7', borderRadius: 12, borderWidth: 1, borderColor: '#f59e0b', width: '100%' }}
-                    onPress={() => {
-                      console.log('--- [ARCHITECT_BYPASS] Manual force dashboard ---');
-                      setProfile(prev => ({ ...prev, isApproved: true } as any));
-                    }}
-                  >
-                    <ThemeText style={{ color: '#92400e', fontSize: 13, fontWeight: '700', textAlign: 'center' }}>
-                      [ARCHITECT BYPASS: VIP ADMIN DETECTED]
-                    </ThemeText>
-                    <ThemeText style={{ color: '#b45309', fontSize: 11, textAlign: 'center', marginTop: 4 }}>
-                      ここをタップして強制的にダッシュボードへ移動
-                    </ThemeText>
-                  </TouchableOpacity>
-                )}
-                
-                <TouchableOpacity 
-                  style={{ backgroundColor: COLORS.primary, paddingHorizontal: 32, paddingVertical: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', opacity: isSyncing ? 0.7 : 1 }}
-                  disabled={isSyncing}
-                  onPress={async () => {
-                    const success = await handleForceCloudSync();
-                    if (success) {
-                      Alert.alert('確認', '最新のステータスを確認しました。');
-                    }
-                  }}
-                >
-                  {isSyncing ? (
-                    <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
-                  ) : (
-                    <RefreshCw size={20} color="white" style={{ marginRight: 8 }} />
-                  )}
-                  <ThemeText bold color="white">{isSyncing ? '確認中...' : '最新の状態に更新'}</ThemeText>
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={{ marginTop: 40 }}
-                  onPress={handleLogout}
-                >
-                  <ThemeText color="#ef4444">入力をやり直す (ログアウト)</ThemeText>
-                </TouchableOpacity>
-              </ThemeCard>
-            </View>
-          </SafeAreaView>
         ) : (
+          /* --- [MAIN APP FLOW] --- */
           <>
             <View style={styles.content}>{renderContent()}</View>
             <SafeAreaView style={styles.tabBarContainer}>
