@@ -8,7 +8,7 @@ import { getDayType, getDateStr } from '../utils/dateUtils';
 import { sortStaffByName } from '../utils/staffUtils';
 import { getCurrentLimit } from '../utils/limitUtils';
 
-const hospitalPlacements = ['4F', '5F', '6F', '外来'];
+const hospitalPlacements = ['２F', '４F', '包括', '排尿', '訪問リハ', 'フォロー', '兼務', '管理', '外来', '助手'];
 
 interface HomeScreenProps {
   onNavigateToStaff?: (ward: string) => void;
@@ -36,7 +36,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   isInitialized
 }) => {
   const [selectedWardDetails, setSelectedWardDetails] = useState<string | null>(null);
-  const [syncMsg, setSyncMsg] = useState('');
 
   // シニアアーキテクト指令: 厳格な配列検証と防弾レンダリング (VERSION 43.0)
   const safeStaff = Array.isArray(staffList) ? staffList : [];
@@ -73,56 +72,70 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
     const isExcluded = (s: any) => {
       const data = getStaffData(s);
-      // これらの役割は、通常の院内PT/OT/ST集計から除外する
-      return ['訪問リハ', '包括', '排尿', '排尿支援'].includes(data.role);
+      // 訪問リハ、包括、排尿、長期休暇/入職前は通常のPT/OT/ST集計から除外（優先して別カウント）
+      const isVisit = data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ';
+      const isHokatsu = data.role === '包括' || data.placement === '包括' || data.job === '包括';
+      const isHainyo = data.role === '排尿' || data.role === '排尿支援' || data.placement === '排尿' || data.placement === '排尿支援';
+      const isInactive = data.status === '長期休暇' || data.status === '入職前';
+      return isVisit || isHokatsu || isHainyo || isInactive;
     };
 
     // ---------------------------------------------------------
     // 2. 統計情報の計算 (React.useMemoで最適化)
     // ---------------------------------------------------------
     const stats = React.useMemo(() => {
-      const activeStaff = safeStaff.filter(s => s && s.isApproved !== false);
+      // isApprovedがデフォルトfalseの場合があるため、ダッシュボードの集計にはすべてsafeStaffを使用
       
-      const ptCount = activeStaff.filter(s => {
+      const ptCount = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.job === 'PT' && data.status === '通常' && !isExcluded(s);
+        return data.job === 'PT' && !isExcluded(s);
       }).length;
 
-      const otCount = activeStaff.filter(s => {
+      const otCount = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.job === 'OT' && data.status === '通常' && !isExcluded(s);
+        return data.job === 'OT' && !isExcluded(s);
       }).length;
 
-      const stCount = activeStaff.filter(s => {
+      const stCount = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.job === 'ST' && data.status === '通常' && !isExcluded(s);
+        return data.job === 'ST' && !isExcluded(s);
       }).length;
 
-      const hospital = ptCount + otCount + stCount;
-
-      const visit = activeStaff.filter(s => {
+      const hospital = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.status === '通常' && (data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ');
+        const isAssistant = data.job === '助手' || data.role === '助手' || data.placement === '助手';
+        const isVisit = data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ';
+        const isInactive = data.status === '長期休暇' || data.status === '入職前';
+        return !isAssistant && !isVisit && !isInactive;
       }).length;
 
-      const assistant = activeStaff.filter(s => {
+      const visit = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.status === '通常' && (data.job === '助手' || data.role === '助手');
+        return data.status !== '長期休暇' && data.status !== '入職前' && 
+               (data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ');
       }).length;
 
-      const inactive = activeStaff.filter(s => {
+      const assistant = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.status === '長期休暇' || data.status === '入職前';
+        return data.status !== '長期休暇' && data.status !== '入職前' && 
+               (data.job === '助手' || data.role === '助手' || data.placement === '助手');
       }).length;
 
-      const hokatsuCount = activeStaff.filter(s => {
+      const inactive = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.status === '通常' && data.role === '包括';
+        return data.status === '長期休暇';
       }).length;
 
-      const hainyoCount = activeStaff.filter(s => {
+      const hokatsuCount = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.status === '通常' && (data.role === '排尿' || data.role === '排尿支援');
+        return data.status !== '長期休暇' && data.status !== '入職前' && 
+               (data.role === '包括' || data.placement === '包括' || data.job === '包括');
+      }).length;
+
+      const hainyoCount = safeStaff.filter(s => {
+        const data = getStaffData(s);
+        return data.status !== '長期休暇' && data.status !== '入職前' && 
+               (data.role === '排尿' || data.role === '排尿支援' || data.placement === '排尿' || data.placement === '排尿支援');
       }).length;
       
       return { inactive, assistant, visit, hospital, ptCount, otCount, stCount, hokatsuCount, hainyoCount };
@@ -139,13 +152,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           const isInactive = data.status === '長期休暇' || data.status === '入職前';
           if (isInactive) return false;
           
-          const isExclSub = ['訪問リハ', '包括', '排尿', '排尿支援'].includes(data.role);
-          const isAssistant = data.job === '助手' || data.role === '助手';
-          const isVisit = data.placement === '訪問' || data.placement === '訪問リハ' || data.role === '訪問リハ';
-          const isPTOTST = ['PT', 'OT', 'ST'].includes(data.job);
+          const p = data.placement || '';
+          const r = data.role || '';
           
-          return (data.placement === label || (label === '外来' && data.placement === '院内')) && 
-                 !isAssistant && !isVisit && isPTOTST && !isExclSub;
+          if (label === '２F') return p === '2F' || p === '２F';
+          if (label === '４F') return p === '4F' || p === '４F';
+          if (label === '排尿') return p.includes('排尿') || r.includes('排尿');
+          if (label === '訪問リハ') return p.includes('訪問') || r.includes('訪問');
+          if (label === '助手') return data.job === '助手' || p === '助手' || r === '助手';
+          
+          return p === label || r === label;
         }).length
       };
     });
@@ -190,17 +206,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       { label: 'PT', count: stats.ptCount, color: COLORS.primary },
       { label: 'OT', count: stats.otCount, color: '#10b981' },
       { label: 'ST', count: stats.stCount, color: '#f59e0b' },
-      { label: '助手', count: stats.assistant, color: '#3b82f6' },
-      { label: '長期休暇/入職前', count: stats.inactive, color: '#a855f7' },
       { label: '包括', count: stats.hokatsuCount, color: '#ec4899' },
       { label: '排尿支援', count: stats.hainyoCount, color: '#f43f5e' },
-      { label: 'その他', count: safeStaff.filter(s => {
-          const data = getStaffData(s);
-          return data.status === '通常' && 
-                 !['PT', 'OT', 'ST', '助手'].includes(data.job) && 
-                 !['訪問リハ', '包括', '排尿', '排尿支援'].includes(data.role) &&
-                 !(data.placement === '訪問' || data.placement === '訪問リハ');
-        }).length, color: COLORS.textSecondary },
     ];
 
     return (
@@ -214,25 +221,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </ThemeText>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              {onForceCloudSync && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  {syncMsg ? <ThemeText variant="caption" style={{ color: COLORS.primary }}>{syncMsg}</ThemeText> : null}
-                  <TouchableOpacity 
-                    onPress={async () => {
-                      console.log("[SYNC_BUTTON] Manual trigger started");
-                      setSyncMsg('更新中...');
-                      const success = await onForceCloudSync();
-                      setSyncMsg(success ? '更新完了' : 'エラー');
-                      console.log("[SYNC_BUTTON] Manual trigger finished, success:", success);
-                      setTimeout(() => setSyncMsg(''), 3000);
-                    }} 
-                    style={{ padding: 10, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 14 }}
-                    activeOpacity={0.7}
-                  >
-                    <RefreshCw size={22} color={COLORS.primary} />
-                  </TouchableOpacity>
-                </View>
-              )}
               <TouchableOpacity 
                 onPress={onLogout}
                 style={{ padding: 10, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 14 }}
@@ -263,33 +251,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             })()
           )}
 
-          {/* サマリーカード */}
-          <View style={styles.summaryRow}>
-            <ThemeCard style={styles.summaryCard}>
-              <View style={styles.summaryIcon}><Users color={COLORS.primary} size={20} /></View>
-              <ThemeText variant="label">院内合計</ThemeText>
-              <ThemeText variant="h2">{stats.hospital}<ThemeText variant="caption" color={COLORS.textSecondary}> 名</ThemeText></ThemeText>
-            </ThemeCard>
-            <ThemeCard style={[styles.summaryCard, { borderColor: COLORS.accent, borderWidth: 1 }]}>
-              <View style={[styles.summaryIcon, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}><MapPin color={COLORS.accent} size={20} /></View>
-              <ThemeText variant="label">訪問合計</ThemeText>
-              <ThemeText variant="h2">{stats.visit}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
-            </ThemeCard>
-          </View>
-
-          <View style={styles.summaryRow}>
-            <ThemeCard style={[styles.summaryCard, { borderColor: '#10b981', borderWidth: 1 }]}>
-              <View style={[styles.summaryIcon, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}><Briefcase color="#10b981" size={20} /></View>
-              <ThemeText variant="label">助手合計</ThemeText>
-              <ThemeText variant="h2">{stats.assistant}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
-            </ThemeCard>
-            <ThemeCard style={[styles.summaryCard, { borderColor: '#a855f7', borderWidth: 1 }]}>
-              <View style={[styles.summaryIcon, { backgroundColor: 'rgba(168, 85, 247, 0.1)' }]}><Coffee color="#a855f7" size={20} /></View>
-              <ThemeText variant="label">長期休暇/入職前</ThemeText>
-              <ThemeText variant="h2">{stats.inactive}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
-            </ThemeCard>
-          </View>
-
           {/* 職種別人数 */}
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleRow}>
@@ -307,11 +268,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             ))}
           </ThemeCard>
 
+          {/* サマリーカード */}
+          <View style={styles.summaryRow}>
+            <ThemeCard style={styles.summaryCard}>
+              <View style={styles.summaryIcon}><Users color={COLORS.primary} size={20} /></View>
+              <ThemeText variant="label">院内合計</ThemeText>
+              <ThemeText variant="h2">{stats.hospital}<ThemeText variant="caption" color={COLORS.textSecondary}> 名</ThemeText></ThemeText>
+            </ThemeCard>
+            <ThemeCard style={[styles.summaryCard, { borderColor: '#a855f7', borderWidth: 1 }]}>
+              <View style={[styles.summaryIcon, { backgroundColor: 'rgba(168, 85, 247, 0.1)' }]}><Coffee color="#a855f7" size={20} /></View>
+              <ThemeText variant="label">長期休暇</ThemeText>
+              <ThemeText variant="h2">{stats.inactive}<ThemeText variant="caption"> 名</ThemeText></ThemeText>
+            </ThemeCard>
+          </View>
+
           {/* 院内内訳グリッド */}
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleRow}>
               <Building2 color={COLORS.primary} size={18} />
-              <ThemeText variant="h2">院内内訳</ThemeText>
+              <ThemeText variant="h2">スタッフ配置内訳</ThemeText>
             </View>
           </View>
           <View style={styles.grid}>

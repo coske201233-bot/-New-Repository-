@@ -3,7 +3,7 @@ import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Al
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Check, Trash2, LogOut } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Check, LogOut } from 'lucide-react-native';
 import { getDayType, formatDate, getDateStr, normalizeName } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';

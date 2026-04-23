@@ -107,14 +107,6 @@ export const cloudStorage = {
       throw err;
     }
   },
-  async deleteStaff(id: number | string) {
-    const { error } = await supabase.from('staff').delete().eq('id', id);
-    if (error) {
-      console.error('Staff deletion error:', error);
-      throw error;
-    }
-    console.log('Staff deleted from cloud');
-  },
 
   // --- Requests ---
   async fetchRequests() {

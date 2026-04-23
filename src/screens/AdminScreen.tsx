@@ -5,7 +5,7 @@ import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING } from '../theme/theme';
 import { 
   ChevronRight, Database, FileOutput, 
-  QrCode, X, Check, Shield, User, Key, Save, LogOut, Edit3, Trash2, Printer, FileText, UserPlus, Clock
+  QrCode, X, Check, Shield, User, Key, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock
 } from 'lucide-react-native';
 import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
@@ -30,7 +30,6 @@ interface AdminScreenProps {
   canUndoAutoAssign: boolean;
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
-  onDeleteStaff: (id: string) => Promise<boolean>;
   updateStaffList: (update: any[] | ((prev: any[]) => any[])) => Promise<any>;
   patchStaff: (id: string, updates: any) => Promise<any>;
 }
@@ -39,16 +38,14 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
   currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
-  onDeleteStaff, updateStaffList, patchStaff
+  updateStaffList, patchStaff
 }) => {
-  const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
-  const [adminAuthInput, setAdminAuthInput] = useState('');
+
   
   const [showPersonalPassModal, setShowPersonalPassModal] = useState(false);
   const [personalPassInput, setPersonalPassInput] = useState('');
   
-  const [showAdminPassChangeModal, setShowAdminPassChangeModal] = useState(false);
-  const [newAdminPassInput, setNewAdminPassInput] = useState('');
+
 
   const [editStaff, setEditStaff] = useState<any>(null);
   const [showStaffEditModal, setShowStaffEditModal] = useState(false);
@@ -82,8 +79,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const pendingRequests = Array.isArray(requests) ? requests.filter(r => r && (r.status === 'pending' || !r.status)) : [];
 
   // --- Constant Options (Custom Hospital Structure) ---
-  const PROFESSION_OPTS = ['PT', 'OT', 'ST', '事務'];
-  const PLACEMENT_OPTS = ['２F', '包括', '4F', '外来', 'フォロー', '兼務', '管理', '事務', '排尿管理'];
+  const PROFESSION_OPTS = ['PT', 'OT', 'ST', '助手'];
+  const PLACEMENT_OPTS = ['２F', '包括', '4F', '外来', 'フォロー', '兼務', '管理', '事務', '排尿管理', '訪問リハ'];
   const POSITION_OPTS = ['科長', '科長補佐', '係長', '主査', '主任', '主事', '会計年度'];
   const STATUS_OPTS = ['常勤', '時短勤務', '長期休暇', 'その他'];
   const HOLIDAY_SETTING_OPTS = [{ label: '設定なし', value: false }, { label: '土日祝休み', value: true }];
@@ -231,31 +228,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     );
   };
 
-  const handleAdminAuth = () => {
-    if (adminAuthInput === adminPassword) { setIsAdminAuthenticated(true); setShowAdminAuthModal(false); setAdminAuthInput(''); }
-    else { Alert.alert('エラー', '管理用パスワードが違います。'); }
-  };
 
 
 
-  const handleDeleteStaff = (id: string, name: string) => {
-    // シニアアーキテクト指令: 物理削除と同期のための統合ワイヤリング
-    const confirmMsg = "この職員を削除してもよろしいですか？この操作は取り消せません。";
-    
-    if (Platform.OS === 'web') {
-      if (window.confirm(`${name}さん: ${confirmMsg}`)) {
-        onDeleteStaff(id).then(() => setShowStaffEditModal(false));
-      }
-    } else {
-      Alert.alert('職員削除', `${name}さんを削除しますか？\n\n${confirmMsg}`, [
-        { text: 'キャンセル', style: 'cancel' }, 
-        { text: '削除', style: 'destructive', onPress: async () => { 
-          await onDeleteStaff(id); 
-          setShowStaffEditModal(false); 
-        }}
-      ]);
-    }
-  };
+
 
   const handlePersonalPassUpdate = async () => {
     if (!personalPassInput) {
@@ -273,39 +249,18 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     Alert.alert('完了', '個人パスワードを更新しました。');
   };
 
-  const handleAdminPassUpdate = () => {
-    if (!newAdminPassInput) {
-      Alert.alert('入力エラー', '新しい管理者パスワードを入力してください。');
-      return;
-    }
-    updatePassword(newAdminPassInput);
-    setShowAdminPassChangeModal(false);
-    setNewAdminPassInput('');
-    Alert.alert('完了', '管理者パスワードを更新しました。');
-  };
+
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}><ThemeText variant="h1">設定</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>個人設定と管理機能</ThemeText></View>
       <ScrollView style={{ flex: 1 }}>
         <View style={{ padding: SPACING.md }}>
-          <ThemeText bold variant="h2" style={{ marginBottom: 12 }}>本人設定</ThemeText>
-          <ThemeCard style={styles.itemRow}>
-            <View style={styles.iconCircle}><User size={20} color="#38bdf8" /></View>
-            <View style={{ flex: 1, marginLeft: 12 }}><ThemeText bold>{profile?.name || 'ユーザー'}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{profile?.profession} | {profile?.placement} {profile?.position ? `[${profile.position}]` : ''}</ThemeText></View>
-          </ThemeCard>
-          {!isAdminAuthenticated && (
-            <TouchableOpacity style={styles.adminLoginEntry} onPress={() => setShowAdminAuthModal(true)}>
-              <Shield size={20} color="white" /><ThemeText bold color="white" style={{ marginLeft: 10 }}>管理者モードへログイン</ThemeText>
-            </TouchableOpacity>
-          )}
+
+
 
           {isAdminAuthenticated ? (
             <View style={{ marginTop: 24 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <ThemeText bold variant="h2">🛡️ 管理者モード</ThemeText>
-                <TouchableOpacity onPress={() => setIsAdminAuthenticated(false)}><ThemeText color="#ef4444" style={{ fontSize: 12 }}>解除</ThemeText></TouchableOpacity>
-              </View>
 
               <ThemeText bold style={{ color: '#ef4444', marginBottom: 12, marginTop: 12 }}>🔔 承認が必要な申請</ThemeText>
               
@@ -411,16 +366,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </TouchableOpacity>
               </ThemeCard>
 
-              <ThemeCard style={styles.itemRow}>
-                <View style={styles.iconCircle}><Shield size={20} color="#f43f5e" /></View>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <ThemeText bold>管理者パスワード変更</ThemeText>
-                  <ThemeText variant="caption" color={COLORS.textSecondary}>管理モードにログインするためのパスワードを変更します</ThemeText>
-                </View>
-                <TouchableOpacity style={[styles.inlineBtn, { backgroundColor: 'rgba(244, 63, 94, 0.1)' }]} onPress={() => setShowAdminPassChangeModal(true)}>
-                  <ThemeText bold color="#f43f5e">変更</ThemeText>
-                </TouchableOpacity>
-              </ThemeCard>
+
 
 
 
@@ -444,8 +390,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       {/* --- モーダル群 --- */}
 
       <Modal visible={showPersonalPassModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>個人パスワードの変更</ThemeText><TextInput style={styles.modalInput} placeholder="新しいパスワード" secureTextEntry value={personalPassInput} onChangeText={setPersonalPassInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowPersonalPassModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#a855f7'}]} onPress={handlePersonalPassUpdate}><ThemeText bold color="white">更新する</ThemeText></TouchableOpacity></View></View></View></Modal>
-      <Modal visible={showAdminPassChangeModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>管理者パスワードの変更</ThemeText><TextInput style={styles.modalInput} placeholder="新しい管理者パスワード" secureTextEntry value={newAdminPassInput} onChangeText={setNewAdminPassInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowAdminPassChangeModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#f43f5e'}]} onPress={handleAdminPassUpdate}><ThemeText bold color="white">更新する</ThemeText></TouchableOpacity></View></View></View></Modal>
-      <Modal visible={showAdminAuthModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>管理者認証</ThemeText><TextInput style={styles.modalInput} placeholder="管理パスワード" secureTextEntry value={adminAuthInput} onChangeText={setAdminAuthInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowAdminAuthModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#38bdf8'}]} onPress={handleAdminAuth}><ThemeText bold color="white">ログイン</ThemeText></TouchableOpacity></View></View></View></Modal>
+
+
     </SafeAreaView>
   );
 };
@@ -458,7 +404,7 @@ const styles = StyleSheet.create({
   miniApproveBtn: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   iconCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
   inlineBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
-  adminLoginEntry: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(56, 189, 248, 0.15)', height: 60, borderRadius: 16, marginTop: 20, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.3)' },
+
   staffAdminList: { marginBottom: 20 },
   staffAdminItem: { flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.015)', borderRadius: 12 },
   staffMiniEdit: { flexDirection: 'row', alignItems: 'center', padding: 8, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 8 },

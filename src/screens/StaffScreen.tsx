@@ -5,7 +5,7 @@ import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { 
   ChevronLeft, ChevronRight, Calendar, User, 
-  Check, X, Clock, MapPin, Briefcase, Trash2, Settings, Shield, Printer, Plus, Pencil, LogOut
+  Check, X, Clock, MapPin, Briefcase, Settings, Shield, Printer, Plus, Pencil, LogOut
 } from 'lucide-react-native';
 import { getMonthInfo, getDayType, isHoliday, getDateStr } from '../utils/dateUtils';
 import { normalizeName } from '../utils/staffUtils';
@@ -56,6 +56,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   }
 
   const isAdminAuthenticated = props.isAdminAuthenticated || isPrivileged;
+  const userRole = isAdminAuthenticated ? 'admin' : 'staff';
+
   
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
   const [isCalendarModalVisible, setIsCalendarModalVisible] = useState(false);
@@ -112,35 +114,24 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
   // Multi-choice options (Custom Hospital Structure)
   const APP_ROLES = ['管理者', '一般スタッフ'];
-  const JOB_TYPES = ['PT', 'OT', 'ST', '事務'];
+  const JOB_TYPES = ['PT', 'OT', 'ST', '助手'];
   const TITLES = ['科長', '科長補佐', '係長', '主査', '主任', '主事', '会計年度'];
-  const PLACEMENTS = ['２F', '包括', '4F', '外来', 'フォロー', '兼務', '管理', '事務', '排尿管理'];
+  const PLACEMENTS = ['２F', '包括', '4F', '外来', 'フォロー', '兼務', '管理', '事務', '排尿管理', '訪問リハ'];
   const STATUSES = ['常勤', '時短勤務', '長期休暇', 'その他'];
 
-  const handleOpenRegistration = (staffToEdit?: any) => {
-    if (staffToEdit) {
-      setEditingStaff(staffToEdit);
-      setRegName(staffToEdit.name || '');
-      setRegEmail(staffToEdit.email || '');
-      setRegAppRole(staffToEdit.permissions?.includes('管理者') ? '管理者' : '一般スタッフ');
-      setRegTitle(staffToEdit.role || '主事');
-      setRegJobType(staffToEdit.jobType || 'PT');
-      setRegPlacement(staffToEdit.placement || '4F');
-      setRegStatus(staffToEdit.status || '常勤');
-      setRegHolidaySetting(!!staffToEdit.noHoliday);
-    } else {
-      setEditingStaff(null);
-      setRegName('');
-      setRegEmail('');
-      // Pre-fill email for master admin if staff list is near empty or contains mock data
-      const isInitialAdminNeeded = (staffList?.length || 0) === 0 || ((staffList?.length || 0) < 5 && !staffList?.find(s => s?.email === 'admin@reha.local'));
-      setRegAppRole(isInitialAdminNeeded ? '管理者' : '一般スタッフ');
-      setRegTitle('主事');
-      setRegJobType('PT');
-      setRegPlacement('4F');
-      setRegStatus('常勤');
-      setRegHolidaySetting(false);
-    }
+  const handleOpenRegistration = (staffToEdit: any) => {
+    if (!staffToEdit) return;
+
+    setEditingStaff(staffToEdit);
+    setRegName(staffToEdit.name || '');
+    setRegEmail(staffToEdit.email || '');
+    setRegAppRole(staffToEdit.permissions?.includes('管理者') ? '管理者' : '一般スタッフ');
+    setRegTitle(staffToEdit.role || '主事');
+    setRegJobType(staffToEdit.jobType || 'PT');
+    setRegPlacement(staffToEdit.placement || '4F');
+    setRegStatus(staffToEdit.status || '常勤');
+    setRegHolidaySetting(!!staffToEdit.noHoliday);
+    
     setIsRegistrationModalVisible(true);
   };
 
@@ -198,38 +189,10 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         if (props.onForceCloudSync) {
           props.onForceCloudSync();
         }
-      } else {
-        // INSERT
-        const { data: insertedData, error } = await Promise.race([
-          supabase.from('staff').insert([payload]).select().single(),
-          timeoutPromise
-        ]) as any;
-
-        if (error) throw error;
-
-        // Update local state with the returned data from DB (including auto-generated ID)
-        if (insertedData) {
-          const newStaff = {
-            id: insertedData.id,
-            name: insertedData.name,
-            email: insertedData.email,
-            role: insertedData.position,
-            permissions: (insertedData.role || '').split(','),
-            jobType: insertedData.profession,
-            placement: insertedData.placement,
-            status: insertedData.status,
-            isApproved: insertedData.is_approved,
-            createdAt: insertedData.created_at
-          };
-          props.setStaffList(prev => [...prev, newStaff]);
-          setStatusMsg("🎉 登録成功！");
-          if (props.onForceCloudSync) {
-            props.onForceCloudSync(); // リストを最新の状態に更新
-          }
-        }
+        setTimeout(() => {
+          setStatusMsg('');
+        }, 3000);
       }
-      
-      setIsRegistrationModalVisible(false);
     } catch (error: any) {
       console.error("INSERT ERROR:", error);
       setStatusMsg("❌ エラー: " + (error.message || "不明なエラー"));
@@ -570,15 +533,17 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <View>
-            <ThemeText variant="h1">[BUILD: VERSION 49.0 - STABLE RELEASE]</ThemeText>
+            <ThemeText variant="h1">[BUILD: VERSION 49.5 - REMOVE DELETE UI]</ThemeText>
             <ThemeText variant="caption">職員の出勤状況・管理</ThemeText>
           </View>
-          <TouchableOpacity 
-            style={{ padding: 8 }} 
-            onPress={() => props.onLogout ? props.onLogout() : supabase.auth.signOut()}
-          >
-            <LogOut size={24} color={COLORS.textSecondary} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <TouchableOpacity 
+              style={{ padding: 8 }} 
+              onPress={() => props.onLogout ? props.onLogout() : supabase.auth.signOut()}
+            >
+              <LogOut size={24} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -599,14 +564,16 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}><MapPin size={12} color={COLORS.textSecondary} /><ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginLeft: 4 }}>{staff?.placement || staff?.department || ''}</ThemeText></View>
                     </View>
                   </TouchableOpacity>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <TouchableOpacity style={[styles.miniBtn, { backgroundColor: 'rgba(56, 189, 248, 0.05)' }]} onPress={() => handleOpenRegistration(staff)}>
-                      <Pencil size={18} color="#38bdf8" />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.miniBtn} onPress={() => { setSelectedStaff(staff); setSelectedDay(null); setIsCalendarModalVisible(true); }}>
-                      <Calendar size={18} color="#38bdf8" />
-                    </TouchableOpacity>
-                  </View>
+                  {userRole === 'admin' && (
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TouchableOpacity style={[styles.miniBtn, { backgroundColor: 'rgba(56, 189, 248, 0.05)' }]} onPress={() => handleOpenRegistration(staff)}>
+                        <Pencil size={18} color="#38bdf8" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  <TouchableOpacity style={styles.miniBtn} onPress={() => { setSelectedStaff(staff); setSelectedDay(null); setIsCalendarModalVisible(true); }}>
+                    <Calendar size={18} color="#38bdf8" />
+                  </TouchableOpacity>
                 </View>
                 <View style={styles.statsGrid}>
                   <View style={styles.statBox}><ThemeText variant="caption" color={COLORS.textSecondary}>平日</ThemeText><ThemeText bold>{stats?.workDays || 0}日</ThemeText></View>
@@ -643,11 +610,11 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                     <View style={{ marginTop: 12 }}>
                       <ThemeText variant="label" style={{ marginBottom: 12 }}>時間設定 (0.25h単位)</ThemeText>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                        <TouchableOpacity onPress={() => setSelectedHours(Math.max(0.25, selectedHours - 0.25))} style={styles.addStaffBtn}>
+                        <TouchableOpacity onPress={() => setSelectedHours(Math.max(0.25, selectedHours - 0.25))} style={styles.adjustBtn}>
                           <ThemeText bold>-</ThemeText>
                         </TouchableOpacity>
                         <ThemeText variant="h2" color={COLORS.primary}>{selectedHours.toFixed(2)}h</ThemeText>
-                        <TouchableOpacity onPress={() => setSelectedHours(Math.min(8.0, selectedHours + 0.25))} style={styles.addStaffBtn}>
+                        <TouchableOpacity onPress={() => setSelectedHours(Math.min(8.0, selectedHours + 0.25))} style={styles.adjustBtn}>
                           <ThemeText bold>+</ThemeText>
                         </TouchableOpacity>
                       </View>
@@ -690,7 +657,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             <View style={{ flex: 1 }}>
               <ThemeText variant="h2">職員情報の編集</ThemeText>
               <ThemeText variant="caption" color={COLORS.textSecondary}>
-                {editingStaff ? `${editingStaff.name} さんの情報を更新します` : '新しいメンバーをシステムに追加します'}
+                {`${editingStaff?.name || ''} さんの情報を更新します`}
               </ThemeText>
             </View>
             <Button title="閉じる" onPress={() => setIsRegistrationModalVisible(false)} color="#ef4444" />
@@ -824,7 +791,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                     <Check size={20} color="white" style={{ marginRight: 8 }} />
                   )}
                   <ThemeText bold color="white">
-                    {isSaving ? '保存中...' : (editingStaff ? '変更を保存する' : '登録する')}
+                    {isSaving ? '保存中...' : '変更を保存する'}
                   </ThemeText>
                 </TouchableOpacity>
               </View>
@@ -911,6 +878,6 @@ const styles = StyleSheet.create({
   hBtnActive: { backgroundColor: '#38bdf8' },
   confirmBtn: { backgroundColor: '#38bdf8', padding: 16, borderRadius: 16, alignItems: 'center' },
   placeholderSection: { height: 100, justifyContent: 'center', alignItems: 'center' },
-  addStaffBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  adjustBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   deleteBtn: { borderWidth: 1, borderColor: '#ef4444', padding: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
 });

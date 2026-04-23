@@ -232,21 +232,6 @@ export const useAppLogic = () => {
     await cancelRequest(requestId);
   }, [cancelRequest]);
 
-  const onDeleteStaff = useCallback(async (id: string) => {
-    try {
-      setIsSyncing(true);
-      await cloudStorage.deleteStaff(id);
-      const newStaffList = staff.staffList.filter(s => s.id !== id);
-      staff.setStaffList(newStaffList);
-      return true;
-    } catch (e: any) {
-      console.error('Delete staff error:', e);
-      Alert.alert('エラー', '職員の削除に失敗しました: ' + e.message);
-      return false;
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [staff.staffList, staff.setStaffList]);
 
   const onUpdateAvatar = useCallback(async (avatarUrl: string) => {
     if (auth.profile) {
@@ -422,7 +407,6 @@ export const useAppLogic = () => {
     cancelRequest,
     approveRequest,
     onDeleteRequest,
-    onDeleteStaff,
     patchStaff: staff.patchStaff,
     onAutoAssign,
     onUndoAutoAssign,

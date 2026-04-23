@@ -3,7 +3,7 @@ import { StyleSheet, View, TouchableOpacity, SafeAreaView, Alert, Platform, AppS
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Home, Calendar, User, ClipboardList, Users, Shield, RefreshCw, AlertTriangle } from 'lucide-react-native';
+import { Home, Calendar, ClipboardList, Users, Shield, RefreshCw, AlertTriangle } from 'lucide-react-native';
 import { ThemeCard } from './src/components/ThemeCard';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { CalendarScreen } from './src/screens/CalendarScreen';
@@ -105,7 +105,7 @@ export default function App() {
       staffList, setStaffList, updateStaffList, patchStaff,
       requests, setRequests,
       onDeleteRequest,
-      onDeleteStaff,
+      onDeleteRequest,
       onDeleteRequests: async (ids: string[]) => {
         for (const id of ids) {
           await onDeleteRequest(id);
@@ -149,7 +149,7 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 49.0 - STABLE RELEASE]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 49.9 - FIX DASHBOARD COUNTS]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}

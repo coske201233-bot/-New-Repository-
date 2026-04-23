@@ -29,7 +29,6 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     hours: 1.0,
   });
   const [formError, setFormError] = useState('');
-  const [syncMsg, setSyncMsg] = useState('');
 
   React.useEffect(() => {
     if (profile?.position?.trim() === '会計年度') {
@@ -123,19 +122,6 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
             <ThemeText variant="h1">申請一覧</ThemeText>
             <ThemeText variant="caption">休暇・シフトの申請</ThemeText>
           </View>
-          {onForceCloudSync && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              {syncMsg ? <ThemeText variant="caption" style={{ color: COLORS.primary }}>{syncMsg}</ThemeText> : null}
-              <TouchableOpacity onPress={async () => {
-                setSyncMsg('更新中...');
-                const success = await onForceCloudSync();
-                setSyncMsg(success ? '更新しました' : 'エラー');
-                setTimeout(() => setSyncMsg(''), 3000);
-              }} style={{ padding: 8, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 12 }}>
-                <RefreshCw size={20} color={COLORS.primary} />
-              </TouchableOpacity>
-            </View>
-          )}
         </View>
         <ThemeText variant="caption" style={{ marginTop: 6, fontSize: 11, color: COLORS.textSecondary, lineHeight: 16 }}>
           ※基本的に休暇は承認しますが、その時の状況により休暇時期の相談をさせてもらう場合があります
