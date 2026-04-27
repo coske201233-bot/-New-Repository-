@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { getDayType, getDateStr, normalizeName } from './dateUtils';
 
 // ─────────────────────────────────────────────
-// [BUILD: VERSION 55.6 - ROBUST NAME MATCHING ENGINE]
+// [BUILD: VERSION 56.1 - COLUMN-SAFE ROBUST ENGINE]
 // ─────────────────────────────────────────────
 
 interface ShiftTargetLimits {
@@ -99,19 +99,20 @@ export const generateMonthlyShifts = async (
     // ═══════════════════════════════════════════
     // Step 0: 自動生成されたシフトを強制削除（クリーンアップ）
     // ═══════════════════════════════════════════
+    // [V56.1] is_manual カラムがない場合を考慮し、ID接頭辞 auto- を主軸に削除
     const { error: deleteError } = await supabase
       .from('shifts')
       .delete()
-      .or(`is_manual.eq.false,id.like.auto-%`) // [V55.5] auto-接頭辞を持つレコードも強制削除対象とする
+      .like('id', 'auto-%') // auto- で始まるものは強制削除
       .gte('date', startDate)
       .lte('date', endDateStr);
 
     if (deleteError) {
       console.error("[ShiftEngine] 自動シフトの削除に失敗しました:", deleteError.message);
-      // カラムがない場合は一旦全削除にフォールバック
+      // カラムがない場合などのフォールバック
       await supabase.from('shifts').delete().gte('date', startDate).lte('date', endDateStr);
     } else {
-      console.log('[ShiftEngine] 既存の自動シフト（auto-接頭辞含む）の削除が完了しました。');
+      console.log('[ShiftEngine] 既存の自動シフト（auto-接頭辞）の削除が完了しました。');
     }
 
     // ═══════════════════════════════════════════
@@ -132,16 +133,22 @@ export const generateMonthlyShifts = async (
     console.log(`[ShiftEngine] 月跨ぎ連勤チェック用として前月末の出勤データ ${prevShifts?.length || 0} 件をロードしました。`);
 
     // ═══════════════════════════════════════════
-    // Step 0.5: 手動シフトを事前ロード（制約として使用）
+    // Step 0.5: シフトデータをロード（制約として使用）
     // ═══════════════════════════════════════════
-    const { data: manualShifts } = await supabase
+    // [V56.1] is_manual カラムに依存せず、全てロードしてから詳細(details)で判定
+    const { data: currentShifts } = await supabase
       .from('shifts')
       .select('*')
-      .eq('is_manual', true)
       .gte('date', startDate)
       .lte('date', endDateStr);
 
-    console.log(`[ShiftEngine] 手動シフト ${manualShifts?.length || 0} 件を保護・制約としてロードしました。`);
+    const manualShifts = (currentShifts || []).filter(s => {
+      const isAuto = String(s.id || '').startsWith('auto-');
+      const isManualFlag = s.is_manual === true || s.details?.isManual === true;
+      return !isAuto || isManualFlag; // auto- でない、または明示的に手動フラグがあるものを保護
+    });
+
+    console.log(`[ShiftEngine] 保護・制約対象のシフト ${manualShifts?.length || 0} 件をロードしました。`);
     // ═══════════════════════════════════════════
     // Step A: スタッフ取得 + 除外フィルタ
     // ═══════════════════════════════════════════
@@ -297,11 +304,12 @@ export const generateMonthlyShifts = async (
         date:       dateStr,
         type:       type, // '公休' など
         status:     'approved',
-        is_manual:  false,
+        // is_manual:  false, // [V56.1] カラム未定義エラー防止のため一旦除外
         details: {
-          source:  'auto_engine_v55_4',
+          isManual: false,
+          source:  'auto_engine_v56_1',
           phase,
-          note:    `V55.4 ${phase}`
+          note:    `V56.1 ${phase}`
         }
       });
       tracker.forcedOffDates.add(dateStr);
@@ -320,12 +328,13 @@ export const generateMonthlyShifts = async (
         date:       dateStr,
         type:       '出勤',
         status:     'approved',
-        is_manual:  false, // 【V53.6】AI生成分であることを明示
+        // is_manual:  false, // [V56.1] カラム未定義エラー防止のため一旦除外
         details: {
-          source:  'auto_engine_v55_4',
+          isManual: false,
+          source:  'auto_engine_v56_1',
           phase,
           dayType,
-          note:    `V55.4 ${phase}`
+          note:    `V56.1 ${phase}`
         }
       });
       tracker.totalWorkCount++;
@@ -612,7 +621,7 @@ export const generateMonthlyShifts = async (
           date:       String(s.date ?? ''),
           type:       String(s.type ?? '出勤'),
           status:     String(s.status ?? 'approved'),
-          is_manual:  Boolean(s.is_manual ?? false), // 【V53.6】AI生成分(false)を明示
+          // [V56.1] is_manual カラム未定義エラー防止のため、詳細は details.isManual に格納済み
           details:    s.details ? JSON.parse(JSON.stringify(s.details)) : null,
         }));
 
