@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { getDayType, getDateStr } from './dateUtils';
 
 // ─────────────────────────────────────────────
-// [BUILD: VERSION 53.6 - PROTECTED MANUAL ASSIGNMENT]
+// [BUILD: VERSION 55.5 - FORCED CLEAN SLATE & STREAK FIX]
 // ─────────────────────────────────────────────
 
 interface ShiftTargetLimits {
@@ -19,6 +19,7 @@ interface StaffTracker {
   holidayWorkCount: number;  // 休日出勤数（公平化用）
   workedDates: Set<string>;  // 出勤済み日付セット（連勤チェック用）
   isWeekendOff: boolean;    // 土日祝休み設定
+  forcedOffDates: Set<string>; // [V55.2] 休日振替や連勤調整で強制的に休みとする日
 }
 
 // ─────────────────────────────────────────────
@@ -96,22 +97,39 @@ export const generateMonthlyShifts = async (
 
   try {
     // ═══════════════════════════════════════════
-    // Step 0: 自動生成されたシフトのみ削除（手動分を保護）
+    // Step 0: 自動生成されたシフトを強制削除（クリーンアップ）
     // ═══════════════════════════════════════════
     const { error: deleteError } = await supabase
       .from('shifts')
       .delete()
-      .eq('is_manual', false) // 【V53.6】手動フラグがないものだけ削除
+      .or(`is_manual.eq.false,id.like.auto-%`) // [V55.5] auto-接頭辞を持つレコードも強制削除対象とする
       .gte('date', startDate)
       .lte('date', endDateStr);
 
     if (deleteError) {
-      console.error("[ShiftEngine] 自動シフトの削除に失敗しました（カラム未定義の可能性あり）:", deleteError.message);
-      // カラムがない場合は一旦全削除にフォールバック（初回移行用）
+      console.error("[ShiftEngine] 自動シフトの削除に失敗しました:", deleteError.message);
+      // カラムがない場合は一旦全削除にフォールバック
       await supabase.from('shifts').delete().gte('date', startDate).lte('date', endDateStr);
     } else {
-      console.log('[ShiftEngine] 自動シフトの削除（クリーンアップ）が完了しました。');
+      console.log('[ShiftEngine] 既存の自動シフト（auto-接頭辞含む）の削除が完了しました。');
     }
+
+    // ═══════════════════════════════════════════
+    // Step 0.2: 前月末のシフトをロード（月跨ぎ連勤防止）
+    // ═══════════════════════════════════════════
+    const prevMonthEnd = new Date(year, jsMonth, 0);
+    const prevMonthStart = new Date(year, jsMonth, -6); // 直前7日間
+    const prevStartDate = getDateStr(prevMonthStart);
+    const prevEndDate = getDateStr(prevMonthEnd);
+
+    const { data: prevShifts } = await supabase
+      .from('shifts')
+      .select('*')
+      .gte('date', prevStartDate)
+      .lte('date', prevEndDate)
+      .in('type', ['出勤', '日勤']);
+
+    console.log(`[ShiftEngine] 月跨ぎ連勤チェック用として前月末の出勤データ ${prevShifts?.length || 0} 件をロードしました。`);
 
     // ═══════════════════════════════════════════
     // Step 0.5: 手動シフトを事前ロード（制約として使用）
@@ -225,6 +243,7 @@ export const generateMonthlyShifts = async (
         holidayWorkCount: 0,
         workedDates: new Set<string>(),
         isWeekendOff,
+        forcedOffDates: new Set<string>(), // [V55.2]
       };
 
       // 手動シフトをトラッカーと集計に反映
@@ -246,6 +265,13 @@ export const generateMonthlyShifts = async (
       });
       
       trackers.set(staff.id, tracker);
+
+      // 前月末の出勤をトラッカーに反映
+      (prevShifts || []).forEach((ps: any) => {
+        if (ps.staff_id === staff.id) {
+          tracker.workedDates.add(ps.date.substring(0, 10));
+        }
+      });
     });
 
     // 補助関数：特定の日に対象スタッフの「手動予定」があるか
@@ -254,6 +280,29 @@ export const generateMonthlyShifts = async (
     };
 
     const generatedShifts: any[] = [];
+
+    const assignOffShift = (
+      tracker: StaffTracker,
+      dateStr: string,
+      type: string,
+      phase: string
+    ) => {
+      generatedShifts.push({
+        id:         `auto-off-${tracker.id}-${dateStr}-${Math.random().toString(36).substr(2, 6)}`,
+        staff_name: tracker.name,
+        staff_id:   tracker.id,
+        date:       dateStr,
+        type:       type, // '公休' など
+        status:     'approved',
+        is_manual:  false,
+        details: {
+          source:  'auto_engine_v55_4',
+          phase,
+          note:    `V55.4 ${phase}`
+        }
+      });
+      tracker.forcedOffDates.add(dateStr);
+    };
 
     const assignShift = (
       tracker: StaffTracker,
@@ -270,16 +319,52 @@ export const generateMonthlyShifts = async (
         status:     'approved',
         is_manual:  false, // 【V53.6】AI生成分であることを明示
         details: {
-          source:  'auto_engine_v53_6',
+          source:  'auto_engine_v55_4',
           phase,
           dayType,
-          note:    `V53.6 ${phase}`
+          note:    `V55.4 ${phase}`
         }
       });
       tracker.totalWorkCount++;
       tracker.workedDates.add(dateStr);
-      if (dayType !== 'weekday') tracker.holidayWorkCount++;
+      if (dayType !== 'weekday') {
+        tracker.holidayWorkCount++;
+        // [V55.4] 休日振替の自動付与
+        findAndSetCompOff(tracker, dateStr, weekdayDates);
+      }
     };
+
+    // [V55.2] 休日振替用の平日を探して予約する
+    function findAndSetCompOff(tracker: StaffTracker, holidayDateStr: string, weekdays: string[]) {
+      const hDate = new Date(holidayDateStr.replace(/-/g, '/'));
+      const getWeekStart = (d: Date) => {
+        const date = new Date(d.getTime());
+        const day = date.getDay();
+        const diff = date.getDate() - day + (day === 0 ? -6 : 1); // 月曜開始
+        return new Date(date.setDate(diff)).toDateString();
+      };
+      const hWeek = getWeekStart(hDate);
+
+      // 同じ週の平日を優先、なければ前後の週
+      const candidates = [...weekdays].sort((a, b) => {
+        const dA = new Date(a.replace(/-/g, '/'));
+        const dB = new Date(b.replace(/-/g, '/'));
+        const isSameWeekA = getWeekStart(dA) === hWeek;
+        const isSameWeekB = getWeekStart(dB) === hWeek;
+        if (isSameWeekA && !isSameWeekB) return -1;
+        if (!isSameWeekA && isSameWeekB) return 1;
+        return Math.abs(dA.getTime() - hDate.getTime()) - Math.abs(dB.getTime() - hDate.getTime());
+      });
+
+      for (const dStr of candidates) {
+        if (!tracker.workedDates.has(dStr) && !tracker.forcedOffDates.has(dStr) && !hasLeave(tracker, dStr)) {
+          // [V55.4] DBに保存されるよう、公休レコードとして追加する
+          assignOffShift(tracker, dStr, '公休', 'holiday_comp_off');
+          console.log(`[ShiftEngine] ${tracker.name}: 休日出勤(${holidayDateStr})に伴う振替休日を ${dStr} に追加しました。`);
+          break;
+        }
+      }
+    }
 
     // ═══════════════════════════════════════════
     // Pass 2: 休日・土日の割り当て
@@ -366,7 +451,8 @@ export const generateMonthlyShifts = async (
       const baseAvailable = staffArray.filter(t => {
         if (t.workedDates.has(dateStr))                 return false;
         if (hasLeave(t, dateStr))                        return false;
-        if (hasManualShift(t.id, dateStr))               return false; // 【V53.6】手動予定がある場合は飛ばす
+        if (t.forcedOffDates.has(dateStr))               return false; // [V55.2] 強制公休
+        if (hasManualShift(t.id, dateStr))               return false; 
         if (wouldViolateStreak(dateStr, t.workedDates)) return false;
         return true;
       });
@@ -413,12 +499,14 @@ export const generateMonthlyShifts = async (
         const remainingNeeded = limits.weekdayCap - toAssign.length;
         console.warn(`[ShiftEngine] ${dateStr}: 平日人数不足 (${toAssign.length}/${limits.weekdayCap}). 連勤制限を緩和して補填を試みます。`);
         
+        // [V55.1] STREAK ENFORCEMENT: 連勤制限は「いかなる理由でも」緩和しない (User Request)
         const desperateAvailable = staffArray.filter(t => {
           if (t.workedDates.has(dateStr)) return false;
           if (hasLeave(t, dateStr)) return false;
-          // すでに割り当て済みの人は除外
           if (toAssign.some(assigned => assigned.id === t.id)) return false;
-          return true; // 連勤チェックをスキップ
+          // 緩和を廃止し、常に連勤チェックを行う
+          if (wouldViolateStreak(dateStr, t.workedDates)) return false;
+          return true;
         }).sort((a, b) => a.totalWorkCount - b.totalWorkCount);
 
         const desperateFill = desperateAvailable.slice(0, remainingNeeded);
@@ -435,6 +523,73 @@ export const generateMonthlyShifts = async (
 
       console.log(`[ShiftEngine] ${dateStr}(weekday): ${toAssign.length}/${limits.weekdayCap}人配置完了`);
     }
+
+    // ═══════════════════════════════════════════
+    // Pass 4: ポストプロセス 連勤の強制分断 (V55.2)
+    // ═══════════════════════════════════════════
+    console.log('\n[ShiftEngine] ════ Pass 4: 連勤チェックと強制修正 ════');
+    trackers.forEach(tracker => {
+      // 最大5回ループして全ての6連勤を解消
+      for (let pass = 0; pass < 5; pass++) {
+        const sortedWorks = Array.from(tracker.workedDates).sort();
+        let streak: string[] = [];
+        let violatedStreak: string[] | null = null;
+
+        for (let i = 0; i < sortedWorks.length; i++) {
+          const dStr = sortedWorks[i];
+          if (streak.length === 0) {
+            streak = [dStr];
+          } else {
+            const prev = new Date(streak[streak.length - 1].replace(/-/g, '/'));
+            const curr = new Date(dStr.replace(/-/g, '/'));
+            const diff = Math.round((curr.getTime() - prev.getTime()) / (1000 * 3600 * 24));
+            if (diff === 1) {
+              streak.push(dStr);
+            } else {
+              if (streak.length >= 6) { violatedStreak = streak; break; }
+              streak = [dStr];
+            }
+          }
+        }
+        if (!violatedStreak && streak.length >= 6) violatedStreak = streak;
+
+        if (violatedStreak) {
+          // 連勤の真ん中あたりの「自動生成」の日を公休に変える
+          const midIdx = Math.floor(violatedStreak.length / 2);
+          let targetDate: string | null = null;
+          
+          // 真ん中から外側に向かって、自動生成の（is_manualでない）日を探す
+          const searchIndices = [midIdx, midIdx + 1, midIdx - 1, midIdx + 2, midIdx - 2];
+          for (const idx of searchIndices) {
+            const d = violatedStreak[idx];
+            if (!d) continue;
+            // 手動シフトでないか確認
+            if (!hasManualShift(tracker.id, d)) {
+              targetDate = d;
+              break;
+            }
+          }
+
+          if (targetDate) {
+            console.warn(`[ShiftEngine] STREAK_VIOLATION: ${tracker.name} が ${violatedStreak.length} 連勤しています。${targetDate} の出勤を取り消し公休にします。`);
+            // 出勤データから削除
+            tracker.workedDates.delete(targetDate);
+            tracker.totalWorkCount--;
+            // generatedShifts から出勤レコードを削除
+            const idx = generatedShifts.findIndex(s => s.staff_id === tracker.id && s.date === targetDate && s.type === '出勤');
+            if (idx !== -1) generatedShifts.splice(idx, 1);
+            
+            // [V55.4] 代わりに公休レコードを追加（DB保存用）
+            assignOffShift(tracker, targetDate, '公休', 'streak_break_fix');
+          } else {
+            console.error(`[ShiftEngine] CRITICAL: ${tracker.name} の連勤を解除できません（全て手動設定のため）。`);
+            break; 
+          }
+        } else {
+          break; // 違反なし
+        }
+      }
+    });
 
     console.log('\n[ShiftEngine] ════ 生成結果サマリー ════');
     console.log("[Engine Debug] Total shift records generated:", generatedShifts.length);
