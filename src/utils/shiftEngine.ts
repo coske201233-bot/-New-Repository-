@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { getDayType, getDateStr, normalizeName } from './dateUtils';
 
 // ─────────────────────────────────────────────
-// [BUILD: VERSION 57.1 - SYNTAX FIX & CLEAN ENGINE]
+// [BUILD: VERSION 57.2 - HOLIDAY CAP FIX]
 // ─────────────────────────────────────────────
 
 interface ShiftTargetLimits {
@@ -394,7 +394,7 @@ export const generateMonthlyShifts = async (
       // 既に手動で配置されている人数をカウント
       let assignedOnDay = manualWorkCountPerDay.get(dateStr) || 0;
 
-      for (let slot = 0; slot < cap; slot++) {
+      for (let slot = assignedOnDay; slot < cap; slot++) {
         const staffArray = Array.from(trackers.values());
         const available = staffArray.filter(t => {
           if (t.isWeekendOff) return false; // 【重要】土日祝休み設定のスタッフを除外
