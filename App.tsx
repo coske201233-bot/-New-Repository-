@@ -158,7 +158,7 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 57.0 - STRICT EVEN DISTRIBUTION]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 57.1 - SYNTAX FIX]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}

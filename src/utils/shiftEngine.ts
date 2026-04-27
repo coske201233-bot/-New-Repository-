@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { getDayType, getDateStr, normalizeName } from './dateUtils';
 
 // ─────────────────────────────────────────────
-// [BUILD: VERSION 57.0 - STRICT EVEN DISTRIBUTION & DOUBLE COMP-OFF FIX]
+// [BUILD: VERSION 57.1 - SYNTAX FIX & CLEAN ENGINE]
 // ─────────────────────────────────────────────
 
 interface ShiftTargetLimits {
@@ -497,13 +497,6 @@ export const generateMonthlyShifts = async (
       toAssign.forEach(t => assignShift(t, dateStr, 'weekday', 'weekday_equalization'));
 
       console.log(`[ShiftEngine] ${dateStr}(weekday): ${toAssign.length}人を配置。定員(${limits.weekdayCap})に満たない場合も、目標未達者がいないため補填は行いません。`);
-    }
-
-      if (toAssign.length < limits.weekdayCap) {
-        console.error(`[ShiftEngine] ${dateStr}: 【致命的】平日人数が最終的にも不足 (${toAssign.length}/${limits.weekdayCap})`);
-      }
-
-      console.log(`[ShiftEngine] ${dateStr}(weekday): ${toAssign.length}/${limits.weekdayCap}人配置完了`);
     }
 
     // ═══════════════════════════════════════════
