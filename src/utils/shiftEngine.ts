@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { getDayType, getDateStr, normalizeName } from './dateUtils';
 
 // ─────────────────────────────────────────────
-// [BUILD: VERSION 56.1 - COLUMN-SAFE ROBUST ENGINE]
+// [BUILD: VERSION 57.0 - STRICT EVEN DISTRIBUTION & DOUBLE COMP-OFF FIX]
 // ─────────────────────────────────────────────
 
 interface ShiftTargetLimits {
@@ -357,7 +357,7 @@ export const generateMonthlyShifts = async (
       };
       const hWeek = getWeekStart(hDate);
 
-      // 同じ週の平日を優先、なければ前後の週
+      // [V57.0] 候補日をスコアリング：既にその日に公休が入っている人数が少ない日を優先して分散させる
       const candidates = [...weekdays].sort((a, b) => {
         const dA = new Date(a.replace(/-/g, '/'));
         const dB = new Date(b.replace(/-/g, '/'));
@@ -365,6 +365,12 @@ export const generateMonthlyShifts = async (
         const isSameWeekB = getWeekStart(dB) === hWeek;
         if (isSameWeekA && !isSameWeekB) return -1;
         if (!isSameWeekA && isSameWeekB) return 1;
+
+        // 公休の分散：その日に既に自動付与された公休の数を確認
+        const aOffs = generatedShifts.filter(s => s.date === a && s.type === '公休').length;
+        const bOffs = generatedShifts.filter(s => s.date === b && s.type === '公休').length;
+        if (aOffs !== bOffs) return aOffs - bOffs;
+
         return Math.abs(dA.getTime() - hDate.getTime()) - Math.abs(dB.getTime() - hDate.getTime());
       });
 
@@ -372,10 +378,11 @@ export const generateMonthlyShifts = async (
         if (!tracker.workedDates.has(dStr) && !tracker.forcedOffDates.has(dStr) && !hasLeave(tracker, dStr)) {
           // [V55.4] DBに保存されるよう、公休レコードとして追加する
           assignOffShift(tracker, dStr, '公休', 'holiday_comp_off');
-          console.log(`[ShiftEngine] ${tracker.name}: 休日出勤(${holidayDateStr})に伴う振替休日を ${dStr} に追加しました。`);
-          break;
+          console.log(`[ShiftEngine] ${tracker.name}: 休日出勤(${holidayDateStr})に伴う振替休日を ${dStr} に確定しました。`);
+          return; // 確定したので終了
         }
       }
+      console.warn(`[ShiftEngine] ${tracker.name}: 休日出勤(${holidayDateStr})の振替休日を割り当てられませんでした（候補日不足）。`);
     }
 
     // ═══════════════════════════════════════════
@@ -476,7 +483,7 @@ export const generateMonthlyShifts = async (
         continue;
       }
 
-      // 層1: 目標未達スタッフを優先
+      // 層1: 目標未達スタッフのみを割り当てる（定員確保のための無理な投入や連勤制限緩和は行わない）
       const underTarget = baseAvailable.filter(t => t.totalWorkCount < targetWorkDays);
       underTarget.sort((a, b) => {
         const aNeed = targetWorkDays - a.totalWorkCount;
@@ -485,49 +492,12 @@ export const generateMonthlyShifts = async (
         return a.id < b.id ? -1 : 1;
       });
 
-      let toAssign = underTarget.slice(0, limits.weekdayCap);
-
-      // 層2: 目標達成済みスタッフをフォールバック投入 (人数の確保を最優先)
-      if (toAssign.length < limits.weekdayCap) {
-        const overTarget = baseAvailable
-          .filter(t => t.totalWorkCount >= targetWorkDays)
-          .sort((a, b) => {
-            // 出勤数が少ない順に選ぶ（可能な限り公平に）
-            if (a.totalWorkCount !== b.totalWorkCount) return a.totalWorkCount - b.totalWorkCount;
-            return a.id < b.id ? -1 : 1;
-          });
-        
-        const needed = limits.weekdayCap - toAssign.length;
-        if (overTarget.length > 0) {
-          console.log(`[Engine Debug] ${dateStr}: Relaxing targetWorkDays. Adding ${Math.min(needed, overTarget.length)} staff who reached target.`);
-          toAssign = [...toAssign, ...overTarget.slice(0, needed)];
-        }
-      }
-
+      // [V57.0] 定員に満たなくても、目標未達の候補者がいなければそこで停止する（無理な補填はしない）
+      const toAssign = underTarget.slice(0, limits.weekdayCap);
       toAssign.forEach(t => assignShift(t, dateStr, 'weekday', 'weekday_equalization'));
 
-      // [V53.3 FALLBACK] 人数が足りない場合、連勤制限を一時的に緩和してでも埋める（医療体制の維持を最優先）
-      if (toAssign.length < limits.weekdayCap) {
-        const remainingNeeded = limits.weekdayCap - toAssign.length;
-        console.warn(`[ShiftEngine] ${dateStr}: 平日人数不足 (${toAssign.length}/${limits.weekdayCap}). 連勤制限を緩和して補填を試みます。`);
-        
-        // [V55.1] STREAK ENFORCEMENT: 連勤制限は「いかなる理由でも」緩和しない (User Request)
-        const desperateAvailable = staffArray.filter(t => {
-          if (t.workedDates.has(dateStr)) return false;
-          if (hasLeave(t, dateStr)) return false;
-          if (toAssign.some(assigned => assigned.id === t.id)) return false;
-          // 緩和を廃止し、常に連勤チェックを行う
-          if (wouldViolateStreak(dateStr, t.workedDates)) return false;
-          return true;
-        }).sort((a, b) => a.totalWorkCount - b.totalWorkCount);
-
-        const desperateFill = desperateAvailable.slice(0, remainingNeeded);
-        if (desperateFill.length > 0) {
-          console.log(`[Engine Debug] ${dateStr}: Streak rule relaxed for ${desperateFill.length} staff to meet hospital cap.`);
-          desperateFill.forEach(t => assignShift(t, dateStr, 'weekday', 'weekday_desperate_fallback'));
-          toAssign = [...toAssign, ...desperateFill];
-        }
-      }
+      console.log(`[ShiftEngine] ${dateStr}(weekday): ${toAssign.length}人を配置。定員(${limits.weekdayCap})に満たない場合も、目標未達者がいないため補填は行いません。`);
+    }
 
       if (toAssign.length < limits.weekdayCap) {
         console.error(`[ShiftEngine] ${dateStr}: 【致命的】平日人数が最終的にも不足 (${toAssign.length}/${limits.weekdayCap})`);
