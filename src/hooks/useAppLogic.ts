@@ -4,6 +4,7 @@ import { useAuthSession } from './useAuthSession';
 import { useStaffData } from './useStaffData';
 import { useRequestData } from './useRequestData';
 import { useConfigData } from './useConfigData';
+import { useShiftData } from './useShiftData';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase, isSupabaseAuthReady as isSupabaseConfigured } from '../utils/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,6 +20,7 @@ export const useAppLogic = () => {
   const staff = useStaffData();
   const req = useRequestData();
   const config = useConfigData();
+  const shifts = useShiftData();
 
   // Removed shadowed state to use auth.isAdminAuthenticated instead  
   // 初期化フロー: 厳格な3秒タイムアウトガードを導入（アプリの「初期化中」画面で固まるのを防止）
@@ -189,7 +191,7 @@ export const useAppLogic = () => {
       
       const newStaffList = [...staff.staffList, newStaff];
       staff.setStaffList(newStaffList);
-      await cloudStorage.saveStaff(newStaffList);
+      await cloudStorage.upsertStaff(newStaffList);
       
       auth.setProfile(newStaff);
       setShowSetup(false);
@@ -202,35 +204,149 @@ export const useAppLogic = () => {
 
   // --- データ操作系ハンドラ ---
   const onSubmitRequest = useCallback(async (request: any) => {
-    const newRequest = { 
-      ...request, 
-      id: 'req-' + Date.now(), 
-      status: 'pending', 
-      createdAt: new Date().toISOString(),
-      staff_id: auth.user?.id,
-      staff_email: auth.user?.email
-    };
-    const newRequests = [...req.requests, newRequest];
-    req.setRequests(newRequests);
-    await cloudStorage.saveRequests(newRequests);
-    return true;
-  }, [auth.user, req.requests, req.setRequests]);
+    try {
+      const requestId = 'req-' + Date.now();
+      const newRequest = { 
+        id: requestId,
+        ...request, 
+        status: 'pending',
+        staff_id: auth.profile?.id || auth.user?.id,
+        staff_name: auth.profile?.name || '不明', // SQL用
+        staffName: auth.profile?.name || '不明',  // UI/JS用
+        created_at: new Date().toISOString()
+      };
 
-  const cancelRequest = useCallback(async (requestId: string) => {
-    const newRequests = req.requests.filter(r => r.id !== requestId);
-    req.setRequests(newRequests);
-    await cloudStorage.saveRequests(newRequests);
-  }, [req.requests, req.setRequests]);
+      // 【確定】supabase.auth.getUser() で認証UUIDを取得（profile.id は使わない）
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      if (authError || !authUser) {
+        Alert.alert('エラー', 'ログイン情報を取得できませんでした。');
+        return false;
+      }
+
+      // デバッグ: 送信前に内容をコンソールに出力
+      console.log('[DEBUG] useAppLogic Submitting:', {
+        user_id: authUser.id, // 本物のSupabase Auth UUID
+        staff_name: newRequest.staff_name,
+        status: newRequest.status
+      });
+
+      // 直接Supabaseに挿入（user_id = auth UUID を使用）
+      const { error } = await supabase.from('requests').insert([
+        {
+          id: newRequest.id,
+          user_id: authUser.id, // 【確定】supabase.auth.getUser()から取得したUUIDを必ず使用
+          staff_name: newRequest.staff_name,
+          date: newRequest.date,
+          type: newRequest.type,
+          status: newRequest.status,
+          reason: newRequest.reason,
+          details: newRequest.details,
+          created_at: newRequest.created_at
+        }
+      ]);
+      
+      if (error) throw error;
+
+      // ローカルステートも更新
+      req.setRequests(prev => [...prev, newRequest]);
+      
+      Alert.alert('送信成功！', 'DBにstatus: pendingで書き込みました。');
+      return true;
+    } catch (e: any) {
+      console.error('Submission error:', e);
+      Alert.alert('DB送信エラー', e.message);
+      return false;
+    }
+  }, [auth.user, auth.profile, req.setRequests]);
 
   const approveRequest = useCallback(async (requestId: string, status: string = 'approved') => {
-    const newRequests = req.requests.map(r => r.id === requestId ? { ...r, status } : r);
-    req.setRequests(newRequests);
-    await cloudStorage.saveRequests(newRequests);
+    try {
+      const updatedItem = req.requests.find(r => r.id === requestId);
+      if (!updatedItem) return;
+
+      const newWithStatus = { ...updatedItem, status, updatedAt: new Date().toISOString() };
+      const newRequests = req.requests.map(r => r.id === requestId ? newWithStatus : r);
+      
+      req.setRequests(newRequests);
+      await cloudStorage.upsertRequests([newWithStatus]);
+    } catch (e) {
+      console.error('Approve/Reject request error:', e);
+      throw e;
+    }
+  }, [req.requests, req.setRequests]);
+
+  const handleBulkApprove = useCallback(async (ids: string[]) => {
+    try {
+      if (!ids || ids.length === 0) return;
+
+      const { error } = await supabase
+        .from('requests')
+        .update({ status: 'approved' })
+        .in('id', ids);
+
+      if (error) throw error;
+
+      Alert.alert('完了', '承認が完了しました');
+
+      const now = new Date().toISOString();
+      const newRequests = req.requests.map(r => {
+        if (ids.includes(r.id)) {
+          return { ...r, status: 'approved', updatedAt: now };
+        }
+        return r;
+      });
+      req.setRequests(newRequests);
+
+      if (Platform.OS === 'web') {
+        window.location.reload();
+      }
+    } catch (e: any) {
+      console.error('Bulk approve error:', e);
+      Alert.alert('エラー', 'エラー: ' + e.message);
+    }
+  }, [req.requests, req.setRequests]);
+
+  const cancelRequest = useCallback(async (requestId: string) => {
+    try {
+      // 物理削除
+      await cloudStorage.deleteRequest(requestId);
+      const newRequests = req.requests.filter(r => r.id !== requestId);
+      req.setRequests(newRequests);
+    } catch (e) {
+      console.error('Cancel request error:', e);
+      throw e;
+    }
   }, [req.requests, req.setRequests]);
 
   const onDeleteRequest = useCallback(async (requestId: string) => {
     await cancelRequest(requestId);
   }, [cancelRequest]);
+
+  const handleReject = useCallback(async (requestId: string) => {
+    try {
+      const { error } = await supabase
+        .from('requests')
+        .update({ status: 'rejected' })
+        .eq('id', requestId);
+
+      if (error) throw error;
+
+      Alert.alert('完了', '却下・取り消しが完了しました');
+
+      const now = new Date().toISOString();
+      const newRequests = req.requests.map(r => 
+        r.id === requestId ? { ...r, status: 'rejected', updatedAt: now } : r
+      );
+      req.setRequests(newRequests);
+
+      if (Platform.OS === 'web') {
+        window.location.reload();
+      }
+    } catch (e: any) {
+      console.error('Reject error:', e);
+      Alert.alert('エラー', 'エラー: ' + e.message);
+    }
+  }, [req.requests, req.setRequests]);
 
 
   const onUpdateAvatar = useCallback(async (avatarUrl: string) => {
@@ -239,7 +355,7 @@ export const useAppLogic = () => {
       auth.setProfile(newProfile);
       const newStaffList = staff.staffList.map(s => s.id === auth.profile?.id ? newProfile : s);
       staff.setStaffList(newStaffList);
-      await cloudStorage.saveStaff(newStaffList);
+      await cloudStorage.upsertStaff(newStaffList);
     }
   }, [auth.profile, auth.setProfile, staff.staffList, staff.setStaffList]);
 
@@ -339,9 +455,10 @@ export const useAppLogic = () => {
         
         const s = await cloudStorage.fetchStaff();
         const r = await cloudStorage.fetchRequests();
+        await shifts.fetchShifts();
         
-        staff.setStaffList(s || []);
-        req.setRequests(r || []);
+        if (s && s.length > 0) staff.setStaffList(s);
+        if (r && r.length > 0) req.setRequests(r);
         
         if (Platform.OS === 'web' && s?.length > 0) {
           localStorage.setItem('proto_staff_data', JSON.stringify(s));
@@ -350,19 +467,17 @@ export const useAppLogic = () => {
         return true;
       } catch (e) {
         console.error('Cloud sync failure:', e);
-        staff.setStaffList([]);
-        req.setRequests([]);
         return false;
       } finally {
         setIsSyncing(false);
       }
-  }, [staff.setStaffList, req.setRequests]);
+  }, [staff.setStaffList, req.setRequests, shifts.fetchShifts]);
 
   const handleForceSave = useCallback(async () => {
       setIsSyncing(true);
       try {
-        await cloudStorage.saveStaff(staff.staffList);
-        await cloudStorage.saveRequests(req.requests);
+        await cloudStorage.upsertStaff(staff.staffList);
+        await cloudStorage.upsertRequests(req.requests);
         return true;
       } catch (e) {
         console.error('Manual save failure:', e);
@@ -380,17 +495,18 @@ export const useAppLogic = () => {
   // シニアアーキテクト指令: 認証成功後のデータ取得 (VERSION 38.0)
   // FIXED: Added handleForceCloudSync to deps and prevented unnecessary runs
   useEffect(() => {
-    if (auth.profile && isInitialized) {
-      console.log('Auth confirmed. Refreshing protected data...');
+    if (auth.profile && isInitialized && !isSyncing) {
+      console.log('--- [AUTH_SYNC] Stable trigger ---');
       handleForceCloudSync();
     }
-  }, [auth.profile?.id, isInitialized, handleForceCloudSync]);
+  }, [auth.profile?.id, isInitialized]);
 
   return useMemo(() => ({
     ...auth,
     ...staff,
     ...req,
     ...config,
+    ...shifts,
     currentTab,
     setCurrentTab,
     showSetup,
@@ -417,7 +533,7 @@ export const useAppLogic = () => {
     handleForceCloudSync,
     handleForceSave
   }), [
-    auth, staff, req, config, currentTab, showSetup, activeDate, isSyncing, isInitialized,
+    auth, staff, req, config, shifts, currentTab, showSetup, activeDate, isSyncing, isInitialized,
     handleLogin, handleAdminMasterLogin, handleRegister, onSubmitRequest, cancelRequest, approveRequest,
     onDeleteRequest, onAutoAssign, onUndoAutoAssign, onUpdateAvatar, onResetStaffPassword, handleLogout,
     handleForceCloudSync, handleForceSave, isSupabaseConfigured, staff.patchStaff

@@ -1,32 +1,35 @@
 import React, { useState, useMemo } from 'react';
-import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { ClipboardList, CheckCircle2, AlertCircle, Clock, Calendar, User, Search, Filter, ChevronLeft } from 'lucide-react-native';
 import { formatDate } from '../utils/dateUtils';
+import { supabase } from '../utils/supabase';
 
 interface AdminRequestScreenProps {
   requests: any[];
   approveRequest: (id: string, status: string) => void;
+  handleBulkApprove: (ids: string[]) => Promise<void>;
   deleteRequest: (id: string) => void;
+  handleReject: (id: string) => Promise<void>;
   onBack: () => void;
 }
 
 export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({ 
-  requests, approveRequest, deleteRequest, onBack 
+  requests, approveRequest, handleBulkApprove, deleteRequest, handleReject, onBack 
 }) => {
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved'>('pending');
   
   const filteredRequests = useMemo(() => {
-    let list = requests.filter(r => r && r.type !== '出勤' && r.type !== '公休' && r.status !== 'deleted');
+    let list = requests.filter(r => r && r.type !== '出勤' && r.type !== '公休' && r.status !== 'deleted' && r.status !== 'rejected');
     if (filter !== 'all') {
       list = list.filter(r => r.status === filter);
     }
     // Sort by date (newest first), then by updated time
     return [...list].sort((a, b) => {
       const dateA = a.date ? new Date(String(a.date).replace(/-/g, '/')).getTime() : 0;
-      const dateB = b.date ? new Date(String(b.date).replace(/-/g, '/')).getTime() : 0;
+      const dateB = b.date ? new Date(String(b.date).replace(/-/g, '　/')).getTime() : 0;
       
       if (dateB !== dateA) return dateB - dateA;
       
@@ -36,24 +39,79 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
     });
   }, [requests, filter]);
 
-  const handleApproveAll = () => {
+  const handleApproveAll = async () => {
     const pendings = filteredRequests.filter(r => r.status === 'pending');
     if (pendings.length === 0) return;
-    
-    Alert.alert(
-      '一括承認', 
-      `表示中の承認待ち申請 ${pendings.length} 件をすべて承認しますか？`,
-      [
-        { text: 'キャンセル', style: 'cancel' },
-        { 
-          text: '承認する', 
-          onPress: () => {
-            pendings.forEach(r => approveRequest(r.id, 'approved'));
-            Alert.alert('完了', '一括承認しました');
-          }
-        }
-      ]
-    );
+
+    if (Platform.OS === 'web') {
+      const confirmOk = window.confirm(`表示中の承認待ち申請 ${pendings.length} 件をすべて承認しますか？`);
+      if (!confirmOk) return;
+      window.alert("一括承認の処理を開始します...");
+    } else {
+      Alert.alert('一括承認処理を開始します...');
+    }
+
+    try {
+      const ids = pendings.map(r => r.id);
+      const { error } = await supabase.from('requests').update({ status: 'approved' }).in('id', ids);
+      
+      if (error) throw error;
+
+      if (Platform.OS === 'web') {
+        window.alert("一括承認が完了しました！");
+        window.location.reload();
+      } else {
+        Alert.alert('完了', '一括承認しました');
+      }
+    } catch (err: any) {
+      if (Platform.OS === 'web') window.alert("エラーが発生しました: " + err.message);
+      else Alert.alert("エラー", err.message);
+    }
+  };
+
+  const handleHardwiredApprove = async (id: string) => {
+    if (Platform.OS === 'web') window.alert("承認処理を開始します...");
+    else Alert.alert('承認処理を開始します...');
+
+    try {
+      const { error } = await supabase.from('requests').update({ status: 'approved' }).eq('id', id);
+      if (error) throw error;
+
+      if (Platform.OS === 'web') {
+        window.alert("承認が完了しました！");
+        window.location.reload();
+      } else {
+        Alert.alert('完了', '承認しました');
+      }
+    } catch (err: any) {
+      if (Platform.OS === 'web') window.alert("エラーが発生しました: " + err.message);
+      else Alert.alert("エラー", err.message);
+    }
+  };
+
+  const handleHardwiredReject = async (id: string) => {
+    if (Platform.OS === 'web') {
+      const confirmOk = window.confirm("この申請を却下しますか？");
+      if (!confirmOk) return;
+      window.alert("却下処理を開始します...");
+    } else {
+      Alert.alert('却下処理を開始します...');
+    }
+
+    try {
+      const { error } = await supabase.from('requests').update({ status: 'rejected' }).eq('id', id);
+      if (error) throw error;
+
+      if (Platform.OS === 'web') {
+        window.alert("却下・取り消しが完了しました！");
+        window.location.reload();
+      } else {
+        Alert.alert('完了', '却下・取り消ししました');
+      }
+    } catch (err: any) {
+      if (Platform.OS === 'web') window.alert("エラーが発生しました: " + err.message);
+      else Alert.alert("エラー", err.message);
+    }
   };
 
   return (
@@ -161,19 +219,14 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
                   <>
                     <TouchableOpacity 
                       style={[styles.actionBtn, styles.approveBtn]} 
-                      onPress={() => approveRequest(item.id, 'approved')}
+                      onPress={() => handleHardwiredApprove(item.id)}
                     >
                       <CheckCircle2 size={16} color="white" />
                       <ThemeText variant="caption" color="white" bold style={{ marginLeft: 4 }}>承認</ThemeText>
                     </TouchableOpacity>
                     <TouchableOpacity 
                       style={[styles.actionBtn, styles.rejectBtn]} 
-                      onPress={() => {
-                        Alert.alert('却下', 'この申請を取り消しますか？', [
-                          { text: 'キャンセル', style: 'cancel' },
-                          { text: '却下・取り消し', style: 'destructive', onPress: () => deleteRequest(item.id) }
-                        ]);
-                      }}
+                      onPress={() => handleHardwiredReject(item.id)}
                     >
                       <ThemeText variant="caption" color={COLORS.danger}>却下</ThemeText>
                     </TouchableOpacity>

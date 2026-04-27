@@ -6,6 +6,7 @@ import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { ClipboardList, Plus, Calendar as CalendarIcon, Clock, CheckCircle2, AlertCircle, X, ChevronRight, RefreshCw } from 'lucide-react-native';
 import { formatDate, getDateStr } from '../utils/dateUtils';
 import { normalizeName } from '../utils/staffUtils';
+import { supabase } from '../utils/supabase';
 
 interface RequestScreenProps {
   requests: any[];
@@ -18,7 +19,9 @@ interface RequestScreenProps {
 }
 
 export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setRequests, onDeleteRequest, approveRequest, profile, isAdminAuthenticated, onForceCloudSync }) => {
+  const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者') || profile?.role?.includes('管理者')) || isAdminAuthenticated;
   const [showForm, setShowForm] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDateModalVisible, setIsDateModalVisible] = useState(false);
   const [newRequest, setNewRequest] = useState({
     type: '年休',
@@ -44,6 +47,45 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     onDeleteRequest?.(id);
   };
 
+  // スタッフ本人が自分の申請を削除する関数
+  const handleDeleteOwnRequest = async (id: string) => {
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm('この申請記録を削除しますか？')
+      : await new Promise<boolean>(resolve => {
+          Alert.alert(
+            '削除の確認',
+            'この申請記録を削除しますか？',
+            [
+              { text: 'キャンセル', style: 'cancel', onPress: () => resolve(false) },
+              { text: '削除', style: 'destructive', onPress: () => resolve(true) }
+            ]
+          );
+        });
+
+    if (!confirmed) return;
+
+    try {
+      const { error } = await supabase.from('requests').delete().eq('id', id);
+      if (error) throw error;
+
+      // ローカルステートも即座に更新
+      setRequests(prev => prev.filter(r => r.id !== id));
+
+      if (Platform.OS === 'web') {
+        window.alert('削除しました。');
+      } else {
+        Alert.alert('完了', '申請記録を削除しました。');
+      }
+    } catch (err: any) {
+      console.error('Delete Error:', err);
+      if (Platform.OS === 'web') {
+        window.alert('削除エラー: ' + err.message);
+      } else {
+        Alert.alert('削除エラー', err.message);
+      }
+    }
+  };
+
   const timeSlots: string[] = [];
   let currentHour = 8;
   let currentMin = 30;
@@ -64,6 +106,13 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
       return;
     }
     
+    if (!profile || !profile.id) {
+      setFormError('ユーザー情報が取得できません。再ログインしてください。');
+      if (Platform.OS === 'web') window.alert('エラー: ユーザーIDが取得できません');
+      else Alert.alert('エラー', 'ユーザーIDが取得できません');
+      return;
+    }
+    
     const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated;
     const nameStr = profile?.name || '不明な職員';
     const isFiscalYear = (profile.position?.trim() === '会計年度');
@@ -81,19 +130,21 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
       duration = newRequest.hours;
     }
 
+    setIsSubmitting(true);
+    
     try {
       const now = new Date().toISOString();
-      const request = {
+      const requestPayload = {
         id: `m-${Date.now()}`,
-        staffId: profile.id,
+        staff_id: profile.id,
+        staff_name: nameStr,
+        staffName: nameStr, // UI互換用
         type: newRequest.type,
         date: newRequest.date,
         reason: newRequest.reason,
-        status: isManager ? 'approved' : 'pending',
-        staffName: nameStr,
-        createdAt: now,
-        updatedAt: now,
-        hours: duration,
+        status: isManager ? 'approved' : 'pending', // ユーザー指示: status: 'pending' をハードコーディング（管理者は即承認）
+        created_at: now,
+        updated_at: now,
         details: (newRequest.type === '時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '特休') ? {
           duration: duration
         } : (newRequest.type === '午前休' || newRequest.type === '午後休' || newRequest.type === '半日振替' || newRequest.type === '1日振替') ? {
@@ -101,16 +152,58 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
         } : null
       };
 
-      setRequests(prev => [request, ...prev]);
+      // 【確定】supabase.auth.getUser() で認証UUIDを取得（profile.id は使わない）
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      if (authError || !authUser) {
+        if (Platform.OS === 'web') window.alert('エラー: ログイン情報を取得できませんでした。');
+        else Alert.alert('エラー', 'ログイン情報を取得できませんでした。');
+        return;
+      }
+
+      // デバッグ: 送信前に内容をコンソールに出力
+      console.log('[DEBUG] Submitting Request Payload:', {
+        user_id: authUser.id, // 本物のSupabase Auth UUID
+        staff_name: requestPayload.staff_name,
+        date: requestPayload.date,
+        status: requestPayload.status
+      });
+
+      const { error } = await supabase.from('requests').insert([
+        {
+          id: requestPayload.id,
+          user_id: authUser.id, // 【確定】supabase.auth.getUser()から取得したUUIDを必ず使用
+          staff_name: requestPayload.staff_name,
+          date: requestPayload.date,
+          type: requestPayload.type,
+          status: requestPayload.status,
+          reason: requestPayload.reason,
+          details: requestPayload.details,
+          created_at: requestPayload.created_at
+        }
+      ]);
+
+      if (error) throw error;
+
+      // ローカルUIの即時更新用
+      setRequests(prev => [requestPayload, ...prev]);
       setShowForm(false);
       setNewRequest({ type: '年休', date: '', reason: '', startTime: '08:30', endTime: '17:15', hours: 1.0 });
       
-      if (!isManager) {
-        Alert.alert('送信完了', '申請を送信しました。管理者の承認をお待ちください。');
+      if (Platform.OS === 'web') {
+        window.alert('データベースへの書き込みが完了しました');
+      } else {
+        Alert.alert('送信成功！', 'データベースへの書き込みが完了しました');
       }
     } catch (err: any) {
       console.error('Submit Error:', err);
       setFormError('申請の送信中にエラーが発生しました。');
+      if (Platform.OS === 'web') {
+        window.alert('DB送信エラー: ' + err.message);
+      } else {
+        Alert.alert('DB送信エラー', err.message);
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -141,7 +234,6 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 const isWorkType = r.type === '出勤' || r.type === '公休';
                 if (isWorkType || r.status === 'deleted') return false;
                 
-                const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated;
                 if (!isManager && normalizeName(r.staffName) !== normalizeName(profile?.name)) return false;
                 
                 return true;
@@ -197,28 +289,42 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 </View>
 
                 <View style={styles.cardActions}>
-                  {item.status === 'pending' ? (
+                  {isManager && (
                     <>
-                      <TouchableOpacity 
-                        style={[styles.actionBtn, styles.approveBtn]} 
-                        onPress={() => updateRequestStatus(item.id, 'approved')}
-                      >
-                        <CheckCircle2 size={16} color="white" />
-                        <ThemeText variant="caption" color="white" bold style={{ marginLeft: 4 }}>承認する</ThemeText>
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        style={[styles.actionBtn, styles.rejectBtn]} 
-                        onPress={() => deleteRequest(item.id)}
-                      >
-                        <ThemeText variant="caption" color={COLORS.textSecondary}>削除</ThemeText>
-                      </TouchableOpacity>
+                      {item.status === 'pending' ? (
+                        <>
+                          <TouchableOpacity 
+                            style={[styles.actionBtn, styles.approveBtn]} 
+                            onPress={() => updateRequestStatus(item.id, 'approved')}
+                          >
+                            <CheckCircle2 size={16} color="white" />
+                            <ThemeText variant="caption" color="white" bold style={{ marginLeft: 4 }}>承認する</ThemeText>
+                          </TouchableOpacity>
+                          <TouchableOpacity 
+                            style={[styles.actionBtn, styles.rejectBtn]} 
+                            onPress={() => deleteRequest(item.id)}
+                          >
+                            <ThemeText variant="caption" color={COLORS.textSecondary}>削除</ThemeText>
+                          </TouchableOpacity>
+                        </>
+                      ) : (
+                        <TouchableOpacity 
+                          style={[styles.actionBtn, styles.undoBtn]} 
+                          onPress={() => updateRequestStatus(item.id, 'pending')}
+                        >
+                          <ThemeText variant="caption" color={COLORS.textSecondary}>承認を取り消す</ThemeText>
+                        </TouchableOpacity>
+                      )}
                     </>
-                  ) : (
+                  )}
+                  {/* スタッフ本人用の削除ボタン：承認済または却下の申請を履歴から消せる */}
+                  {!isManager && (item.status === 'approved' || item.status === 'rejected' || item.status === 'pending') && (
                     <TouchableOpacity 
-                      style={[styles.actionBtn, styles.undoBtn]} 
-                      onPress={() => updateRequestStatus(item.id, 'pending')}
+                      style={[styles.actionBtn, styles.rejectBtn]}
+                      onPress={() => handleDeleteOwnRequest(item.id)}
                     >
-                      <ThemeText variant="caption" color={COLORS.textSecondary}>承認を取り消す</ThemeText>
+                      <X size={14} color={COLORS.danger} />
+                      <ThemeText variant="caption" color={COLORS.danger} style={{ marginLeft: 4 }}>削除</ThemeText>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -295,11 +401,11 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
               </View>
   
               <View style={styles.formButtons}>
-                <TouchableOpacity style={[styles.button, styles.cancelButton]} onPress={() => setShowForm(false)}>
+                <TouchableOpacity style={[styles.button, styles.cancelButton]} onPress={() => setShowForm(false)} disabled={isSubmitting}>
                   <ThemeText bold>キャンセル</ThemeText>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.button, styles.submitButton]} onPress={handleSubmit}>
-                  <ThemeText bold color={COLORS.background}>申請する</ThemeText>
+                <TouchableOpacity style={[styles.button, styles.submitButton, isSubmitting && { opacity: 0.5 }]} onPress={handleSubmit} disabled={isSubmitting}>
+                  <ThemeText bold color={COLORS.background}>{isSubmitting ? '送信中...' : '申請する'}</ThemeText>
                 </TouchableOpacity>
               </View>
             </ThemeCard>

@@ -87,6 +87,11 @@ export default function App() {
     updateStaffList,
     patchStaff,
     handleLogin,
+    handleBulkApprove,
+    handleReject,
+    shifts,
+    fetchShifts,
+    isLoadingShifts,
   } = logic;
 
   useEffect(() => {
@@ -130,6 +135,10 @@ export default function App() {
       onUndoAutoAssign,
       canUndoAutoAssign,
       isInitialized,
+      // [V54.0] グローバルなシフトステートを全ての画面で共有
+      shifts,
+      fetchShifts,
+      isLoadingShifts,
     };
 
     switch (currentTab) {
@@ -138,7 +147,7 @@ export default function App() {
       case 'requests': return <RequestScreen {...commonProps} />;
       case 'staff': return <StaffScreen {...commonProps} isPrivileged={isAdminAuthenticated} />;
       case 'admin': return <AdminScreen {...commonProps} />;
-      case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={approveRequest} deleteRequest={onDeleteRequest} />;
+      case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={approveRequest} handleBulkApprove={handleBulkApprove} deleteRequest={onDeleteRequest} handleReject={handleReject} />;
       case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab('admin')} />;
       default: return <HomeScreen onNavigateToStaff={() => setCurrentTab('staff')} {...commonProps} />;
     }
@@ -149,7 +158,7 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 49.9 - FIX DASHBOARD COUNTS]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 55.0 - UNIFIED SYNC LOGIC]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}

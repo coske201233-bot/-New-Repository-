@@ -3,11 +3,11 @@ import { STORAGE_KEYS, saveData, loadData } from '../utils/storage';
 import { cloudStorage } from '../utils/cloudStorage';
 
 export const useConfigData = () => {
-  const [weekdayLimit, setWeekdayLimit] = useState(12);
-  const [holidayLimit, setHolidayLimit] = useState(2);
-  const [saturdayLimit, setSaturdayLimit] = useState(2);
-  const [sundayLimit, setSundayLimit] = useState(2);
-  const [publicHolidayLimit, setPublicHolidayLimit] = useState(2);
+  const [weekdayLimit, setWeekdayLimit] = useState(12); // 平日デフォルト: 12人
+  const [holidayLimit, setHolidayLimit] = useState(1);  // 祝日デフォルト: 1人
+  const [saturdayLimit, setSaturdayLimit] = useState(1); // 土曜デフォルト: 1人
+  const [sundayLimit, setSundayLimit] = useState(0);    // 日曜デフォルト: 0人
+  const [publicHolidayLimit, setPublicHolidayLimit] = useState(1); // 公休日デフォルト: 1人
   const [monthlyLimits, setMonthlyLimits] = useState<Record<string, any>>({});
   const [adminPassword, setAdminPassword] = useState('0000');
   const [staffViewMode, setStaffViewMode] = useState(false);

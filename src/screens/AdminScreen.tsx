@@ -9,6 +9,7 @@ import {
 } from 'lucide-react-native';
 import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
+import { supabase } from '../utils/supabase';
 import * as Print from 'expo-print';
 
 interface AdminScreenProps {
@@ -102,8 +103,15 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   };
 
   const handleRejectRequest = async (id: string) => {
-    setRequests(prev => prev.filter(r => r.id !== id));
-    Alert.alert('却下', '申請を却下し、削除しました。');
+    try {
+      // 物理削除を実行
+      await cloudStorage.deleteRequest(id);
+      setRequests(prev => prev.filter(r => r.id !== id));
+      Alert.alert('完了', '申請を却下し、削除しました。');
+    } catch (e) {
+      console.error('Reject error:', e);
+      Alert.alert('エラー', '却下処理中にエラーが発生しました。');
+    }
   };
 
   const handlePrintAttendanceReport = () => {
@@ -312,11 +320,45 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                     if (isAssigning) return;
                     setIsAssigning(true);
                     try {
-                      await onAutoAssign(currentYear, currentMonth + 1, limits);
+                      const { generateMonthlyShifts } = require('../utils/shiftEngine');
+                      await generateMonthlyShifts(currentYear, currentMonth + 1, {
+                        weekdayCap: limits.weekday,
+                        satCap: limits.sat,
+                        sunCap: limits.sun,
+                        holidayCap: limits.pub
+                      });
                       Alert.alert('完了', 'シフトの自動割り当てが完了しました。');
-                    } catch (e) {
+
+                      // window.location.reload() を削除 → React stateのシームレス更新に変更
+                      try {
+                        const monthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+                        const { data: shiftsRaw, error: shiftsErr } = await supabase
+                          .from('shifts')
+                          .select('*')
+                          .like('date', `${monthPrefix}%`);
+                        if (!shiftsErr && Array.isArray(shiftsRaw)) {
+                          setRequests((prev: any[]) => {
+                            // 对象月の旧シフトデータを削除し、新しいデータで置き換え
+                            const withoutOldShifts = prev.filter(
+                              r => !(String(r.id || '').startsWith('auto-') && r.date && r.date.startsWith(monthPrefix))
+                            );
+                            const newShifts = shiftsRaw.map((s: any) => ({
+                              ...s,
+                              staffName: s.staff_name || s.staffName || '',
+                            }));
+                            return [...withoutOldShifts, ...newShifts];
+                          });
+                          console.log(`[AdminScreen] shifts再取得完了: ${shiftsRaw.length}件`);
+                        }
+                      } catch (fetchErr) {
+                        console.warn('[AdminScreen] shifts再取得失敗 (UIの表示には影響なし):', fetchErr);
+                      }
+                    } catch (e: any) {
                       console.error('Auto assign error:', e);
-                      Alert.alert('エラー', '自動割り当て中にエラーが発生しました。');
+                      Alert.alert(
+                        'シフト自動割り当てエラー',
+                        'シフトの自動割り当てに失敗しました。\n\n' + (e.message || '不明なエラー')
+                      );
                     } finally {
                       setIsAssigning(false);
                     }

@@ -14,7 +14,7 @@ export const useAuthSession = () => {
 
   // CRITICAL ARCHITECT COMMAND: Global Admin Override
   const isMasterAdminAuth = user?.email ? user.email.includes('admin@reha.local') : false;
-  const isGlobalAdmin = isMasterAdminAuth || (profile?.role === 'admin' || profile?.role?.includes('開発者') || profile?.is_admin === true);
+  const isGlobalAdmin = isMasterAdminAuth || (profile?.role === 'admin' || profile?.role?.includes('管理者') || profile?.role?.includes('開発者') || profile?.is_admin === true);
   
   // Replace standalone isAdminAuthenticated with forced evaluate to prevent race conditions
   const currentAdminState = !!(isGlobalAdmin || isAdminAuthenticated);
@@ -96,7 +96,7 @@ export const useAuthSession = () => {
         checkAdmin(profileData, session.user);
         
         if (!profileData.user_id) {
-          await supabase.from('staff').update({ user_id: session.user.id }).eq('id', profileData.id).catch(() => {});
+          await supabase.from('staff').update({ user_id: session.user.id }).eq('id', profileData.id);
         }
         return profileData;
       }
@@ -182,7 +182,7 @@ export const useAuthSession = () => {
   const checkAdmin = (_p: any, u?: any) => {
     const email = (u?.email || user?.email || '').toLowerCase();
     // [VERSION 49.1] Added 'makoto' to admin master list
-    const isAdmin = email.includes('admin') || email.includes('makoto') || _p?.role === 'admin' || _p?.is_admin === true;
+    const isAdmin = email.includes('admin') || email.includes('makoto') || _p?.role === 'admin' || _p?.role?.includes('管理者') || _p?.is_admin === true;
     
     console.log(`[ACL] UserEmail:${email} AdminStatus:${isAdmin} (FORCED_MASTER_KEY)`);
     setIsAdminAuthenticated(isAdmin);

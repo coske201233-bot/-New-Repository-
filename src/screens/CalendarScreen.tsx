@@ -47,12 +47,17 @@ interface CalendarScreenProps {
   onLogout?: () => void;
 }
 
-export const CalendarScreen: React.FC<CalendarScreenProps> = ({ 
+// ─────────────────────────────────────────────
+// [BUILD: VERSION 55.0 - UNIFIED SYNC LOGIC]
+// ─────────────────────────────────────────────
+
+export const CalendarScreen: React.FC<any> = ({ 
   requests, setRequests, weekdayLimit, holidayLimit, 
   saturdayLimit, sundayLimit, publicHolidayLimit,
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,
   currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest,
-  onLogout
+  onLogout,
+  shifts, fetchShifts, isLoadingShifts // [V53.9] Props から受け取る
 }) => {
   const [selectedDate, setSelectedDate] = useState(currentDate);
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
@@ -62,85 +67,145 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
   const [isTypeModalVisible, setIsTypeModalVisible] = useState(false);
 
   React.useEffect(() => {
+    // タブ切り替えや月変更時に最新データを取得
+    if (fetchShifts) fetchShifts();
+  }, [fetchShifts, currentDate]);
+
+  React.useEffect(() => {
     // If current selected date is not in the active month, reset it to the 1st of that month
     if (selectedDate.getMonth() !== currentDate.getMonth() || selectedDate.getFullYear() !== currentDate.getFullYear()) {
       setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
     }
   }, [currentDate]);
 
-  // Optimization: Index requests to avoid O(N^2) scans in getDetailedDayInfo
+  const normalize = (n: string) => (n || '').replace(/[\s　]/g, '').replace(/公費/g, '');
+
+  // [V55.0] PERFECT DATA SYNC: 全てのスタッフで共通の重複排除・優先順位ロジック
   const requestMap = React.useMemo(() => {
-    const map = new Map<string, Map<string, any[]>>();
-    requests.forEach((r: any) => {
-      if (!r || !r.date || !r.staffName || typeof r.staffName !== 'string') return;
-      const sT = r.staffName.trim();
-      if (!map.has(r.date)) map.set(r.date, new Map<string, any[]>());
-      if (!map.get(r.date)!.has(sT)) map.get(r.date)!.set(sT, []);
-      map.get(r.date)!.get(sT)!.push(r);
-    });
-    return map;
-  }, [requests]);
+    const map = new Map<string, Map<string, any>>();
+    const allData = [...requests, ...shifts];
 
-  const isPrivileged = ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
-
-  const getDetailedDayInfo = (date: Date) => {
-    const dateStr = getDateStr(date);
-    const dayType = getDayType(date);
-    const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-
-    const working: any[] = [];
-    const off: any[] = [];
-
-    (staffList || []).forEach(staff => {
-      if (!staff || !staff.name) return;
+    allData.forEach((r: any) => {
+      if (!r || !r.date || r.status === 'deleted') return;
       
-      const status = staff.status?.trim() || '通常';
-      const isInactive = status === '長期休暇' || status === '入職前';
+      const dateKey = String(r.date).substring(0, 10);
+      const sName = normalize(r.staffName || r.staff_name || '');
+      if (!sName) return;
+
+      if (!map.has(dateKey)) map.set(dateKey, new Map<string, any>());
+      const dayMap = map.get(dateKey)!;
       
-      // 完全に除外するのは休職者/入職前のみ
-      if (isInactive) return;
+      const key = sName; // 氏名を一貫したキーとする
 
-      const jobType = staff.jobType || staff.profession || '';
-      const placement = staff.placement || '';
-      const role = staff.role || staff.position || '';
+      const existing = dayMap.get(key);
+      if (!existing) {
+        dayMap.set(key, r);
+        return;
+      }
 
-      const isHomeVisit = placement === '訪問' || placement === '訪問リハ' || role === '訪問リハ';
-      const isAssistant = jobType === '助手' || role === '助手';
+      // 重複時の優先順位判定
+      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(t);
+      const newIsManual = !!(r.is_manual || r.isManual);
+      const oldIsManual = !!(existing.is_manual || existing.isManual);
 
-      const userRequests = requestMap.get(dateStr)?.get(staff.name.trim()) || [];
-      const attendanceTypes = ['出勤', '午前休', '午後休', '時間休', '時間給', '午前振替', '午後振替', '特休', '看護休暇'];
-      
-      const leaveRequest = userRequests.find(r => !attendanceTypes.includes(r.type) && r.status === 'approved');
-      const workRequest = userRequests.find(r => attendanceTypes.includes(r.type) && r.status === 'approved');
-      const pendingRequest = userRequests.find(r => r.status === 'pending');
+      // 1. 手動優先
+      if (newIsManual && !oldIsManual) {
+        dayMap.set(key, r);
+        return;
+      }
+      if (!newIsManual && oldIsManual) return;
 
-      const isNoHoliday = (dayType !== 'weekday') && (staff.monthlyNoHoliday?.[monthStr] ?? staff.noHoliday);
-
-      if (leaveRequest) {
-        off.push({ staff, type: leaveRequest.type, requestId: leaveRequest.id, isManual: true, isHomeVisit, isAssistant, status: 'approved', details: leaveRequest.details });
-      } else if (workRequest) {
-        working.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, isAssistant, status: 'approved', details: workRequest.details });
-        if (workRequest.type !== '出勤') {
-          off.push({ staff, type: workRequest.type, requestId: workRequest.id, isManual: true, isHomeVisit, isAssistant, status: 'approved', details: workRequest.details });
-        }
-      } else if (pendingRequest) {
-        const list = attendanceTypes.includes(pendingRequest.type) ? working : off;
-        list.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', details: pendingRequest.details });
-        if (list === working && pendingRequest.type !== '出勤') {
-          off.push({ staff, type: pendingRequest.type, requestId: pendingRequest.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', details: pendingRequest.details });
-        }
-      } else {
-        const isScheduledToWork = dayType === 'weekday';
-        if (isScheduledToWork) {
-          working.push({ staff, type: '出勤', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
-        } else {
-          off.push({ staff, type: isNoHoliday ? '休日出勤不要' : '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
-        }
+      // 2. 休み優先
+      if (isOff(r.type) && !isOff(existing.type)) {
+        dayMap.set(key, r);
       }
     });
 
-    return { working, off };
-  };
+    return map;
+  }, [requests, shifts]);
+
+  const isPrivileged = ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
+
+    const getDetailedDayInfo = (date: Date) => {
+      const dateStr = getDateStr(date); // YYYY-MM-DD
+      const dayType = getDayType(date);
+
+      const working: any[] = [];
+      const off: any[] = [];
+
+      (staffList || []).forEach(staff => {
+        if (!staff || !staff.name) return;
+        
+        const status = staff.status?.trim() || '通常';
+        const isInactive = status === '長期休暇' || status === '入職前';
+        if (isInactive) return;
+
+        const jobType = staff.jobType || staff.profession || '';
+        const placement = staff.placement || '';
+        const role = staff.role || staff.position || '';
+
+        const isHomeVisit = placement === '訪問' || placement === '訪問リハ' || role === '訪問リハ';
+        const isAssistant = jobType === '助手' || role === '助手';
+
+        const dayMap = requestMap.get(dateStr);
+        const sId = String(staff.id || '').trim();
+        const sName = normalize(staff.name || '');
+        // [V54.9] 個人カレンダーと同じ「正規化された氏名」でのみルックアップを行う
+        const singleReq = dayMap?.get(sName);
+        const userRequests = singleReq ? [singleReq] : [];
+        
+        // 稼働としてカウントする種別の定義
+        const isWorkType = (t: string) => {
+          if (!t) return false;
+          if (t === '出勤' || t === '日勤') return true; 
+          if (t.includes('時')) return true; 
+          if (t.includes('振')) return true; 
+          if (t.includes('午前休') || t.includes('午後休')) return true;
+          return false;
+        };
+
+        // 休暇系種別の定義
+        const isOffType = (t: string) => {
+          if (!t) return false;
+          // [V54.6] 研修も「出勤人数（分母）」に含めない休みとして扱う
+          if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(t)) return true;
+          return false;
+        };
+
+        const approvedReqs = userRequests.filter(r => r.status === 'approved');
+        const pendingReq = userRequests.find(r => r.status === 'pending');
+
+        if (approvedReqs.length > 0) {
+          const offReq = approvedReqs.find(r => isOffType(r.type));
+          const workReq = approvedReqs.find(r => isWorkType(r.type));
+
+          if (offReq) {
+            off.push({ staff, type: offReq.type, requestId: offReq.id, isManual: !!(offReq.is_manual || offReq.isManual), isHomeVisit, isAssistant, status: 'approved', details: offReq.details });
+          } else if (workReq) {
+            working.push({ staff, type: workReq.type, requestId: workReq.id, isManual: !!(workReq.is_manual || workReq.isManual), isHomeVisit, isAssistant, status: 'approved', details: workReq.details });
+          } else {
+            off.push({ staff, type: '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
+          }
+        } else if (pendingReq) {
+          if (isWorkType(pendingReq.type)) {
+            working.push({ staff, type: pendingReq.type, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', details: pendingReq.details });
+          } else {
+            off.push({ staff, type: pendingReq.type, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', details: pendingReq.details });
+          }
+        } else {
+          // [V54.9] デフォルトロジック：平日は出勤、休日は公休
+          const isScheduledToWork = dayType === 'weekday';
+          
+          if (isScheduledToWork) {
+            working.push({ staff, type: '出勤', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
+          } else {
+            off.push({ staff, type: '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
+          }
+        }
+      });
+
+      return { working, off };
+    };
 
   const { working: workingStaff, off: offStaff } = getDetailedDayInfo(selectedDate);
   const currentDayType = getDayType(selectedDate);
@@ -242,17 +307,37 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       type: selectedType,
       status: 'approved',
       reason: '管理者による調整',
+      isManual: true, // リクエストテーブル用
       details: { 
         note: '手動割当',
         duration: (selectedType === '時間休' || selectedType === '時間給' || selectedType === '特休' || selectedType === '看護休暇') ? hourlyDuration : undefined
       },
       createdAt: new Date().toISOString(),
     }));
+
+    // [V53.6] shiftsテーブルに同期
+    for (const req of newReqs) {
+      const staff = staffList.find(s => normalizeName(s.name) === normalizeName(req.staffName));
+      if (staff) {
+        await supabase.from('shifts').upsert({
+          id: req.id,
+          staff_id: staff.id,
+          staff_name: staff.name,
+          date: req.date,
+          type: req.type,
+          status: 'approved',
+          is_manual: true, // AIエンジン保護用
+          details: req.details
+        });
+      }
+    }
+
     setRequests((prev: any[]) => [...prev, ...newReqs]);
     setIsAddStaffModalVisible(false);
     setIsTypeModalVisible(false);
     setSelectedStaffToAdd([]);
     setSelectedType('出勤');
+    fetchShifts(); // 最新の状態を再取得
   };
 
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
@@ -282,11 +367,13 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({
       
       const d = day ? new Date(currentDate.getFullYear(), currentDate.getMonth(), day) : null;
       const dayType = d ? getDayType(d) : 'weekday';
-      const monthly = monthlyLimits[monthStr] || { weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit };
-      const limit = dayType === 'weekday' ? monthly.weekday : 
-                    dayType === 'sat' ? monthly.sat :
-                    dayType === 'sun' ? monthly.sun :
-                    monthly.pub;
+      // currentDate ベースの monthStr を使用（表示月と一致させるため）
+      const cellMonthStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+      const monthly = monthlyLimits[cellMonthStr] || {};
+      const limit = dayType === 'weekday' ? (monthly.weekday ?? weekdayLimit) : 
+                    dayType === 'sat' ? (monthly.sat ?? saturdayLimit) :
+                    dayType === 'sun' ? (monthly.sun ?? sundayLimit) :
+                    (monthly.pub ?? publicHolidayLimit);
 
       let dateColor = COLORS.text;
       if (dayType === 'sun' || dayType === 'holiday') dateColor = '#ef4444';

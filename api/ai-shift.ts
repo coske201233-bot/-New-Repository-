@@ -285,6 +285,7 @@ export default async function handler(req: any, res: any) {
         return (pA === -1 ? 999 : pA) - (pB === -1 ? 999 : pB);
       });
 
+    console.log("[Engine Debug] 休日出勤の候補者数 (土日祝休み設定のスタッフを除外後):", holidayQueue.length);
     console.log(`DEBUG: Holiday candidate names: ${holidayQueue.map((s: any) => s.name).join(', ')}`);
 
     // 1. 休日（土日祝）の割り当て
@@ -390,7 +391,7 @@ export default async function handler(req: any, res: any) {
           const cId = String(chosen.id || chosen.name);
           const cKey = normalize(chosen.name);
           console.log(`DEBUG: Assigning ${chosen.name} to ${dStr}`);
-          autoAssigned.push({ staffId: cId, staffName: chosen.name, date: dStr, type: '日勤', details: { note: '自動割当(休日)' } });
+          autoAssigned.push({ staffId: cId, staffName: chosen.name, date: dStr, type: '出勤', details: { note: '自動割当(休日)' } });
           currentWorkers.add(cKey);
           if (!staffWorkDays[cId]) staffWorkDays[cId] = new Set();
           staffWorkDays[cId].add(dStr);
@@ -520,7 +521,7 @@ export default async function handler(req: any, res: any) {
         if (candidates.length > 0) {
           const chosen = candidates[0];
           const cId = String(chosen.id || chosen.name);
-          autoAssigned.push({ staffId: cId, staffName: chosen.name, date: dStr, type: '日勤', details: { note: '自動割当(平日)' } });
+          autoAssigned.push({ staffId: cId, staffName: chosen.name, date: dStr, type: '出勤', details: { note: '自動割当(平日)' } });
           if (!staffWorkDays[cId]) staffWorkDays[cId] = new Set();
           staffWorkDays[cId].add(dStr);
           staffCurrentWorkCount[cId] = (staffCurrentWorkCount[cId] || 0) + 1;

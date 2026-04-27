@@ -37,7 +37,12 @@ interface MonthDay {
 }
 
 export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
-  const { staffList, requests, setRequests, onDeleteRequest, isPrivileged, profile, currentDate, setCurrentDate } = props;
+  const { 
+    staffList, setStaffList, 
+    requests, setRequests, onDeleteRequest, isPrivileged, profile, 
+    currentDate, setCurrentDate,
+    shifts, fetchShifts, isLoadingShifts // [V54.0]
+  } = props;
 
   // --- [CRITICAL: FALLBACK UI FOR WSOD PREVENTION] ---
   if (!staffList || !requests) {
@@ -58,7 +63,6 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const isAdminAuthenticated = props.isAdminAuthenticated || isPrivileged;
   const userRole = isAdminAuthenticated ? 'admin' : 'staff';
 
-  
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
   const [isCalendarModalVisible, setIsCalendarModalVisible] = useState(false);
   const activeDate = currentDate || new Date();
@@ -68,6 +72,10 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const [selectedType, setSelectedType] = useState('出勤');
   const [selectedHours, setSelectedHours] = useState(1.0);
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (fetchShifts) fetchShifts();
+  }, [fetchShifts, activeDate]);
 
   // --- [CRITICAL: FORCE RE-FETCH ON FOCUS & DEBUG] ---
   // タブが切り替わってこのコンポーネントがマウントされるたびにクラウドから最新データを取得します
@@ -212,7 +220,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     return [...staffList.filter(s => s)].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   }, [staffList]);
 
-  const normalize = (s: string) => normalizeName(s || '');
+  const normalize = (name: string) => (name || '').replace(/[\s　]/g, '').replace(/公費/g, '');
 
   const getReqHours = (r: any): number => {
     if (!r) return 0;
@@ -239,11 +247,22 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
   const requestMap = useMemo(() => {
     const map = new Map<string, Map<string, any>>();
-    if (!Array.isArray(requests)) return map;
-    requests.forEach(r => {
-      if (!r || !r.date || !r.staffName || r.status === 'deleted') return;
-      const dateMap = map.get(r.date) || new Map<string, any>();
-      const existing = dateMap.get(normalize(r.staffName));
+    
+    // [V53.2] requests と shifts をマージして最新の状態を反映
+    const allData = [...(Array.isArray(requests) ? requests : []), ...shifts];
+    
+    allData.forEach(r => {
+      if (!r || !r.date || r.status === 'deleted') return;
+      
+      // スタッフIDの特定（shiftsはstaff_id、requestsはstaffNameなどで照合）
+      const sName = r.staff_name || r.staffName;
+      if (!sName) return;
+      
+      const sT = normalize(sName);
+      const dateKey = String(r.date).substring(0, 10); // YYYY-MM-DD
+      
+      const dateMap = map.get(dateKey) || new Map<string, any>();
+      const existing = dateMap.get(sT);
       
       // Prioritize "leave" types or entries with hours if duplicates exist
       const isBetter = !existing || 
@@ -305,6 +324,21 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       });
       
       await cloudStorage.upsertRequests([newReq]);
+      
+      // [V53.2] shiftsテーブルも同期（全体カレンダーとの不整合を解消）
+      const shiftPayload = {
+        id: newReq.id,
+        staff_id: selectedStaff.id,
+        staff_name: selectedStaff.name,
+        date: selectedDay,
+        type: type,
+        status: 'approved',
+        is_manual: true, // 【V53.6】手動フラグを付与
+        details: newReq.details
+      };
+      await supabase.from('shifts').upsert(shiftPayload);
+      
+      await fetchShifts(); // 再取得して表示を更新
       Alert.alert('完了', '保存しました');
     } catch (e) {
       console.error('Confirm Shift Error:', e);
@@ -337,6 +371,14 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             }
           }
         }
+        
+        // [V53.3] shiftsテーブルからも削除
+        await supabase.from('shifts').delete()
+          .eq('staff_id', selectedStaff.id)
+          .eq('date', selectedDay);
+        
+        await fetchShifts();
+        
         // Instead of setting selectedDay to null and closing everything, just update the state
         setSelectedType('出勤');
         setSelectedHours(1.0);
@@ -380,7 +422,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           const dDate = new Date(d.dateStr);
           const dtype = getDayType(dDate);
           const isNoHoliday = (dtype !== 'weekday') && (selectedStaff.monthlyNoHoliday?.[currentMonthKey] ?? selectedStaff.noHoliday);
-          type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '日勤' : '公休');
+          type = (dtype === 'weekday') ? '出勤' : '公休';
         }
 
         const h = r ? getReqHours(r) : 0;
@@ -458,12 +500,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             if (dtype === 'weekday') {
               displayLabel = '出勤'; labelColor = '#38bdf8';
             } else {
-              // 休日出勤不可スタッフ（noHoliday）は「日勤」、それ以外は「公休」として表示
-              if (isNoHoliday) {
-                displayLabel = '日勤'; labelColor = '#38bdf8';
-              } else {
-                displayLabel = '公休'; labelColor = '#ef4444';
-              }
+              // 休日設定に関わらず、デフォルトは「公休」として表示
+              displayLabel = '公休'; labelColor = '#ef4444';
             }
           }
 
@@ -510,18 +548,15 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           const h = getReqHours(req);
           if (h > 0) {
             leaveHours += h;
-          } else if (['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤'].includes(req.type)) {
+          } else if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(req.type)) {
             leaveHours += 7.75;
           }
         }
       } else {
-        // デフォルトロジック
+        // デフォルトロジック：平日は出勤、休日は公休（カウントなし）
         const dtype = getDayType(date);
-        const isNoHoliday = (dtype !== 'weekday') && (staff.monthlyNoHoliday?.[targetMonth] ?? staff.noHoliday);
         if (dtype === 'weekday') {
           workDays++;
-        } else if (isNoHoliday) {
-          holidayWorkDays++;
         }
       }
     }
@@ -533,7 +568,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <View>
-            <ThemeText variant="h1">[BUILD: VERSION 49.5 - REMOVE DELETE UI]</ThemeText>
+            <ThemeText variant="h1">[BUILD: VERSION 55.0 - UNIFIED SYNC LOGIC]</ThemeText>
             <ThemeText variant="caption">職員の出勤状況・管理</ThemeText>
           </View>
           <View style={{ flexDirection: 'row', gap: 12 }}>

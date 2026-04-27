@@ -8,7 +8,7 @@ import { getDayType, getDateStr } from '../utils/dateUtils';
 import { sortStaffByName } from '../utils/staffUtils';
 import { getCurrentLimit } from '../utils/limitUtils';
 
-const hospitalPlacements = ['２F', '４F', '包括', '排尿', '訪問リハ', 'フォロー', '兼務', '管理', '外来', '助手'];
+const hospitalPlacements = ['２F', '４F', '訪問リハ', 'フォロー', '兼務', '管理', '外来', '助手'];
 
 interface HomeScreenProps {
   onNavigateToStaff?: (ward: string) => void;
@@ -72,12 +72,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
     const isExcluded = (s: any) => {
       const data = getStaffData(s);
-      // 訪問リハ、包括、排尿、長期休暇/入職前は通常のPT/OT/ST集計から除外（優先して別カウント）
+      // 訪問リハ、包括、排尿、長期休暇/入職前、そして助手は通常のPT/OT/ST集計から除外（優先して別カウント）
       const isVisit = data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ';
       const isHokatsu = data.role === '包括' || data.placement === '包括' || data.job === '包括';
       const isHainyo = data.role === '排尿' || data.role === '排尿支援' || data.placement === '排尿' || data.placement === '排尿支援';
       const isInactive = data.status === '長期休暇' || data.status === '入職前';
-      return isVisit || isHokatsu || isHainyo || isInactive;
+      const isAssistant = data.job === '助手' || data.role === '助手' || data.placement === '助手';
+      return isVisit || isHokatsu || isHainyo || isInactive || isAssistant;
     };
 
     // ---------------------------------------------------------
