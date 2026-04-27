@@ -158,7 +158,7 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 55.5 - FORCED CLEAN SLATE FIX]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 55.6 - ROBUST NAME MATCHING]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}

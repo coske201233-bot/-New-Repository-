@@ -1,8 +1,8 @@
 import { supabase } from './supabase';
-import { getDayType, getDateStr } from './dateUtils';
+import { getDayType, getDateStr, normalizeName } from './dateUtils';
 
 // ─────────────────────────────────────────────
-// [BUILD: VERSION 55.5 - FORCED CLEAN SLATE & STREAK FIX]
+// [BUILD: VERSION 55.6 - ROBUST NAME MATCHING ENGINE]
 // ─────────────────────────────────────────────
 
 interface ShiftTargetLimits {
@@ -246,9 +246,13 @@ export const generateMonthlyShifts = async (
         forcedOffDates: new Set<string>(), // [V55.2]
       };
 
-      // 手動シフトをトラッカーと集計に反映
+      // 手動シフトをトラッカーと集計に反映 (IDまたは氏名で照合)
       (manualShifts || []).forEach((ms: any) => {
-        if (ms.staff_id === staff.id) {
+        const msId = String(ms.staff_id || '').trim();
+        const msName = normalizeName(ms.staff_name || ms.staffName || '');
+        const isMatch = msId === staff.id || (msName && msName === normalizeName(staff.name));
+
+        if (isMatch) {
           const dKey = ms.date.substring(0, 10);
           if (ms.type === '出勤') {
             tracker.workedDates.add(dKey);
@@ -257,18 +261,17 @@ export const generateMonthlyShifts = async (
               tracker.holidayWorkCount++;
             }
             manualWorkCountPerDay.set(dKey, (manualWorkCountPerDay.get(dKey) || 0) + 1);
-          } else {
-            // 公休などの手動設定も「予定あり」として記録し、二重割り当てを防止
-            // workedDates には入れない（連勤チェックには影響させないが、hasShift等の判定に使う）
           }
         }
       });
       
       trackers.set(staff.id, tracker);
 
-      // 前月末の出勤をトラッカーに反映
+      // 前月末の出勤をトラッカーに反映 (IDまたは氏名で照合)
       (prevShifts || []).forEach((ps: any) => {
-        if (ps.staff_id === staff.id) {
+        const psId = String(ps.staff_id || '').trim();
+        const psName = normalizeName(ps.staff_name || '');
+        if (psId === staff.id || (psName && psName === normalizeName(staff.name))) {
           tracker.workedDates.add(ps.date.substring(0, 10));
         }
       });
