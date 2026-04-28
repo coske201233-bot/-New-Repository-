@@ -25,10 +25,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToSetup }
     try {
       const success = await onLogin(email, password);
       if (success) {
-        console.log('--- [AUTH_FORCE_NAV] Login successful, forcing hard redirect ---');
-        if (Platform.OS === 'web') {
-          window.location.href = '/'; 
-        }
+        console.log('--- [AUTH_SUCCESS] Login successful ---');
+        // [V60.2] ハードリダイレクトは状態をリセットしてしまうため削除
       }
     } catch (e: any) {
       console.error('Login error:', e);

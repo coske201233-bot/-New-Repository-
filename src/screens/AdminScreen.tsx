@@ -415,7 +415,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               <View style={{ marginTop: 24, paddingBottom: 40 }}>
                 <ThemeText bold variant="h2" style={{ marginBottom: 16 }}>📈 {currentMonth + 1}月の必要人数設定</ThemeText>
                 <View style={styles.limitGrid}>
-                  <DropdownSelector label="平日" value={limits.weekday} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('weekday', v, currentMonthStr)} style={{flex:1}} />
+                  {/* [V60.4] 平日の上限設定を廃止 */}
+                  <View style={{ flex: 1 }} />
                   <DropdownSelector label="土曜" value={limits.sat} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('sat', v, currentMonthStr)} style={{flex:1}} />
                 </View>
                 <View style={styles.limitGrid}>

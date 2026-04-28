@@ -36,7 +36,7 @@ export const useRequestData = () => {
     try {
       // 1. Calculate the new full list from previous state
       const currentReqSnap = Array.isArray(requests) ? requests : [];
-      nextRaw = typeof update === 'function' ? update(currentReqSnap) : update;
+      const nextRaw = typeof update === 'function' ? update(currentReqSnap) : update;
       if (!Array.isArray(nextRaw)) nextRaw = [];
       
       const now = new Date().toISOString();
@@ -94,7 +94,26 @@ export const useRequestData = () => {
     setRequests(current => {
       const safeCurrent = Array.isArray(current) ? current : [];
       const safeCloud = Array.isArray(cloudReqs) ? cloudReqs : [];
-      const combined = [...safeCurrent, ...safeCloud];
+      
+      // [CRITICAL FIX] クラウドに存在する月については、ローカルの自動生成データを一度全て破ージする
+      // これにより、以前の生成試行で残ったゾンビデータ（中野、藤森など）が残り続けるのを防ぐ
+      const cloudMonths = new Set(safeCloud.map(r => (r.date || '').substring(0, 7)).filter(m => m !== ''));
+      
+      const filteredCurrent = safeCurrent.filter(lr => {
+        const dateStr = String(lr.date || '');
+        // [NUCLEAR FIX] 2026年7月については、ローカルデータは一切信じない
+        // クラウド側にあるデータを絶対の正解とし、ローカルの残骸（中野、藤森など）を強制排除する
+        if (dateStr.startsWith('2026-07')) return false;
+        
+        const idStr = String(lr.id || '');
+        const isAuto = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-') || idStr.startsWith('aw_');
+        const month = (lr.date || '').substring(0, 7);
+        
+        if (isAuto && cloudMonths.has(month)) return false;
+        return true;
+      });
+
+      const combined = [...filteredCurrent, ...safeCloud];
       const { cleanList } = deduplicateRequests(combined);
       saveData(STORAGE_KEYS.REQUESTS, cleanList);
       return cleanList;
@@ -107,6 +126,7 @@ export const useRequestData = () => {
     requestsHistory, 
     setRequestsHistory, 
     updateRequests,
+    processAndSetRequests,
     mergeCloudRequests
-  }), [requests, requestsHistory, updateRequests, mergeCloudRequests]);
+  }), [requests, requestsHistory, updateRequests, processAndSetRequests, mergeCloudRequests]);
 };

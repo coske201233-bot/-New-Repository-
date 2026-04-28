@@ -137,6 +137,7 @@ export const useAuthSession = () => {
       console.log('Auth event:', _event);
       
       if (session) {
+        setUser(session.user); // [V60.2] Set user immediately to unlock UI
         // Direct email lookup, no loops, no setup screens
         await loadProfile(session);
       } else {
@@ -166,6 +167,7 @@ export const useAuthSession = () => {
     // Initial session grab
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
+        setUser(session.user); // [V60.2] Set user immediately
         loadProfile(session);
       } else {
         setIsCheckingProfile(false);

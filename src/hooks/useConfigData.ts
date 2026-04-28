@@ -4,10 +4,9 @@ import { cloudStorage } from '../utils/cloudStorage';
 
 export const useConfigData = () => {
   const [weekdayLimit, setWeekdayLimit] = useState(12); // 平日デフォルト: 12人
-  const [holidayLimit, setHolidayLimit] = useState(1);  // 祝日デフォルト: 1人
   const [saturdayLimit, setSaturdayLimit] = useState(1); // 土曜デフォルト: 1人
   const [sundayLimit, setSundayLimit] = useState(0);    // 日曜デフォルト: 0人
-  const [publicHolidayLimit, setPublicHolidayLimit] = useState(1); // 公休日デフォルト: 1人
+  const [publicHolidayLimit, setPublicHolidayLimit] = useState(1); // 祝日デフォルト: 1人
   const [monthlyLimits, setMonthlyLimits] = useState<Record<string, any>>({});
   const [adminPassword, setAdminPassword] = useState('0000');
   const [staffViewMode, setStaffViewMode] = useState(false);
@@ -23,45 +22,50 @@ export const useConfigData = () => {
     '@staff_view_mode': staffViewMode
   }), [weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode]);
 
-  useEffect(() => {
-    const load = async () => {
-      const configKeys = [
-        { key: STORAGE_KEYS.WEEKDAY_LIMIT, setter: setWeekdayLimit },
-        { key: STORAGE_KEYS.SATURDAY_LIMIT, setter: setSaturdayLimit },
-        { key: STORAGE_KEYS.SUNDAY_LIMIT, setter: setSundayLimit },
-        { key: STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT, setter: setPublicHolidayLimit },
-        { key: STORAGE_KEYS.MONTHLY_LIMITS, setter: setMonthlyLimits },
-        { key: STORAGE_KEYS.ADMIN_PASSWORD, setter: setAdminPassword },
-        { key: STORAGE_KEYS.STAFF_VIEW_MODE, setter: setStaffViewMode },
-      ];
+  const refreshConfigs = useCallback(async () => {
+    try {
+      const cloudConfigs = await cloudStorage.fetchConfigs();
+      if (!cloudConfigs) return;
 
-      const loadItem = async (key: string, setter: (v: any) => void) => {
-        try {
-          const lv = await loadData(key);
-          if (lv !== null) setter(lv);
-        } catch (e) {
-          console.warn(`Config load failed for key: ${key}`);
-        }
+      const safeNumber = (v: any, fallback: number) => {
+        const n = Number(v);
+        return isNaN(n) ? fallback : n;
       };
 
-      configKeys.forEach(item => loadItem(item.key, item.setter));
-    };
-    load();
+      if (cloudConfigs[STORAGE_KEYS.WEEKDAY_LIMIT] !== undefined) setWeekdayLimit(safeNumber(cloudConfigs[STORAGE_KEYS.WEEKDAY_LIMIT], 12));
+      if (cloudConfigs[STORAGE_KEYS.SATURDAY_LIMIT] !== undefined) setSaturdayLimit(safeNumber(cloudConfigs[STORAGE_KEYS.SATURDAY_LIMIT], 1));
+      if (cloudConfigs[STORAGE_KEYS.SUNDAY_LIMIT] !== undefined) setSundayLimit(safeNumber(cloudConfigs[STORAGE_KEYS.SUNDAY_LIMIT], 0));
+      if (cloudConfigs[STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT] !== undefined) setPublicHolidayLimit(safeNumber(cloudConfigs[STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT], 1));
+      if (cloudConfigs[STORAGE_KEYS.MONTHLY_LIMITS] !== undefined) setMonthlyLimits(cloudConfigs[STORAGE_KEYS.MONTHLY_LIMITS]);
+      if (cloudConfigs[STORAGE_KEYS.ADMIN_PASSWORD] !== undefined) setAdminPassword(String(cloudConfigs[STORAGE_KEYS.ADMIN_PASSWORD]));
+      if (cloudConfigs[STORAGE_KEYS.STAFF_VIEW_MODE] !== undefined) setStaffViewMode(Boolean(cloudConfigs[STORAGE_KEYS.STAFF_VIEW_MODE]));
+      
+      console.log('✅ Configs refreshed from cloud');
+    } catch (e) {
+      console.warn('Config refresh failed:', e);
+    }
   }, []);
+
+  useEffect(() => {
+    refreshConfigs();
+  }, [refreshConfigs]);
 
   const updateConfigValue = useCallback(async (key: string, val: any) => {
     try {
       // 内部ステートの即時反映
-      if (key === STORAGE_KEYS.WEEKDAY_LIMIT) setWeekdayLimit(Number(val));
-      if (key === STORAGE_KEYS.SATURDAY_LIMIT) setSaturdayLimit(Number(val));
-      if (key === STORAGE_KEYS.SUNDAY_LIMIT) setSundayLimit(Number(val));
-      if (key === STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT) setPublicHolidayLimit(Number(val));
+      const num = Number(val);
+      const safeVal = isNaN(num) ? 1 : num;
+      if (key === STORAGE_KEYS.WEEKDAY_LIMIT) setWeekdayLimit(safeVal);
+      if (key === STORAGE_KEYS.SATURDAY_LIMIT) setSaturdayLimit(safeVal);
+      if (key === STORAGE_KEYS.SUNDAY_LIMIT) setSundayLimit(safeVal);
+      if (key === STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT) setPublicHolidayLimit(safeVal);
       if (key === STORAGE_KEYS.MONTHLY_LIMITS) setMonthlyLimits(val);
       if (key === STORAGE_KEYS.ADMIN_PASSWORD) setAdminPassword(String(val));
       if (key === STORAGE_KEYS.STAFF_VIEW_MODE) setStaffViewMode(Boolean(val));
 
       // 保存処理
       await saveData(key, val);
+      await cloudStorage.upsertConfig(key, val);
     } catch (e) {
       console.error('Config update error:', e);
       throw e;
@@ -70,7 +74,8 @@ export const useConfigData = () => {
 
   const updateLimits = useCallback(async (type: string, val: number, monthStr?: string) => {
     if (monthStr) {
-        const next = { ...monthlyLimits, [monthStr]: { ...(monthlyLimits[monthStr] || { weekday: 12, sat: 1, sun: 0, pub: 1 }), [type]: val } };
+        const base = { weekday: 12, sat: 1, sun: 0, pub: 1, ...(monthlyLimits[monthStr] || {}) };
+        const next = { ...monthlyLimits, [monthStr]: { ...base, [type]: val } };
         await updateConfigValue(STORAGE_KEYS.MONTHLY_LIMITS, next);
     } else {
         const key = type === 'weekday' ? STORAGE_KEYS.WEEKDAY_LIMIT :
@@ -83,8 +88,9 @@ export const useConfigData = () => {
 
   return useMemo(() => ({ 
     config, 
-    weekdayLimit, holidayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode, 
+    weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode, 
     updateLimits, updatePassword: (p: string) => updateConfigValue(STORAGE_KEYS.ADMIN_PASSWORD, p),
-    updateConfigValue
-  }), [config, weekdayLimit, holidayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode, updateLimits, updateConfigValue]);
+    updateConfigValue,
+    refreshConfigs
+  }), [config, weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, adminPassword, staffViewMode, updateLimits, updateConfigValue, refreshConfigs]);
 };

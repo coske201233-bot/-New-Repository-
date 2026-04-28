@@ -8,6 +8,7 @@ import { useShiftData } from './useShiftData';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase, isSupabaseAuthReady as isSupabaseConfigured } from '../utils/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { STORAGE_KEYS } from '../utils/storage';
 
 export const useAppLogic = () => {
   const [currentTab, setCurrentTab] = useState('home');
@@ -404,8 +405,9 @@ export const useAppLogic = () => {
 
       const filteredRequests = req.requests.filter(r => {
         const idStr = String(r.id || '');
-        const isAuto = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-');
+        const isAuto = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-') || idStr.startsWith('aw_');
         const isTargetMonth = r.date && r.date.startsWith(currentMonthStr);
+        // [CRITICAL] ターゲット月の自動生成データは全てパージする
         return !(isAuto && isTargetMonth);
       });
 
@@ -445,20 +447,30 @@ export const useAppLogic = () => {
   }, [req.requests, req.requestsHistory, req.setRequestsHistory, req.updateRequests]);
 
   const handleForceCloudSync = useCallback(async () => {
-      setIsSyncing(true);
-      try {
-        console.log('--- [CLOUD_RECOVERY_TRIGGERED] ---');
-        if (Platform.OS === 'web') {
-          localStorage.removeItem('proto_staff_data');
-          localStorage.removeItem('proto_request_data');
-        }
+    setIsSyncing(true);
+    try {
+      console.log('--- [CLOUD_RECOVERY_TRIGGERED] ---');
+      // [NUCLEAR RESILIENCE] インポートに頼らず直接文字列でキーを指定
+      await AsyncStorage.removeItem('@staff_list');
+      await AsyncStorage.removeItem('@requests');
+      
+      if (Platform.OS === 'web') {
+        localStorage.removeItem('proto_staff_data');
+        localStorage.removeItem('proto_request_data');
+        localStorage.removeItem('v43_purged_final');
+      }
         
         const s = await cloudStorage.fetchStaff();
         const r = await cloudStorage.fetchRequests();
         await shifts.fetchShifts();
+        await config.refreshConfigs();
         
         if (s && s.length > 0) staff.setStaffList(s);
-        if (r && r.length > 0) req.setRequests(r);
+        if (r && r.length > 0) {
+          // [CRITICAL FIX] setRequests ではなく processAndSetRequests を使用して
+          // AsyncStorage への永続化を確実に行う
+          await req.processAndSetRequests(r, true);
+        }
         
         if (Platform.OS === 'web' && s?.length > 0) {
           localStorage.setItem('proto_staff_data', JSON.stringify(s));

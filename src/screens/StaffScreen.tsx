@@ -220,7 +220,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     return [...staffList.filter(s => s)].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   }, [staffList]);
 
-  const normalize = (name: string) => (name || '').replace(/[\s　]/g, '').replace(/公費/g, '');
+  const normalize = (n: string) => (n || '').replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/公費/g, '').toUpperCase();
 
   const getReqHours = (r: any): number => {
     if (!r) return 0;
@@ -248,40 +248,55 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const requestMap = useMemo(() => {
     const map = new Map<string, Map<string, any>>();
     
-    // [V53.2] requests と shifts をマージして最新の状態を反映
-    const allData = [...(Array.isArray(requests) ? requests : []), ...shifts];
+    const normalizeLocal = (n: string) => (n || '').replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/公費/g, '').toUpperCase();
+    const extractUuid = (idStr: string): string | null => {
+      if (!idStr) return null;
+      const parts = idStr.split('-');
+      return parts.length >= 6 ? parts.slice(1, 6).join('-') : null;
+    };
+    const allData = [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
     
     allData.forEach(r => {
       if (!r || !r.date || r.status === 'deleted') return;
       
-      // スタッフIDの特定（shiftsはstaff_id、requestsはstaffNameなどで照合）
-      const sName = r.staff_name || r.staffName;
-      if (!sName) return;
+      const dateKey = String(r.date).substring(0, 10);
+      if (!map.has(dateKey)) map.set(dateKey, new Map<string, any>());
+      const dayMap = map.get(dateKey)!;
       
-      const sT = normalize(sName);
-      const dateKey = String(r.date).substring(0, 10); // YYYY-MM-DD
+      // [V57.6] 照合キーを ID 優先にするが、IDの揺れ（staff_id vs user_id）に備え名前でも保持
+      const extractedId = extractUuid(r.id);
+      const sId = String(r.staff_id || r.staffId || r.user_id || extractedId || '').trim();
+      const sName = normalizeLocal(r.staffName || r.staff_name || '');
       
-      const dateMap = map.get(dateKey) || new Map<string, any>();
-      const existing = dateMap.get(sT);
-      
-      // Prioritize "leave" types or entries with hours if duplicates exist
-      const isBetter = !existing || 
-        (getReqHours(r) > 0 && getReqHours(existing) === 0) ||
-        (!['出勤', '日勤'].includes(r.type) && ['出勤', '日勤'].includes(existing.type));
+      const keys = [sId, sName].filter(Boolean);
+      keys.forEach(key => {
+        const existing = dayMap.get(key);
         
-      if (isBetter) {
-        dateMap.set(normalize(r.staffName), r);
-      }
-      map.set(r.date, dateMap);
+        const isManualEntry = (rec: any) => 
+          !!(rec.is_manual || rec.isManual) || 
+          String(rec.id || '').startsWith('m-') || 
+          String(rec.id || '').startsWith('req-');
+
+        const isBetter = !existing || 
+          (isManualEntry(r) && !isManualEntry(existing)) ||
+          (getReqHours(r) > 0 && getReqHours(existing) === 0) ||
+          (!['出勤', '日勤'].includes(r.type) && ['出勤', '日勤'].includes(existing.type));
+          
+        if (isBetter) {
+          dayMap.set(key, r);
+        }
+      });
     });
     return map;
-  }, [requests]);
+  }, [requests, shifts, normalize]);
 
   const handleDayPress = (d: MonthDay) => {
     if (!d || d.empty) return;
     setSelectedDay(d.dateStr);
-    const sT = normalize(selectedStaff?.name || '');
-    const existing = requestMap.get(d.dateStr)?.get(sT);
+    const sId = String(selectedStaff?.id || '').trim();
+    const sName = normalize(selectedStaff?.name || '');
+    const dayMap = requestMap.get(d.dateStr);
+    const existing = (sId && dayMap?.get(sId)) || (sName && dayMap?.get(sName));
     if (existing) {
       setSelectedType((existing.type === '日勤' || existing.type === '出勤') ? '出勤' : existing.type);
       setSelectedHours(getReqHours(existing) || 1.0);
@@ -404,16 +419,16 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     if (Platform.OS !== 'web' || !selectedStaff) return;
     
     try {
-      const year = activeDate.getFullYear();
-      const month = activeDate.getMonth() + 1;
-      const sT = normalize(selectedStaff.name);
+      const sId = String(selectedStaff.id || '').trim();
+      const sName = normalize(selectedStaff.name);
       const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
       const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
       
       let rowsHtml = '';
       monthInfo.forEach((d: MonthDay) => {
         if (d.empty) return;
-        const r = requestMap.get(d.dateStr)?.get(sT);
+        const dayMap = requestMap.get(d.dateStr);
+        const r = (sId && dayMap?.get(sId)) || (sName && dayMap?.get(sName));
         
         let type = '';
         if (r) {
@@ -465,8 +480,10 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         {monthInfo.map((d: MonthDay, i: number) => {
           if (!d || d.empty) return <View key={`empty-${i}`} style={styles.calendarDay} />;
           const isSelected = selectedDay === d.dateStr;
-          const sT = normalize(selectedStaff?.name || '');
-          const req = requestMap.get(d.dateStr)?.get(sT);
+          const sId = String(selectedStaff?.id || '').trim();
+          const sName = normalize(selectedStaff?.name || '');
+          const dayMap = requestMap.get(d.dateStr);
+          const req = (sId && dayMap?.get(sId)) || (sName && dayMap?.get(sName));
           
           let displayLabel = '';
           let labelColor = 'white';

@@ -14,8 +14,6 @@ interface HomeScreenProps {
   onNavigateToStaff?: (ward: string) => void;
   staffList: any[];
   requests: any[];
-  weekdayLimit: number;
-  holidayLimit: number;
   saturdayLimit: number;
   sundayLimit: number;
   publicHolidayLimit: number;
@@ -30,7 +28,7 @@ interface HomeScreenProps {
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ 
-  onNavigateToStaff, staffList, requests, weekdayLimit, holidayLimit,
+  onNavigateToStaff, staffList, requests, weekdayLimit,
   saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, staffViewMode = false,
   onForceCloudSync, profile, isAdminAuthenticated, onOpenRequests, onLogout,
   isInitialized
@@ -195,10 +193,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit 
     };
 
-    const currentLimit = dayType === 'weekday' ? currentMonthly.weekday : 
+    const rawLimit = dayType === 'weekday' ? currentMonthly.weekday : 
                          dayType === 'sat' ? currentMonthly.sat :
                          dayType === 'sun' ? currentMonthly.sun :
                          currentMonthly.pub;
+    const currentLimit = Number(rawLimit) || (dayType === 'weekday' ? 12 : 1);
 
     // ---------------------------------------------------------
     // 6. 表示用配列の構築

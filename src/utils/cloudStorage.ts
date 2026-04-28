@@ -300,5 +300,33 @@ export const cloudStorage = {
   },
   unsubscribe(channel: any) {
     supabase.removeChannel(channel);
+  },
+
+  // --- Config ---
+  async fetchConfigs() {
+    try {
+      const { data, error } = await supabase.from('app_config').select('*');
+      if (error) throw error;
+      const configMap: Record<string, any> = {};
+      (data || []).forEach(row => {
+        configMap[row.key] = row.value;
+      });
+      return configMap;
+    } catch (err) {
+      console.error('Fetch configs error:', err);
+      return {};
+    }
+  },
+  async upsertConfig(key: string, value: any) {
+    try {
+      const { error } = await supabase
+        .from('app_config')
+        .upsert({ key, value }, { onConflict: 'key' });
+      if (error) throw error;
+      console.log(`✅ Config [${key}] synced to cloud`);
+    } catch (err) {
+      console.error(`Upsert config [${key}] error:`, err);
+      throw err;
+    }
   }
 };

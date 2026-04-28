@@ -52,12 +52,12 @@ interface CalendarScreenProps {
 // ─────────────────────────────────────────────
 
 export const CalendarScreen: React.FC<any> = ({ 
-  requests, setRequests, weekdayLimit, holidayLimit, 
-  saturdayLimit, sundayLimit, publicHolidayLimit,
+  requests, setRequests,
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,
   currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest,
   onLogout,
-  shifts, fetchShifts, isLoadingShifts // [V53.9] Props から受け取る
+  shifts, fetchShifts, isLoadingShifts, // [V53.9] Props から受け取る
+  weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit
 }) => {
   const [selectedDate, setSelectedDate] = useState(currentDate);
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
@@ -78,47 +78,77 @@ export const CalendarScreen: React.FC<any> = ({
     }
   }, [currentDate]);
 
-  const normalize = (n: string) => (n || '').replace(/[\s　]/g, '').replace(/公費/g, '');
+  const normalize = (n: string) => (n || '').replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/公費/g, '').toUpperCase();
 
   // [V55.0] PERFECT DATA SYNC: 全てのスタッフで共通の重複排除・優先順位ロジック
   const requestMap = React.useMemo(() => {
     const map = new Map<string, Map<string, any>>();
-    const allData = [...requests, ...shifts];
+    const allData = [...requests, ...shifts].filter(r => {
+      return true;
+    });
+    
+    const normalizeLocal = (n: string) => (n || '').replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/公費/g, '').toUpperCase();
+    
+    const extractUuid = (idStr: string): string | null => {
+      if (!idStr) return null;
+      const parts = idStr.split('-');
+      return parts.length >= 6 ? parts.slice(1, 6).join('-') : null;
+    };
 
     allData.forEach((r: any) => {
       if (!r || !r.date || r.status === 'deleted') return;
       
       const dateKey = String(r.date).substring(0, 10);
-      const sName = normalize(r.staffName || r.staff_name || '');
-      if (!sName) return;
-
       if (!map.has(dateKey)) map.set(dateKey, new Map<string, any>());
       const dayMap = map.get(dateKey)!;
       
-      const key = sName; // 氏名を一貫したキーとする
+      // [V57.6] 照合キーを ID 優先にするが、IDの揺れ（staff_id vs user_id）に備え名前でも保持
+      const extractedId = extractUuid(r.id);
+      const sId = String(r.staff_id || r.staffId || r.user_id || extractedId || '').trim();
+      const sName = normalizeLocal(r.staffName || r.staff_name || '');
+      
+      const keys = [sId, sName].filter(Boolean);
+      keys.forEach(key => {
+        const existing = dayMap.get(key);
+        
+        const isManualEntry = (rec: any) => 
+          !!(rec.is_manual || rec.isManual) || 
+          String(rec.id || '').startsWith('m-') || 
+          String(rec.id || '').startsWith('manual-') || 
+          String(rec.id || '').startsWith('req-');
 
-      const existing = dayMap.get(key);
-      if (!existing) {
-        dayMap.set(key, r);
-        return;
-      }
+        const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(t);
 
-      // 重複時の優先順位判定
-      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(t);
-      const newIsManual = !!(r.is_manual || r.isManual);
-      const oldIsManual = !!(existing.is_manual || existing.isManual);
+        const getTime = (i: any) => {
+          const t = i.updatedAt || i.updated_at || i.createdAt || i.created_at || 0;
+          return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
+        };
 
-      // 1. 手動優先
-      if (newIsManual && !oldIsManual) {
-        dayMap.set(key, r);
-        return;
-      }
-      if (!newIsManual && oldIsManual) return;
+        let isBetter = false;
+        if (!existing) {
+          isBetter = true;
+        } else {
+          const isManNew = isManualEntry(r);
+          const wasManOld = isManualEntry(existing);
+          const isOffNew = isOff(r.type);
+          const isOffOld = isOff(existing.type);
 
-      // 2. 休み優先
-      if (isOff(r.type) && !isOff(existing.type)) {
-        dayMap.set(key, r);
-      }
+          if (isManNew && !wasManOld) {
+            isBetter = true; // 手動は常に自動を上書き
+          } else if (!isManNew && wasManOld) {
+            isBetter = false; // 自動は手動を上書きできない
+          } else if (isManNew && wasManOld) {
+            isBetter = getTime(r) > getTime(existing); // 共に手動なら新しい方を優先
+          } else {
+            // 共に自動の場合、安全のため公休（休み）を優先
+            isBetter = isOffNew && !isOffOld;
+          }
+        }
+
+        if (isBetter) {
+          dayMap.set(key, r);
+        }
+      });
     });
 
     return map;
@@ -150,8 +180,9 @@ export const CalendarScreen: React.FC<any> = ({
         const dayMap = requestMap.get(dateStr);
         const sId = String(staff.id || '').trim();
         const sName = normalize(staff.name || '');
-        // [V54.9] 個人カレンダーと同じ「正規化された氏名」でのみルックアップを行う
-        const singleReq = dayMap?.get(sName);
+        
+        // [V57.3] ID優先でルックアップ
+        const singleReq = (sId && dayMap?.get(sId)) || (sName && dayMap?.get(sName));
         const userRequests = singleReq ? [singleReq] : [];
         
         // 稼働としてカウントする種別の定義
@@ -211,10 +242,11 @@ export const CalendarScreen: React.FC<any> = ({
   const currentDayType = getDayType(selectedDate);
   const monthStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`;
   const currentMonthly = monthlyLimits[monthStr] || { weekday: weekdayLimit, sat: saturdayLimit, sun: sundayLimit, pub: publicHolidayLimit };
-  const currentLimit = currentDayType === 'weekday' ? currentMonthly.weekday : 
-                       currentDayType === 'sat' ? currentMonthly.sat :
-                       currentDayType === 'sun' ? currentMonthly.sun :
-                       currentMonthly.pub;
+  const rawLimit = currentDayType === 'weekday' ? currentMonthly.weekday : 
+                   currentDayType === 'sat' ? currentMonthly.sat :
+                   currentDayType === 'sun' ? currentMonthly.sun :
+                   currentMonthly.pub;
+  const currentLimit = Number(rawLimit) || (currentDayType === 'weekday' ? 12 : 1);
 
   const handleDeleteShift = async (staffName: string, requestId: string, isManual: boolean, wasWorking: boolean) => {
     Alert.alert(
@@ -245,29 +277,20 @@ export const CalendarScreen: React.FC<any> = ({
               }
             }
 
-            // 3. ローカルステートの更新と「状態保持（公休化）」
-            setRequests((prev: any[]) => {
-              // まず対象の全リクエストをフィルタリング
-              const filtered = prev.filter(r => !(r.staffName?.trim() === staffName.trim() && r.date === dateStr));
-              
-              // 平日で「出勤」を削除した場合のみ、「公休（休み）」として状態を上書き保持する
-              if (wasWorking && dayType === 'weekday') {
-                const offRequest = {
-                  id: `off-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                  staffName: staffName,
-                  date: dateStr,
-                  type: '公休',
-                  status: 'approved',
-                  reason: '調整',
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                };
-                return [...filtered, offRequest];
-              }
-              return filtered;
-            });
+            // 3. shiftsテーブルからも削除
+            const staff = staffList.find(s => normalizeName(s.name) === normalizeName(staffName));
+            if (staff) {
+              await supabase.from('shifts').delete()
+                .eq('staff_id', staff.id)
+                .eq('date', dateStr)
+                .eq('is_manual', true);
+            }
+
+            // 4. ローカルステートの更新
+            setRequests((prev: any[]) => prev.filter(r => !(r.staffName?.trim() === staffName.trim() && r.date === dateStr)));
 
             Alert.alert('完了', 'シフトの解除・調整が完了しました。');
+            fetchShifts();
           }
         }
       ]
@@ -294,31 +317,53 @@ export const CalendarScreen: React.FC<any> = ({
         setRequests((prev: any[]) => prev.filter(r => !idsToDelete.includes(r.id)));
         Alert.alert('完了', 'シフトをクリアしました。');
       }
+
+      // [V60.9] shiftsテーブルからも該当スタッフのその日の手動シフトを確実に削除する
+      const staffs = staffNames.map(name => staffList.find(s => normalizeName(s.name) === normalizeName(name)));
+      const staffIds = staffs.filter(Boolean).map(s => s.id);
+      if (staffIds.length > 0) {
+        await supabase.from('shifts').delete()
+          .in('staff_id', staffIds)
+          .eq('date', dateStr)
+          .eq('is_manual', true);
+      }
+
       setIsAddStaffModalVisible(false);
       setIsTypeModalVisible(false);
       setSelectedStaffToAdd([]);
+      fetchShifts(); // [V60.9] 削除後も再取得を呼ぶ
       return;
     }
 
-    const newReqs = staffNames.map(name => ({
-      id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      staffName: name,
-      date: dateStr,
-      type: selectedType,
-      status: 'approved',
-      reason: '管理者による調整',
-      isManual: true, // リクエストテーブル用
-      details: { 
-        note: '手動割当',
-        duration: (selectedType === '時間休' || selectedType === '時間給' || selectedType === '特休' || selectedType === '看護休暇') ? hourlyDuration : undefined
-      },
-      createdAt: new Date().toISOString(),
-    }));
+    const newReqs = staffNames.map(nameOrId => {
+      const staff = staffList.find(s => s.id === nameOrId || normalizeName(s.name) === normalizeName(nameOrId));
+      const finalName = staff ? staff.name : nameOrId;
+      const sId = staff ? staff.id : `manual-${Date.now()}`;
+      // [V60.9] 確定的ID（m-ID-DATE）を使用することで、UPSERT時に以前の手動シフト（公休など）を上書きする
+      return {
+        id: `m-${sId}-${dateStr}`,
+        staffName: finalName,
+        date: dateStr,
+        type: selectedType,
+        status: 'approved',
+        reason: '管理者による調整',
+        isManual: true, // リクエストテーブル用
+        details: { 
+          note: '手動割当',
+          duration: (selectedType === '時間休' || selectedType === '時間給' || selectedType === '特休' || selectedType === '看護休暇') ? hourlyDuration : undefined
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(), // [V61.0] 優先度判定のためにupdatedAtを付与
+      };
+    });
 
-    // [V53.6] shiftsテーブルに同期
+    // [V61.4] requests と shifts 両方のテーブルを更新して状態の不整合を防ぐ
     for (const req of newReqs) {
-      const staff = staffList.find(s => normalizeName(s.name) === normalizeName(req.staffName));
+      // 確実なマッチングのために、UUIDのチェックも追加
+      const extractedId = extractUuid(req.id);
+      const staff = staffList.find(s => s.id === extractedId || normalizeName(s.name) === normalizeName(req.staffName));
       if (staff) {
+        // 1. shiftsテーブルの更新（updated_atカラムは存在しないため除外）
         await supabase.from('shifts').upsert({
           id: req.id,
           staff_id: staff.id,
@@ -326,8 +371,20 @@ export const CalendarScreen: React.FC<any> = ({
           date: req.date,
           type: req.type,
           status: 'approved',
-          is_manual: true, // AIエンジン保護用
+          is_manual: true,
           details: req.details
+        });
+
+        // 2. requestsテーブルの更新（同期割れ防止）
+        await supabase.from('requests').upsert({
+          id: req.id,
+          staff_name: req.staffName,
+          date: req.date,
+          type: req.type,
+          status: 'approved',
+          reason: req.reason,
+          details: { ...req.details, isManual: true, updatedAt: req.updatedAt },
+          is_manual: true
         });
       }
     }
@@ -370,10 +427,11 @@ export const CalendarScreen: React.FC<any> = ({
       // currentDate ベースの monthStr を使用（表示月と一致させるため）
       const cellMonthStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
       const monthly = monthlyLimits[cellMonthStr] || {};
-      const limit = dayType === 'weekday' ? (monthly.weekday ?? weekdayLimit) : 
+      const rawLimit = dayType === 'weekday' ? (monthly.weekday ?? weekdayLimit) : 
                     dayType === 'sat' ? (monthly.sat ?? saturdayLimit) :
                     dayType === 'sun' ? (monthly.sun ?? sundayLimit) :
                     (monthly.pub ?? publicHolidayLimit);
+      const limit = Number(rawLimit) || (dayType === 'weekday' ? 12 : 1);
 
       let dateColor = COLORS.text;
       if (dayType === 'sun' || dayType === 'holiday') dateColor = '#ef4444';
@@ -419,7 +477,7 @@ export const CalendarScreen: React.FC<any> = ({
                   { color: isSelected ? COLORS.background : (workingCount > limit ? '#ef4444' : isUnderLimit ? '#3b82f6' : COLORS.textSecondary) }
                 ]}
               >
-                {workingCount}/{limit}
+                {dayType === 'weekday' ? workingCount : `${workingCount}/${limit}`}
               </ThemeText>
 
               {holidayWorkers.length > 0 && (
@@ -622,9 +680,9 @@ export const CalendarScreen: React.FC<any> = ({
                   const mStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
                   const isLongTerm = s.status === '長期休暇' || s.status === '入職前';
                   const isNoHoliday = (getDayType(selectedDate) !== 'weekday') && (s.monthlyNoHoliday?.[mStr] ?? s.noHoliday);
-                  const alreadyHasRequest = requests.some(r => r && r.staffName?.trim() === s.name?.trim() && r.date === getDateStr(selectedDate) && r.status === 'approved');
+                  // [V61.3] 既に手動データが存在していても、何度でも上書き修正できるように除外フィルターを撤廃
                   
-                  return !isLongTerm && !isNoHoliday && !alreadyHasRequest;
+                  return !isLongTerm && !isNoHoliday;
                 })
                 .map((staff, idx) => {
                   const isSelected = selectedStaffToAdd.includes(staff.name);

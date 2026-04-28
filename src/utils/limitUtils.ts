@@ -20,8 +20,10 @@ export const getCurrentLimit = (
     pub: publicHolidayLimit 
   };
 
-  if (dayType === 'weekday') return currentMonthly.weekday;
-  if (dayType === 'sat') return currentMonthly.sat;
-  if (dayType === 'sun') return currentMonthly.sun;
-  return currentMonthly.pub;
+  const raw = dayType === 'weekday' ? currentMonthly.weekday : 
+               dayType === 'sat' ? currentMonthly.sat :
+               dayType === 'sun' ? currentMonthly.sun :
+               currentMonthly.pub;
+  
+  return Number(raw) || (dayType === 'weekday' ? 12 : 1);
 };

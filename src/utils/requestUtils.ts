@@ -25,7 +25,7 @@ export const deduplicateRequests = (list: any[]) => {
     if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('off-') || idStr.startsWith('u-')) return true;
 
     // 自動系IDでも、内容が変更されていれば手動扱いとする
-    if (idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-')) {
+    if (idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-') || idStr.startsWith('aw_')) {
       if (note !== '' && !note.includes('自動')) return true;
       if (reason !== '' && !reason.includes('自動')) return true;
       if (item.isManual === true) return true; // 明示的なフラグがあれば尊重

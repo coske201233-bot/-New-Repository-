@@ -73,7 +73,6 @@ export default function App() {
     sessionDuration, setSessionDuration,
     isInitialized, isSyncing,
     activeDate, setActiveDate,
-    holidayLimit,
     handleLogout,
     handleForceCloudSync,
     onSubmitRequest,
@@ -118,7 +117,7 @@ export default function App() {
       },
       approveRequest,
       profile, setProfile,
-      weekdayLimit, holidayLimit, saturdayLimit, sundayLimit, publicHolidayLimit,
+      weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit,
       monthlyLimits, updateLimits,
       adminPassword, updatePassword,
       isAdminAuthenticated, setIsAdminAuthenticated,
@@ -158,7 +157,7 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 57.2 - HOLIDAY CAP FIX]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 61.3 - FOOLPROOF MANUAL OVERRIDE]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}

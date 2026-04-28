@@ -27,11 +27,18 @@ export const useShiftData = () => {
 
         // 2. 重複排除 (Staff + Date)
         const priorityMap = new Map<string, any>();
-        const normalize = (name: string) => (name || '').replace(/[\s　]/g, '').replace(/公費/g, '');
+        const normalize = (name: string) => (name || '').replace(/[\s　]/g, '').replace(/公費/g, '').toUpperCase();
+        
+        const extractUuid = (idStr: string): string | null => {
+          if (!idStr) return null;
+          const parts = idStr.split('-');
+          return parts.length >= 6 ? parts.slice(1, 6).join('-') : null;
+        };
 
         normalized.forEach(s => {
           // IDまたは名前でキーを生成（同期漏れ対策）
-          const sId = String(s.staff_id || s.user_id || '').trim();
+          const extractedId = extractUuid(s.id);
+          const sId = String(s.staff_id || s.user_id || extractedId || '').trim();
           const sName = normalize(s.staff_name || s.staffName || '');
           if ((!sId && !sName) || !s.date) return;
           
@@ -45,9 +52,15 @@ export const useShiftData = () => {
           }
 
           // 優先順位判定
-          // A. 手動 (is_manual) は AI生成 より優先
-          const existingIsManual = !!(existing.is_manual || existing.isManual);
-          const newIsManual = !!(s.is_manual || s.isManual);
+          // A. 手動データは AI生成 より優先
+          // [V57.3] is_manualカラムだけでなく、ID接頭辞 'm-' も判定に含める
+          const isManualEntry = (rec: any) => 
+            !!(rec.is_manual || rec.isManual) || 
+            String(rec.id || '').startsWith('m-') || 
+            String(rec.id || '').startsWith('req-');
+
+          const existingIsManual = isManualEntry(existing);
+          const newIsManual = isManualEntry(s);
           
           if (newIsManual && !existingIsManual) {
             priorityMap.set(key, s);
@@ -56,7 +69,6 @@ export const useShiftData = () => {
           if (!newIsManual && existingIsManual) return; // 既存（手動）を維持
 
           // B. 種別優先度 (休み系 > 出勤系)
-          // [V54.6] 休み（出勤数に数えない）として扱う種別
           const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(t);
           if (isOff(s.type) && !isOff(existing.type)) {
             priorityMap.set(key, s);
@@ -64,7 +76,9 @@ export const useShiftData = () => {
           }
         });
 
-        const deduplicated = Array.from(priorityMap.values());
+        const deduplicated = Array.from(priorityMap.values()).filter(s => {
+          return true;
+        });
         setShifts(deduplicated);
         console.log(`[ShiftEngine] Global fetch: ${deduplicated.length} unique records (Sanitized & Deduplicated)`);
       }

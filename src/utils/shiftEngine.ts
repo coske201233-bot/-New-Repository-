@@ -22,6 +22,20 @@ interface StaffTracker {
   forcedOffDates: Set<string>; // [V55.2] 休日振替や連勤調整で強制的に休みとする日
 }
 
+/**
+ * ID文字列からUUIDを抽出します (auto-UUID-... or m-UUID-...)
+ * [V57.3] 完全にUUIDベースに移行するための補助関数
+ */
+const extractUuid = (idStr: string): string | null => {
+  if (!idStr) return null;
+  const parts = idStr.split('-');
+  if (parts.length >= 6) {
+    // 8-4-4-4-12 の形式を再構築
+    return parts.slice(1, 6).join('-');
+  }
+  return null;
+};
+
 // ─────────────────────────────────────────────
 // 連勤チェック関数 (V53.3)
 // Rule: いかなる時点でも6連勤以上にならないことを保証する
@@ -90,8 +104,11 @@ export const generateMonthlyShifts = async (
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const endDateStr = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
 
+  // [V60.4] 2026年7月のアンロック（ユーザー要望により最新ルールでの再生成を許可）
+  // if (year === 2026 && month === 7) { ... }
+
   console.log('══════════════════════════════════════════════');
-  console.log(`[BUILD: VERSION 53.0 - CLEAN SLATE] 処理開始: ${year}年${month}月`);
+  console.log(`[BUILD: VERSION 60.0 - NUCLEAR RECOVERY] 処理開始: ${year}年${month}月`);
   console.log("[Engine Debug] 既存のシフトを削除します:", monthPrefix);
   console.log('══════════════════════════════════════════════');
 
@@ -135,20 +152,46 @@ export const generateMonthlyShifts = async (
     // ═══════════════════════════════════════════
     // Step 0.5: シフトデータをロード（制約として使用）
     // ═══════════════════════════════════════════
-    // [V56.1] is_manual カラムに依存せず、全てロードしてから詳細(details)で判定
+    // [V60.5] shiftsだけでなくrequestsからも手動シフトを取得してマージする
     const { data: currentShifts } = await supabase
       .from('shifts')
       .select('*')
       .gte('date', startDate)
       .lte('date', endDateStr);
 
-    const manualShifts = (currentShifts || []).filter(s => {
+    const { data: currentRequests } = await supabase
+      .from('requests')
+      .select('*')
+      .gte('date', startDate)
+      .lte('date', endDateStr)
+      .eq('status', 'approved');
+
+    // UI(CalendarScreen)と同じロジックで重複を排除し、手動シフトとして扱う
+    const manualDayMap = new Map<string, any>();
+    
+    (currentShifts || []).forEach(s => {
       const isAuto = String(s.id || '').startsWith('auto-');
       const isManualFlag = s.is_manual === true || s.details?.isManual === true;
-      return !isAuto || isManualFlag; // auto- でない、または明示的に手動フラグがあるものを保護
+      if (!isAuto || isManualFlag) {
+        const dKey = s.date.substring(0, 10);
+        const extractedId = extractUuid(s.id);
+        const sId = String(s.staff_id || s.user_id || extractedId || '').trim();
+        if (sId) manualDayMap.set(`${dKey}_${sId}`, s);
+      }
     });
 
-    console.log(`[ShiftEngine] 保護・制約対象のシフト ${manualShifts?.length || 0} 件をロードしました。`);
+    // requests の「出勤」で上書き
+    (currentRequests || []).forEach(r => {
+      if (r.type === '出勤') {
+        const dKey = r.date.substring(0, 10);
+        const extractedId = extractUuid(r.id);
+        const sId = String(r.user_id || r.staff_id || extractedId || '').trim();
+        if (sId) manualDayMap.set(`${dKey}_${sId}`, r);
+      }
+    });
+
+    const manualShifts = Array.from(manualDayMap.values());
+    console.log(`[ShiftEngine] 保護・制約対象の手動シフト ${manualShifts.length} 件をロードしました。`);
     // ═══════════════════════════════════════════
     // Step A: スタッフ取得 + 除外フィルタ
     // ═══════════════════════════════════════════
@@ -195,14 +238,17 @@ export const generateMonthlyShifts = async (
 
     const leaveSet = new Set<string>();
     (approvedLeaves || []).forEach((r: any) => {
-      if (r.user_id    && r.date) leaveSet.add(`uid__${r.user_id}__${r.date}`);
-      if (r.staff_name && r.date) leaveSet.add(`name__${r.staff_name}__${r.date}`);
+      const extractedId = extractUuid(r.id);
+      const uid = r.user_id || extractedId;
+      if (uid && r.date) leaveSet.add(`uid__${uid}__${r.date}`);
+      if (r.staff_name && r.date) leaveSet.add(`name__${normalizeName(r.staff_name)}__${r.date}`);
     });
     console.log(`[ShiftEngine] 承認済み休暇件数: ${approvedLeaves?.length ?? 0}件`);
 
     const hasLeave = (tracker: StaffTracker, dateStr: string): boolean => {
+      const normName = normalizeName(tracker.name);
       return leaveSet.has(`uid__${tracker.id}__${dateStr}`) ||
-             leaveSet.has(`name__${tracker.name}__${dateStr}`);
+             (normName && leaveSet.has(`name__${normName}__${dateStr}`));
     };
 
     // ═══════════════════════════════════════════
@@ -240,7 +286,11 @@ export const generateMonthlyShifts = async (
     const trackers = new Map<string, StaffTracker>();
     const manualWorkCountPerDay = new Map<string, number>();
 
-    rawEligible.forEach(staff => {
+    // [V60.5] 名簿の並び順（シーケンス）を記憶
+    const staffSequenceMap = new Map<string, number>();
+
+    rawEligible.forEach((staff, index) => {
+      staffSequenceMap.set(staff.id, index);
       const isWeekendOff = !!(staff.no_holiday === true || staff.no_holiday === 'true' || staff.noHoliday === true);
       
       const tracker: StaffTracker = {
@@ -255,9 +305,10 @@ export const generateMonthlyShifts = async (
 
       // 手動シフトをトラッカーと集計に反映 (IDまたは氏名で照合)
       (manualShifts || []).forEach((ms: any) => {
-        const msId = String(ms.staff_id || '').trim();
+        const extractedId = extractUuid(ms.id);
+        const msId = String(ms.staff_id || ms.user_id || extractedId || '').trim();
         const msName = normalizeName(ms.staff_name || ms.staffName || '');
-        const isMatch = msId === staff.id || (msName && msName === normalizeName(staff.name));
+        const isMatch = (msId && msId === staff.id) || (msName && msName === normalizeName(staff.name));
 
         if (isMatch) {
           const dKey = ms.date.substring(0, 10);
@@ -276,9 +327,10 @@ export const generateMonthlyShifts = async (
 
       // 前月末の出勤をトラッカーに反映 (IDまたは氏名で照合)
       (prevShifts || []).forEach((ps: any) => {
-        const psId = String(ps.staff_id || '').trim();
+        const extractedId = extractUuid(ps.id);
+        const psId = String(ps.staff_id || ps.user_id || extractedId || '').trim();
         const psName = normalizeName(ps.staff_name || '');
-        if (psId === staff.id || (psName && psName === normalizeName(staff.name))) {
+        if ((psId && psId === staff.id) || (psName && psName === normalizeName(staff.name))) {
           tracker.workedDates.add(ps.date.substring(0, 10));
         }
       });
@@ -412,10 +464,25 @@ export const generateMonthlyShifts = async (
 
         if (available.length === 0) break;
 
+        // [V60.7] 名簿順（シーケンス）を絶対の基準としてローテーションを厳格化
+        // ユーザー要望: 7月は「森田さん（13番目）」から厳格に開始する
+        const isJuly = dateStr.startsWith('2026-07');
+        const moritaIndex = rawEligible.findIndex(s => s.name.includes('森田'));
+        const totalEligible = rawEligible.length;
+
         available.sort((a, b) => {
           const diff = a.holidayWorkCount - b.holidayWorkCount;
           if (diff !== 0) return diff;
-          return a.id < b.id ? -1 : 1;
+          
+          let seqA = staffSequenceMap.get(a.id) ?? 999;
+          let seqB = staffSequenceMap.get(b.id) ?? 999;
+          
+          if (isJuly && moritaIndex !== -1 && seqA !== 999 && seqB !== 999) {
+            seqA = (seqA - moritaIndex + totalEligible) % totalEligible;
+            seqB = (seqB - moritaIndex + totalEligible) % totalEligible;
+          }
+          
+          return seqA - seqB;
         });
 
         assignShift(available[0], dateStr, dayType, 'holiday_round_robin');
@@ -437,10 +504,20 @@ export const generateMonthlyShifts = async (
 
           if (fallback.length === 0) break;
 
+          // [V60.7] 名簿順（シーケンス）を絶対の基準としてローテーションを厳格化（フォールバック用）
           fallback.sort((a, b) => {
             const diff = a.holidayWorkCount - b.holidayWorkCount;
             if (diff !== 0) return diff;
-            return a.id < b.id ? -1 : 1;
+            
+            let seqA = staffSequenceMap.get(a.id) ?? 999;
+            let seqB = staffSequenceMap.get(b.id) ?? 999;
+            
+            if (isJuly && moritaIndex !== -1 && seqA !== 999 && seqB !== 999) {
+              seqA = (seqA - moritaIndex + totalEligible) % totalEligible;
+              seqB = (seqB - moritaIndex + totalEligible) % totalEligible;
+            }
+            
+            return seqA - seqB;
           });
 
           assignShift(fallback[0], dateStr, dayType, 'holiday_emergency');
@@ -483,20 +560,12 @@ export const generateMonthlyShifts = async (
         continue;
       }
 
-      // 層1: 目標未達スタッフのみを割り当てる（定員確保のための無理な投入や連勤制限緩和は行わない）
+      // [V60.4] 平日定員の撤廃: 目標稼働日数に達していない全スタッフを割り当てる
       const underTarget = baseAvailable.filter(t => t.totalWorkCount < targetWorkDays);
-      underTarget.sort((a, b) => {
-        const aNeed = targetWorkDays - a.totalWorkCount;
-        const bNeed = targetWorkDays - b.totalWorkCount;
-        if (bNeed !== aNeed) return bNeed - aNeed;
-        return a.id < b.id ? -1 : 1;
-      });
+      
+      underTarget.forEach(t => assignShift(t, dateStr, 'weekday', 'weekday_equalization'));
 
-      // [V57.0] 定員に満たなくても、目標未達の候補者がいなければそこで停止する（無理な補填はしない）
-      const toAssign = underTarget.slice(0, limits.weekdayCap);
-      toAssign.forEach(t => assignShift(t, dateStr, 'weekday', 'weekday_equalization'));
-
-      console.log(`[ShiftEngine] ${dateStr}(weekday): ${toAssign.length}人を配置。定員(${limits.weekdayCap})に満たない場合も、目標未達者がいないため補填は行いません。`);
+      console.log(`[ShiftEngine] ${dateStr}(weekday): ${underTarget.length}人を配置。平日の定員制限は撤廃されました。`);
     }
 
     // ═══════════════════════════════════════════
