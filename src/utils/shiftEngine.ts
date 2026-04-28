@@ -400,43 +400,6 @@ export const generateMonthlyShifts = async (
       }
       console.log(`[ShiftEngine] ${dateStr}(${dayType}): ${assignedOnDay}/${cap}人配置完了`);
     }
-
-      // フォールバック: 上限超えの投入
-      if (assignedOnDay < cap) {
-        for (let slot = assignedOnDay; slot < cap; slot++) {
-          const staffArray = Array.from(trackers.values());
-          const fallback = staffArray.filter(t => {
-            if (t.isWeekendOff) return false; // 【重要】フォールバック時も土日祝休み設定を尊重
-            if (t.workedDates.has(dateStr))                 return false;
-            if (hasLeave(t, dateStr))                        return false;
-            if (hasManualShift(t.id, dateStr))               return false; // 【V53.6】
-            if (wouldViolateStreak(dateStr, t.workedDates)) return false;
-            return true;
-          });
-
-          if (fallback.length === 0) break;
-
-          // [V60.7] 名簿順（シーケンス）を絶対の基準としてローテーションを厳格化（フォールバック用）
-          fallback.sort((a, b) => {
-            const diff = a.holidayWorkCount - b.holidayWorkCount;
-            if (diff !== 0) return diff;
-            
-            let seqA = staffSequenceMap.get(a.id) ?? 999;
-            let seqB = staffSequenceMap.get(b.id) ?? 999;
-            
-            if (isJuly && moritaIndex !== -1 && seqA !== 999 && seqB !== 999) {
-              seqA = (seqA - moritaIndex + totalEligible) % totalEligible;
-              seqB = (seqB - moritaIndex + totalEligible) % totalEligible;
-            }
-            
-            return seqA - seqB;
-          });
-
-          assignShift(fallback[0], dateStr, dayType, 'holiday_emergency');
-          assignedOnDay++;
-        }
-      }
-      console.log(`[ShiftEngine] ${dateStr}(${dayType}): ${assignedOnDay}/${cap}人配置`);
     }
 
     // ═══════════════════════════════════════════
