@@ -157,7 +157,7 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 61.4 - STAFF CALENDAR SYNC]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 61.5 - WSOD HOTFIX]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}

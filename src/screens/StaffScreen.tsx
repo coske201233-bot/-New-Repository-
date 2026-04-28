@@ -273,30 +273,32 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         const existing = dayMap.get(key);
         
         const isManualEntry = (rec: any) => 
-          !!(rec.is_manual || rec.isManual) || 
-          String(rec.id || '').startsWith('m-') || 
-          String(rec.id || '').startsWith('req-');
-
-        const isManNew = isManualEntry(r);
-        const wasManOld = isManualEntry(existing);
+          !!(rec?.is_manual || rec?.isManual) || 
+          String(rec?.id || '').startsWith('m-') || 
+          String(rec?.id || '').startsWith('req-');
 
         let isBetter = false;
         if (!existing) {
           isBetter = true;
-        } else if (isManNew && !wasManOld) {
-          isBetter = true; // 手動は常に自動を上書き
-        } else if (!isManNew && wasManOld) {
-          isBetter = false; // 自動は手動を上書きできない
-        } else if (isManNew && wasManOld) {
-          // 共に手動の場合は時間が新しい方を優先
-          const getTime = (i: any) => {
-            const t = i.updatedAt || i.updated_at || i.createdAt || i.created_at || 0;
-            return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
-          };
-          isBetter = getTime(r) > getTime(existing);
         } else {
-          // 共に自動（または手動フラグが無い）場合は、休みを優先
-          isBetter = (!['出勤', '日勤'].includes(r.type) && ['出勤', '日勤'].includes(existing.type));
+          const isManNew = isManualEntry(r);
+          const wasManOld = isManualEntry(existing);
+
+          if (isManNew && !wasManOld) {
+            isBetter = true; // 手動は常に自動を上書き
+          } else if (!isManNew && wasManOld) {
+            isBetter = false; // 自動は手動を上書きできない
+          } else if (isManNew && wasManOld) {
+            // 共に手動の場合は時間が新しい方を優先
+            const getTime = (i: any) => {
+              const t = i?.updatedAt || i?.updated_at || i?.createdAt || i?.created_at || 0;
+              return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
+            };
+            isBetter = getTime(r) > getTime(existing);
+          } else {
+            // 共に自動（または手動フラグが無い）場合は、休みを優先
+            isBetter = (!['出勤', '日勤'].includes(r?.type) && ['出勤', '日勤'].includes(existing?.type));
+          }
         }
           
         if (isBetter) {
@@ -602,7 +604,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <View>
-            <ThemeText variant="h1">[BUILD: VERSION 61.4 - STAFF CALENDAR SYNC]</ThemeText>
+            <ThemeText variant="h1">[BUILD: VERSION 61.5 - WSOD HOTFIX]</ThemeText>
             <ThemeText variant="caption">職員の出勤状況・管理</ThemeText>
           </View>
           <View style={{ flexDirection: 'row', gap: 12 }}>
