@@ -400,7 +400,6 @@ export const generateMonthlyShifts = async (
       }
       console.log(`[ShiftEngine] ${dateStr}(${dayType}): ${assignedOnDay}/${cap}人配置完了`);
     }
-    }
 
     // ═══════════════════════════════════════════
     // Pass 3: 平日割り当て (Relaxed Constraint)
