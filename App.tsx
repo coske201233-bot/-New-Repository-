@@ -157,7 +157,7 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 61.7 - STRICT SHIFT ASSIGNMENT ENGINE]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 62.0 - STRICT SEQUENTIAL HOLIDAYS]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}
