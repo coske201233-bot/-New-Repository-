@@ -958,8 +958,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background, width: '100%' },
-  header: { padding: SPACING.md, paddingTop: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' },
+  container: { flex: 1, backgroundColor: COLORS.background, width: '100%', alignItems: 'stretch' },
+  header: { padding: SPACING.md, paddingTop: 10, width: '100%', alignItems: 'stretch' },
   input: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
@@ -973,9 +973,9 @@ const styles = StyleSheet.create({
   wardScroll: { paddingVertical: 10, width: '100%' },
   wardTab: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', marginRight: 8 },
   wardTabActive: { backgroundColor: '#38bdf8' },
-  staffGrid: { gap: 12, width: '100%' },
-  staffCard: { padding: 16, borderRadius: 24, backgroundColor: 'rgba(30, 41, 59, 0.4)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.03)', width: '100%' },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16, width: '100%' },
+  staffGrid: { gap: 12, width: '100%', alignItems: 'stretch' },
+  staffCard: { padding: 16, borderRadius: 24, backgroundColor: 'rgba(30, 41, 59, 0.4)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.03)', width: '100%', alignItems: 'stretch' },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16, width: '100%', alignItems: 'center' },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, backgroundColor: 'rgba(56, 189, 248, 0.15)', marginRight: 6, marginTop: 4 },
   badgeText: { fontSize: 10, color: '#38bdf8', fontWeight: 'bold' },
   miniBtn: { width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center' },

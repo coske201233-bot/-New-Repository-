@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
   buildBanner: { backgroundColor: '#1e293b', paddingVertical: 4, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#334155', width: '100%' },
   buildBannerText: { color: COLORS.primary, fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
   content: { flex: 1, width: '100%', alignItems: 'stretch' },
-  tabBarContainer: { backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border, width: '100%' },
+  tabBarContainer: { backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border, width: '100%', alignItems: 'stretch' },
   tabBar: { flexDirection: 'row', height: 60, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, paddingBottom: 8, width: '100%' },
   tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 8 },
 });
