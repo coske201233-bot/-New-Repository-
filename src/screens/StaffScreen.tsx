@@ -504,70 +504,102 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
   const renderCalendar = () => {
     const days = ['日', '月', '火', '水', '木', '金', '土'];
-    return (
-      <View style={styles.calendarGrid}>
-        {days.map(d => <ThemeText key={d} variant="caption" color={COLORS.textSecondary} style={styles.calendarHeaderCase}>{d}</ThemeText>)}
-        {monthInfo.map((d: MonthDay, i: number) => {
-          if (!d || d.empty) return <View key={`empty-${i}`} style={styles.calendarDay} />;
-          const isSelected = selectedDay === d.dateStr;
-          const sId = String(selectedStaff?.id || '').trim();
-          const sName = normalize(selectedStaff?.name || '');
-          const dayMap = requestMap.get(d.dateStr);
-          const req = (sId && dayMap?.get(sId)) || (sName && dayMap?.get(sName));
-          
-          let displayLabel = '';
-          let labelColor = 'white';
-          if (req) {
-            const h = getReqHours(req);
-            if (['出勤', '日勤'].includes(req.type)) {
-              displayLabel = '出勤'; labelColor = '#38bdf8';
-            } else if (req.type === '公休') {
-              displayLabel = '公休'; labelColor = '#ef4444';
-            } else if (req.type === '夏季休暇') {
-              displayLabel = '夏季'; labelColor = '#ef4444';
-            } else if (req.type === '年休' || req.type === '有給休暇') {
-              displayLabel = '年休'; labelColor = '#ef4444';
-            } else if (req.type === '1日振替') {
-              displayLabel = '振(全)'; labelColor = '#ef4444';
-            } else if (req.type === '半日振替') {
-              displayLabel = '振(半)'; labelColor = '#ef4444';
-            } else if (['時間休', '時間給', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(req.type)) {
-              displayLabel = `${req.type.charAt(0)}(${h}h)`; labelColor = '#ef4444';
-            } else {
-              displayLabel = req.type.slice(0, 2);
-              if (['公休', '欠勤', '休暇', '全休'].includes(req.type)) labelColor = '#ef4444';
-            }
-          } else {
-            // デフォルト表示ロジック（リクエストがない場合）
-            const dDate = new Date(d.dateStr);
-            const dtype = getDayType(dDate);
-            const monthStr = `${dDate.getFullYear()}-${String(dDate.getMonth() + 1).padStart(2, '0')}`;
-            const isNoHoliday = (dtype !== 'weekday') && (selectedStaff?.monthlyNoHoliday?.[monthStr] ?? selectedStaff?.noHoliday);
-            
-            if (dtype === 'weekday') {
-              displayLabel = '出勤'; labelColor = '#38bdf8';
-            } else {
-              // 休日設定に関わらず、デフォルトは「公休」として表示
-              displayLabel = '公休'; labelColor = '#ef4444';
-            }
-          }
+    
+    // 1週間（7日）ごとの行に分割する
+    const rows: MonthDay[][] = [];
+    let currentRow: MonthDay[] = [];
+    
+    monthInfo.forEach((d, i) => {
+      currentRow.push(d);
+      if (currentRow.length === 7 || i === monthInfo.length - 1) {
+        // 7日分たまったか、最後の日なら行を追加
+        while (currentRow.length < 7) {
+          currentRow.push({ day: 0, dateStr: `empty-${i}-${currentRow.length}`, empty: true, isH: false });
+        }
+        rows.push(currentRow);
+        currentRow = [];
+      }
+    });
 
-          return (
-            <TouchableOpacity key={d.dateStr} style={[styles.calendarDay, isSelected && styles.calendarDaySelected]} onPress={() => handleDayPress(d)}>
-              <ThemeText bold={isSelected} color={d.isH ? '#ef4444' : 'white'} style={{ fontSize: 13, marginBottom: 2 }}>{d.day}</ThemeText>
-              <View style={styles.statusLabelContainer}>
-                {displayLabel ? (
-                  <ThemeText 
-                    numberOfLines={1} 
-                    style={[styles.statusLabel, { color: labelColor }]}
-                  >
-                    {displayLabel}
-                  </ThemeText>
-                ) : null}
-              </View>
-            </TouchableOpacity>
-          );
-        })}
+    return (
+      <View style={styles.calendarContainer}>
+        {/* 曜日ヘッダー */}
+        <View style={styles.calendarRow}>
+          {days.map(d => (
+            <View key={d} style={styles.calendarHeaderCell}>
+              <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 12 }}>{d}</ThemeText>
+            </View>
+          ))}
+        </View>
+
+        {/* 日付グリッド */}
+        {rows.map((row, rowIndex) => (
+          <View key={`row-${rowIndex}`} style={styles.calendarRow}>
+            {row.map((d, colIndex) => {
+              if (!d || d.empty) {
+                return <View key={`empty-${rowIndex}-${colIndex}`} style={styles.calendarDayCell} />;
+              }
+
+              const isSelected = selectedDay === d.dateStr;
+              const sId = String(selectedStaff?.id || '').trim();
+              const sName = normalize(selectedStaff?.name || '');
+              const dayMap = requestMap.get(d.dateStr);
+              const req = (sId && dayMap?.get(sId)) || (sName && dayMap?.get(sName));
+              
+              let displayLabel = '';
+              let labelColor = 'white';
+              if (req) {
+                const h = getReqHours(req);
+                if (['出勤', '日勤'].includes(req.type)) {
+                  displayLabel = '出勤'; labelColor = '#38bdf8';
+                } else if (req.type === '公休') {
+                  displayLabel = '公休'; labelColor = '#ef4444';
+                } else if (req.type === '夏季休暇') {
+                  displayLabel = '夏季'; labelColor = '#ef4444';
+                } else if (req.type === '年休' || req.type === '有給休暇') {
+                  displayLabel = '年休'; labelColor = '#ef4444';
+                } else if (req.type === '1日振替') {
+                  displayLabel = '振(全)'; labelColor = '#ef4444';
+                } else if (req.type === '半日振替') {
+                  displayLabel = '振(半)'; labelColor = '#ef4444';
+                } else if (['時間休', '時間給', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(req.type)) {
+                  displayLabel = `${req.type.charAt(0)}(${h}h)`; labelColor = '#ef4444';
+                } else {
+                  displayLabel = req.type.slice(0, 2);
+                  if (['公休', '欠勤', '休暇', '全休'].includes(req.type)) labelColor = '#ef4444';
+                }
+              } else {
+                const dDate = new Date(d.dateStr);
+                const dtype = getDayType(dDate);
+                if (dtype === 'weekday') {
+                  displayLabel = '出勤'; labelColor = '#38bdf8';
+                } else {
+                  displayLabel = '公休'; labelColor = '#ef4444';
+                }
+              }
+
+              return (
+                <TouchableOpacity 
+                  key={d.dateStr} 
+                  style={[styles.calendarDayCell, isSelected && styles.calendarDaySelected]} 
+                  onPress={() => handleDayPress(d)}
+                >
+                  <ThemeText bold={isSelected} color={d.isH ? '#ef4444' : 'white'} style={{ fontSize: 13, marginBottom: 2 }}>{d.day}</ThemeText>
+                  <View style={styles.statusLabelContainer}>
+                    {displayLabel ? (
+                      <ThemeText 
+                        numberOfLines={1} 
+                        style={[styles.statusLabel, { color: labelColor }]}
+                      >
+                        {displayLabel}
+                      </ThemeText>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ))}
       </View>
     );
   };
@@ -960,15 +992,16 @@ const styles = StyleSheet.create({
   },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   calendarNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 20 },
-  calendarHeaderCase: { width: '14.28%', textAlign: 'center', marginBottom: 10, fontSize: 12 },
-  calendarDay: { 
-    width: '14.28%', 
+  calendarContainer: { width: '100%', marginBottom: 10 },
+  calendarRow: { flexDirection: 'row', width: '100%' },
+  calendarHeaderCell: { flex: 1, height: 30, justifyContent: 'center', alignItems: 'center' },
+  calendarDayCell: { 
+    flex: 1, 
     height: 68, 
     justifyContent: 'center', 
     alignItems: 'center', 
     borderRadius: 12, 
-    marginBottom: 2,
+    margin: 1,
     borderWidth: 1,
     borderColor: 'transparent'
   },
