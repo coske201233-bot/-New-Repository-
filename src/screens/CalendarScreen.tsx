@@ -586,42 +586,44 @@ export const CalendarScreen: React.FC<any> = ({
             </View>
           </View>
 
-            {/* Working Staff Section - Only show names for Holidays */}
-            <View style={styles.leavesSection}>
-              <View style={styles.sectionDivider} />
-              <View style={styles.leavesTitleRow}><Users size={16} color={COLORS.primary} /><ThemeText variant="label" style={{ color: COLORS.primary, marginLeft: 8 }}>出勤者一覧</ThemeText></View>
-              {workingStaff.length > 0 ? workingStaff.map((item, idx) => (
-                <View key={idx} style={styles.leafItem}>
-                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                    <ThemeText variant="caption" bold>
-                      {item.staff.name} {item.isHomeVisit ? '[訪問リハ]' : (item.isAssistant ? '[助手]' : `[${item.staff.jobType || item.staff.profession}]`)}
-                    </ThemeText>
-                    <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginLeft: 8 }} numberOfLines={1}>
-                      ({item.type}{item.isHomeVisit ? ' / 訪問' : (item.isAssistant ? ' / 助手' : '')})
-                      {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
-                      {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.duration}h</ThemeText>}
-                      {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
-                    </ThemeText>
-                  </View>
-                  {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                      {item.status === 'pending' && (
-                        <TouchableOpacity 
-                          style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
-                          onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
-                        >
-                          <Check size={14} color={COLORS.primary} />
-                        </TouchableOpacity>
-                      )}
+          {/* 休日のみ詳細リストを表示する */}
+          {getDayType(selectedDate) !== 'weekday' && (
+            <>
+              {/* Working Staff Section */}
+              <View style={styles.leavesSection}>
+                <View style={styles.sectionDivider} />
+                <View style={styles.leavesTitleRow}><Users size={16} color={COLORS.primary} /><ThemeText variant="label" style={{ color: COLORS.primary, marginLeft: 8 }}>出勤者一覧</ThemeText></View>
+                {workingStaff.length > 0 ? workingStaff.map((item, idx) => (
+                  <View key={idx} style={styles.leafItem}>
+                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                      <ThemeText variant="caption" bold>
+                        {item.staff.name} {item.isHomeVisit ? '[訪問リハ]' : (item.isAssistant ? '[助手]' : `[${item.staff.jobType || item.staff.profession}]`)}
+                      </ThemeText>
+                      <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginLeft: 8 }} numberOfLines={1}>
+                        ({item.type}{item.isHomeVisit ? ' / 訪問' : (item.isAssistant ? ' / 助手' : '')})
+                        {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
+                        {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.duration}h</ThemeText>}
+                        {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
+                      </ThemeText>
                     </View>
-                  )}
-                </View>
-              )) : (
-                <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>出勤予定なし</ThemeText>
-              )}
-            </View>
-
-          {/* Off Staff Section */}
+                    {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        {item.status === 'pending' && (
+                          <TouchableOpacity 
+                            style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
+                            onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
+                          >
+                            <Check size={14} color={COLORS.primary} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                )) : (
+                  <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>出勤予定なし</ThemeText>
+                )}
+              </View>
+            {/* Off Staff Section */}
           <View style={styles.leavesSection}>
             <View style={styles.sectionDivider} />
             <View style={styles.leavesTitleRow}><UserMinus size={16} color="#ef4444" /><ThemeText variant="label" style={{ color: '#ef4444', marginLeft: 8 }}>休暇・休日</ThemeText></View>
@@ -655,7 +657,8 @@ export const CalendarScreen: React.FC<any> = ({
               <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>休暇者なし</ThemeText>
             )}
           </View>
-
+            </>
+          )}
         </ThemeCard>
       </View>
       </ScrollView>

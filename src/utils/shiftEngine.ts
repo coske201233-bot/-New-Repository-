@@ -434,12 +434,20 @@ export const generateMonthlyShifts = async (
         continue;
       }
 
-      // [V60.4] 平日定員の撤廃: 目標稼働日数に達していない全スタッフを割り当てる
-      const underTarget = baseAvailable.filter(t => t.totalWorkCount < targetWorkDays);
+      // 目標稼働日数に達していないスタッフを抽出し、現在の出勤数が少ない順にソート（公平化）
+      const underTarget = baseAvailable
+        .filter(t => t.totalWorkCount < targetWorkDays)
+        .sort((a, b) => a.totalWorkCount - b.totalWorkCount);
       
-      underTarget.forEach(t => assignShift(t, dateStr, 'weekday', 'weekday_equalization'));
+      // 不足分だけ割り当て
+      let assignedCount = 0;
+      for (const t of underTarget) {
+        if (assignedCount >= neededCount) break;
+        assignShift(t, dateStr, 'weekday', 'weekday_equalization');
+        assignedCount++;
+      }
 
-      console.log(`[ShiftEngine] ${dateStr}(weekday): ${underTarget.length}人を配置。平日の定員制限は撤廃されました。`);
+      console.log(`[ShiftEngine] ${dateStr}(weekday): ${assignedCount}人を追加配置。合計 ${assignedForDay + assignedCount}/${limits.weekdayCap} 人`);
     }
 
     // ═══════════════════════════════════════════
