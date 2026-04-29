@@ -166,7 +166,7 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 67.0 - ULTIMATE MOBILE LAYOUT RECOVERY]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 68.0 - COMPLETE MOBILE FULL-WIDTH RECOVERY]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}
