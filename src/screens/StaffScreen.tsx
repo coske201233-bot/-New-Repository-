@@ -767,7 +767,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           pointerEvents: 'box-none'
         }}>
           <View style={{
-            width: '90%', maxWidth: 500, backgroundColor: '#0f172a',
+            width: '95%', backgroundColor: '#0f172a',
             padding: 20, borderRadius: 10,
             pointerEvents: 'auto',
             elevation: 10,
@@ -958,8 +958,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  header: { padding: SPACING.md, paddingTop: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: COLORS.background, width: '100%' },
+  header: { padding: SPACING.md, paddingTop: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' },
   input: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
@@ -967,28 +967,30 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)'
+    borderColor: 'rgba(255,255,255,0.1)',
+    width: '100%'
   },
-  wardScroll: { paddingVertical: 10 },
+  wardScroll: { paddingVertical: 10, width: '100%' },
   wardTab: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', marginRight: 8 },
   wardTabActive: { backgroundColor: '#38bdf8' },
-  staffGrid: { gap: 12 },
-  staffCard: { padding: 16, borderRadius: 24, backgroundColor: 'rgba(30, 41, 59, 0.4)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.03)' },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
+  staffGrid: { gap: 12, width: '100%' },
+  staffCard: { padding: 16, borderRadius: 24, backgroundColor: 'rgba(30, 41, 59, 0.4)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.03)', width: '100%' },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16, width: '100%' },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, backgroundColor: 'rgba(56, 189, 248, 0.15)', marginRight: 6, marginTop: 4 },
   badgeText: { fontSize: 10, color: '#38bdf8', fontWeight: 'bold' },
   miniBtn: { width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center' },
   iconBtn: { padding: 8, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 10 },
-  statsGrid: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 16, padding: 12 },
+  statsGrid: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 16, padding: 12, width: '100%' },
   statBox: { flex: 1, alignItems: 'center' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end', width: '100%' },
   calendarModal: { 
     backgroundColor: '#0f172a', 
     borderTopLeftRadius: 28, 
     borderTopRightRadius: 28, 
     padding: 12, 
     paddingTop: 20,
-    maxHeight: '92%' 
+    maxHeight: '92%',
+    width: '100%' 
   },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   calendarNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
