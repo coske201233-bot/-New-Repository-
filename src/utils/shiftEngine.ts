@@ -12,6 +12,11 @@ interface ShiftTargetLimits {
   holidayCap: number;
 }
 
+const HOLIDAY_ROTATION_ORDER = [
+  '佐藤公貴', '佐藤', '三井', '阿部', '藤森', '坂下', '佐久間', '中野',
+  '山川', '久保田', '小笠原', '森田', '駒津', '馬淵', '吉田'
+];
+
 interface StaffTracker {
   id: string;
   name: string;
@@ -200,9 +205,14 @@ export const generateMonthlyShifts = async (
       return true;
     });
 
-    // 名簿順を固定（氏名順）
-    const rawEligible = [...eligibleForFilter].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    console.log("[Engine Debug] Target staff list (Sorted):", rawEligible.map(s => s.name).join(', '));
+    // 固定順序に基づいたスタッフリストの作成 [V63.0]
+    const holidayOrderStaff = HOLIDAY_ROTATION_ORDER.map(name => {
+      const normName = normalizeName(name);
+      return eligibleForFilter.find(s => normalizeName(s.name) === normName);
+    }).filter(s => s !== undefined) as any[];
+
+    console.log("[ShiftEngine] Step A: Data filtering/sorting completed.");
+    console.log("[ShiftEngine] Holiday Rotation Order (Eligible):", holidayOrderStaff.map(s => s.name).join(', '));
 
     // ═══════════════════════════════════════════
     // Step B: 承認済み休暇申請を取得
@@ -257,7 +267,7 @@ export const generateMonthlyShifts = async (
     const trackers = new Map<string, StaffTracker>();
     const manualWorkCountPerDay = new Map<string, number>();
 
-    rawEligible.forEach((staff) => {
+    eligibleForFilter.forEach((staff) => {
       const isWeekendOff = !!(staff.no_holiday === true || staff.no_holiday === 'true' || staff.noHoliday === true);
       const tracker: StaffTracker = {
         id: staff.id,
@@ -326,46 +336,67 @@ export const generateMonthlyShifts = async (
       tracker.workedDates.add(dateStr);
       if (dayType !== 'weekday') {
         tracker.holidayWorkCount++;
-        findAndSetCompOff(tracker, dateStr, weekdayDates);
+        findAndSetCompOff(tracker, dateStr, weekdayDates, generatedShifts);
       }
     };
 
-    // [V62.0] 同週の水曜日または木曜日に振休を割り当てる
-    function findAndSetCompOff(tracker: StaffTracker, holidayDateStr: string, weekdays: string[]) {
+    // [V66.0] 振休を同週の月〜金の中で、最も振休が少ない日に分散させる
+    function findAndSetCompOff(tracker: StaffTracker, holidayDateStr: string, weekdays: string[], currentGenerated: any[]) {
       const hDate = new Date(holidayDateStr.replace(/-/g, '/'));
       
       // 週の開始日（月曜日）を算出
       const getWeekStart = (d: Date) => {
         const date = new Date(d.getTime());
         const day = date.getDay();
-        const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+        // 日曜(0)なら-6、それ以外は -(day-1)
+        const diff = date.getDate() - (day === 0 ? 6 : day - 1);
         return new Date(date.setDate(diff));
       };
       const weekStart = getWeekStart(hDate);
-
-      // 同週の水曜日(3)と木曜日(4)を算出
-      const wed = new Date(weekStart); wed.setDate(weekStart.getDate() + 2);
-      const thu = new Date(weekStart); thu.setDate(weekStart.getDate() + 3);
       
-      const targets = [getDateStr(wed), getDateStr(thu)];
-
-      for (const dStr of targets) {
-        // 対象月内かつ、他の出勤や休暇と重なっていないかチェック
+      // 同週の月〜金(0-4)を候補にする
+      const candidates: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const d = new Date(weekStart);
+        d.setDate(weekStart.getDate() + i);
+        const dStr = getDateStr(d);
+        // 対象月内かつ、そのスタッフがまだ予定を入れていない日のみ
         if (weekdays.includes(dStr) && !tracker.workedDates.has(dStr) && !tracker.forcedOffDates.has(dStr) && !hasLeave(tracker, dStr)) {
-          assignOffShift(tracker, dStr, '公休', 'holiday_comp_off');
-          console.log(`[ShiftEngine] ${tracker.name}: 休日出勤(${holidayDateStr})の振休を同週の ${dStr} に割り当てました。`);
-          return;
+          candidates.push(dStr);
         }
       }
-      console.warn(`[ShiftEngine] ${tracker.name}: 休日出勤(${holidayDateStr})の振休を同週の水・木に割り当てられませんでした。`);
+
+      if (candidates.length === 0) {
+        console.warn(`[ShiftEngine] ${tracker.name}: 休日出勤(${holidayDateStr})の振休を同週内に割り当てられませんでした。`);
+        return;
+      }
+
+      // 各候補日の「既に割り当てられた振休数」をカウントして、最小の日を選ぶ
+      const sortedCandidates = candidates.sort((a, b) => {
+        const countA = currentGenerated.filter(s => s.date === a && s.details?.phase === 'holiday_comp_off').length;
+        const countB = currentGenerated.filter(s => s.date === b && s.details?.phase === 'holiday_comp_off').length;
+        return countA - countB;
+      });
+
+      const targetDate = sortedCandidates[0];
+      assignOffShift(tracker, targetDate, '公休', 'holiday_comp_off');
+      console.log(`[ShiftEngine] ${tracker.name}: 休日出勤(${holidayDateStr})の振休を週内の負荷分散により ${targetDate} に割り当てました。`);
     }
 
     // ═══════════════════════════════════════════
-    // Pass 2: 休日・土日の割り当て (厳格な名簿順ローテーション)
+    // Pass 2: 休日・土日の割り当て (厳格な固定順ローテーション)
     // ═══════════════════════════════════════════
-    console.log('\n[ShiftEngine] ════ Pass 2: 休日割り当て (厳格なローテーション) ════');
+    console.log('\n[ShiftEngine] ════ Pass 2: 休日割り当て (固定順ローテーション) ════');
     
-    let currentHolidayPtr = 0; // 名簿のポインタを月内で維持
+    // [V65.0] 月ごとの開始ポインタ調整
+    let currentHolidayPtr = 0; 
+    if (year === 2026 && month === 11) {
+      // 11月は佐藤公貴（新リストの1番目）から開始
+      currentHolidayPtr = 0;
+      console.log(`[ShiftEngine] 2026年11月の特定ルール適用: ${HOLIDAY_ROTATION_ORDER[currentHolidayPtr]} から開始します。`);
+    }
+
+    const holidayWorkedInMonth = new Set<string>(); // 月内での重複出勤防止
 
     for (const { dateStr, dayType, cap } of holidayDates) {
       let assignedOnDay = manualWorkCountPerDay.get(dateStr) || 0;
@@ -373,22 +404,37 @@ export const generateMonthlyShifts = async (
       for (let slot = assignedOnDay; slot < cap; slot++) {
         let found = false;
         // ポインタの位置から1周チェック
-        for (let i = 0; i < rawEligible.length; i++) {
-          const idx = (currentHolidayPtr + i) % rawEligible.length;
-          const staff = rawEligible[idx];
+        for (let i = 0; i < holidayOrderStaff.length; i++) {
+          const idx = (currentHolidayPtr + i) % holidayOrderStaff.length;
+          const staff = holidayOrderStaff[idx];
           const tracker = trackers.get(staff.id)!;
 
-          // 条件チェック
+          // 基本条件チェック
           if (tracker.isWeekendOff) continue;
           if (tracker.workedDates.has(dateStr)) continue;
           if (hasLeave(tracker, dateStr)) continue;
           if (hasManualShift(staff.id, dateStr)) continue;
           if (wouldViolateStreak(dateStr, tracker.workedDates)) continue;
 
+          // [V63.1] 月内公平性チェック: 全員が1回ずつ回るまで2回目は避ける
+          if (holidayWorkedInMonth.has(staff.id)) {
+            const anyOneElseNotWorked = holidayOrderStaff.some(s2 => {
+              const t2 = trackers.get(s2.id)!;
+              return !holidayWorkedInMonth.has(s2.id) && 
+                     !t2.isWeekendOff && 
+                     !t2.workedDates.has(dateStr) && 
+                     !hasLeave(t2, dateStr) && 
+                     !hasManualShift(s2.id, dateStr) && 
+                     !wouldViolateStreak(dateStr, t2.workedDates);
+            });
+            if (anyOneElseNotWorked) continue;
+          }
+
           // 配置確定
           assignShift(tracker, dateStr, dayType, 'holiday_strict_sequence');
-          console.log(`[ShiftEngine] ${dateStr}: ${staff.name} を配置 (名簿順)`);
-          currentHolidayPtr = (idx + 1) % rawEligible.length;
+          holidayWorkedInMonth.add(staff.id);
+          console.log(`[ShiftEngine] ${dateStr}: ${staff.name} を配置 (固定順)`);
+          currentHolidayPtr = (idx + 1) % holidayOrderStaff.length;
           found = true;
           assignedOnDay++;
           break;
@@ -550,6 +596,7 @@ export const generateMonthlyShifts = async (
       console.warn('[ShiftEngine] 生成されたシフトが0件のため、保存をスキップしました。');
     }
 
+    console.log('[ShiftEngine] ════ Shift assignment completed. ════');
     console.log('[ShiftEngine] ════ 処理完了 ════\n');
     return generatedShifts;
 

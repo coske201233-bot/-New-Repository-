@@ -3,7 +3,7 @@ import { StyleSheet, View, ScrollView, SafeAreaView, TouchableOpacity, Modal, Pl
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { Users, Coffee, Briefcase, Building2, MapPin, X, RefreshCw, AlertCircle, ChevronRight, LogOut } from 'lucide-react-native';
+import { Users, Coffee, Briefcase, Building2, MapPin, X, RefreshCw, AlertCircle, ChevronRight, LogOut, Calendar as CalendarIcon } from 'lucide-react-native';
 import { getDayType, getDateStr } from '../utils/dateUtils';
 import { sortStaffByName } from '../utils/staffUtils';
 import { getCurrentLimit } from '../utils/limitUtils';
@@ -230,6 +230,65 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* --- [NEW] マイスケジュール セクション (個人カレンダー) --- */}
+          {profile && (
+            <View style={{ marginBottom: SPACING.xl }}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionTitleRow}>
+                  <CalendarIcon color={COLORS.primary} size={18} />
+                  <ThemeText variant="h2">マイスケジュール</ThemeText>
+                </View>
+              </View>
+              <ThemeCard style={styles.personalCard}>
+                <View style={styles.personalHeader}>
+                  <View style={styles.avatarMini}>
+                    <ThemeText bold color="white">{profile.name?.substring(0, 1)}</ThemeText>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <ThemeText bold variant="body">{profile.name} さん</ThemeText>
+                    <ThemeText variant="caption" color={COLORS.textSecondary}>{profile.jobType || profile.profession} / {profile.placement}</ThemeText>
+                  </View>
+                  <TouchableOpacity 
+                    onPress={() => onNavigateToStaff ? onNavigateToStaff('my-calendar') : null}
+                    style={styles.personalCalendarBtn}
+                  >
+                    <ThemeText variant="caption" color={COLORS.primary} bold>詳細カレンダー</ThemeText>
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={styles.personalScheduleRow}>
+                  {[0, 1, 2].map(offset => {
+                    const target = new Date();
+                    target.setDate(target.getDate() + offset);
+                    const dStr = getDateStr(target);
+                    const dayType = getDayType(target);
+                    
+                    const shift = (requests || []).find(r => 
+                      (r.staff_id === profile.id || r.staffName === profile.name) && 
+                      r.date === dStr && 
+                      r.status === 'approved'
+                    );
+                    
+                    const type = shift ? shift.type : (dayType === 'weekday' ? '出勤' : '公休');
+                    const isOff = ['公休', '年休', '休暇', '欠勤'].includes(type);
+                    
+                    return (
+                      <View key={offset} style={styles.scheduleItem}>
+                        <ThemeText variant="caption" color={COLORS.textSecondary}>
+                          {offset === 0 ? '今日' : offset === 1 ? '明日' : '明後日'}
+                        </ThemeText>
+                        <View style={[styles.scheduleBadge, { backgroundColor: isOff ? 'rgba(239, 68, 68, 0.1)' : 'rgba(14, 165, 233, 0.1)' }]}>
+                          <ThemeText bold style={{ fontSize: 13, color: isOff ? '#ef4444' : '#0ea5e9' }}>{type}</ThemeText>
+                        </View>
+                        <ThemeText style={{ fontSize: 10, marginTop: 4, opacity: 0.7 }}>{target.getMonth()+1}/{target.getDate()}</ThemeText>
+                      </View>
+                    );
+                  })}
+                </View>
+              </ThemeCard>
+            </View>
+          )}
           
           {/* 申請承認通知（管理者のみ） */}
           {((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated) && (
@@ -425,6 +484,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   iconBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239, 68, 68, 0.1)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
+  personalCard: { padding: 16, borderRadius: 24, backgroundColor: 'rgba(56, 189, 248, 0.05)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.1)' },
+  personalHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  personalCalendarBtn: { backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
+  personalScheduleRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 18, padding: 12 },
+  scheduleItem: { flex: 1, alignItems: 'center' },
+  scheduleBadge: { marginTop: 6, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10 },
   personalAccountBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', margin: SPACING.md, padding: 12, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
   avatarMini: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
 });

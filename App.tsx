@@ -140,15 +140,24 @@ export default function App() {
       isLoadingShifts,
     };
 
+    const handleNavigateToStaff = (mode?: string) => {
+      if (mode === 'my-calendar') {
+        // We'll use a local state in StaffScreen to trigger the personal calendar
+        setCurrentTab('staff');
+      } else {
+        setCurrentTab('staff');
+      }
+    };
+
     switch (currentTab) {
-      case 'home': return <HomeScreen onNavigateToStaff={() => setCurrentTab('staff')} {...commonProps} />;
+      case 'home': return <HomeScreen onNavigateToStaff={handleNavigateToStaff} {...commonProps} />;
       case 'calendar': return <CalendarScreen {...commonProps} />;
       case 'requests': return <RequestScreen {...commonProps} />;
       case 'staff': return <StaffScreen {...commonProps} isPrivileged={isAdminAuthenticated} />;
       case 'admin': return <AdminScreen {...commonProps} />;
       case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={approveRequest} handleBulkApprove={handleBulkApprove} deleteRequest={onDeleteRequest} handleReject={handleReject} />;
       case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab('admin')} />;
-      default: return <HomeScreen onNavigateToStaff={() => setCurrentTab('staff')} {...commonProps} />;
+      default: return <HomeScreen onNavigateToStaff={handleNavigateToStaff} {...commonProps} />;
     }
   };
 

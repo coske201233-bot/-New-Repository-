@@ -101,6 +101,17 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     runDebugFetch();
   }, []);
 
+  // [NEW] 自動的に自分のカレンダーを開くロジック (一般スタッフ用)
+  useEffect(() => {
+    if (profile && !isAdminAuthenticated && !selectedStaff && staffList.length > 0) {
+      const me = staffList.find(s => s && (s.id === profile.id || normalize(s.name) === normalize(profile.name)));
+      if (me) {
+        setSelectedStaff(me);
+        setIsCalendarModalVisible(true);
+      }
+    }
+  }, [profile, staffList, isAdminAuthenticated]);
+
   // Registration Form States
   const [isRegistrationModalVisible, setIsRegistrationModalVisible] = useState(false);
   const [regName, setRegName] = useState('');
@@ -543,9 +554,16 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
           return (
             <TouchableOpacity key={d.dateStr} style={[styles.calendarDay, isSelected && styles.calendarDaySelected]} onPress={() => handleDayPress(d)}>
-              <ThemeText bold={isSelected} color={d.isH ? '#ef4444' : 'white'} style={{ fontSize: 13 }}>{d.day}</ThemeText>
+              <ThemeText bold={isSelected} color={d.isH ? '#ef4444' : 'white'} style={{ fontSize: 13, marginBottom: 2 }}>{d.day}</ThemeText>
               <View style={styles.statusLabelContainer}>
-                {displayLabel ? <ThemeText style={[styles.statusLabel, { color: labelColor }]}>{displayLabel}</ThemeText> : null}
+                {displayLabel ? (
+                  <ThemeText 
+                    numberOfLines={1} 
+                    style={[styles.statusLabel, { color: labelColor }]}
+                  >
+                    {displayLabel}
+                  </ThemeText>
+                ) : null}
               </View>
             </TouchableOpacity>
           );
@@ -932,14 +950,30 @@ const styles = StyleSheet.create({
   statsGrid: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 16, padding: 12 },
   statBox: { flex: 1, alignItems: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
-  calendarModal: { backgroundColor: '#0f172a', borderTopLeftRadius: 32, borderTopRightRadius: 32, padding: 24, maxHeight: '90%' },
+  calendarModal: { 
+    backgroundColor: '#0f172a', 
+    borderTopLeftRadius: 28, 
+    borderTopRightRadius: 28, 
+    padding: 12, 
+    paddingTop: 20,
+    maxHeight: '92%' 
+  },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   calendarNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 20 },
-  calendarHeaderCase: { width: '14.2%', textAlign: 'center', marginBottom: 8 },
-  calendarDay: { width: '14.2%', minHeight: 65, justifyContent: 'flex-start', alignItems: 'center', borderRadius: 12, marginBottom: 4, paddingTop: 8 },
-  calendarDaySelected: { backgroundColor: 'rgba(56, 189, 248, 0.15)', borderWidth: 1, borderColor: '#38bdf8' },
-  statusLabelContainer: { minHeight: 20, justifyContent: 'center', alignItems: 'center', marginTop: 4 },
+  calendarHeaderCase: { width: '14.28%', textAlign: 'center', marginBottom: 10, fontSize: 12 },
+  calendarDay: { 
+    width: '14.28%', 
+    height: 68, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    borderRadius: 12, 
+    marginBottom: 2,
+    borderWidth: 1,
+    borderColor: 'transparent'
+  },
+  calendarDaySelected: { backgroundColor: 'rgba(56, 189, 248, 0.2)', borderColor: '#38bdf8' },
+  statusLabelContainer: { height: 18, justifyContent: 'center', alignItems: 'center' },
   statusLabel: { fontSize: 9, fontWeight: 'bold', textAlign: 'center' },
   editorSection: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', paddingTop: 20 },
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },

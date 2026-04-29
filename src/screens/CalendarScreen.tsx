@@ -439,11 +439,33 @@ export const CalendarScreen: React.FC<any> = ({
 
       let workingCount = 0;
       let holidayWorkers: any[] = [];
+      let offWorkers: any[] = [];
       if (day) {
         const info = getDetailedDayInfo(d!);
         workingCount = info.working.filter(w => !w.isHomeVisit && !w.isAssistant).length;
+
+        // 名前＋種別のラベルを生成するヘルパー
+        const getDisplayLabel = (item: any) => {
+          const name = item.staff.name;
+          const type = item.type || '';
+          if (type === '時間休' || type === '時間給') return `${name}(${item.details?.duration || '?'}h)`;
+          if (type === '午前休') return `${name}(前)`;
+          if (type === '午後休') return `${name}(後)`;
+          if (type.includes('振替') || type.includes('振休')) return `${name}(振)`;
+          if (type === '年休' || type === '有給休暇') return `${name}(年)`;
+          if (type === '特休') return `${name}(特)`;
+          if (type === '公休') return name;
+          return `${name}(${type.substring(0, 1)})`;
+        };
+
         if (dayType !== 'weekday') {
-          holidayWorkers = info.working.filter(w => !w.isHomeVisit && !w.isAssistant).map(w => w.staff.name);
+          holidayWorkers = info.working.filter(w => !w.isHomeVisit && !w.isAssistant).map(w => getDisplayLabel(w));
+        } else {
+          // [V67.0] 2026年6月以降は平日でも「公休」を含めてすべて表示する
+          const isAfterJune2026 = (d!.getFullYear() > 2026) || (d!.getFullYear() === 2026 && d!.getMonth() >= 5);
+          offWorkers = info.off
+            .filter(o => isAfterJune2026 || o.type !== '公休')
+            .map(o => getDisplayLabel(o));
         }
       }
 
@@ -480,20 +502,26 @@ export const CalendarScreen: React.FC<any> = ({
                 {dayType === 'weekday' ? workingCount : `${workingCount}/${limit}`}
               </ThemeText>
 
-              {holidayWorkers.length > 0 && (
+              {(holidayWorkers.length > 0 || offWorkers.length > 0) && (
                 <View style={styles.holidayWorkersBox}>
-                  {holidayWorkers.slice(0, 3).map((name, idx) => (
+                  {(dayType === 'weekday' ? offWorkers : holidayWorkers).slice(0, 3).map((name, idx) => (
                     <ThemeText 
                       key={idx} 
-                      style={[styles.holidayWorkerName, isSelected && { color: 'white' }]} 
+                      style={[
+                        styles.holidayWorkerName, 
+                        isSelected && { color: 'white' },
+                        dayType === 'weekday' && { color: '#ef4444' } // 休暇者は赤字で表示
+                      ]} 
                       numberOfLines={1}
                       adjustsFontSizeToFit
                     >
                       {name}
                     </ThemeText>
                   ))}
-                  {holidayWorkers.length > 3 && (
-                    <ThemeText style={[styles.holidayWorkerName, { opacity: 0.6, fontSize: 8 }, isSelected && { color: 'white' }]}>他{holidayWorkers.length - 3}名</ThemeText>
+                  {(dayType === 'weekday' ? offWorkers : holidayWorkers).length > 3 && (
+                    <ThemeText style={[styles.holidayWorkerName, { opacity: 0.6, fontSize: 8 }, isSelected && { color: 'white' }]}>
+                      他{(dayType === 'weekday' ? offWorkers : holidayWorkers).length - 3}名
+                    </ThemeText>
                   )}
                 </View>
               )}
@@ -587,7 +615,8 @@ export const CalendarScreen: React.FC<any> = ({
           </View>
 
           {/* 休日のみ詳細リストを表示する */}
-          {getDayType(selectedDate) !== 'weekday' && (
+          {/* 詳細は常に表示 */}
+          {true && (
             <>
               {/* Working Staff Section */}
               <View style={styles.leavesSection}>
@@ -630,10 +659,19 @@ export const CalendarScreen: React.FC<any> = ({
             {offStaff.length > 0 ? offStaff.map((item, idx) => (
                 <View key={idx} style={styles.leafItem}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                    <ThemeText variant="caption" bold style={{ color: COLORS.textSecondary }}>
+                    <ThemeText 
+                      variant="caption" 
+                      bold={item.type !== '公休' && item.type !== '年休'} 
+                      style={{ color: (item.type !== '公休' && item.type !== '年休') ? COLORS.primary : COLORS.textSecondary }}
+                    >
                       {item.staff.name} {item.isHomeVisit ? '[訪問リハ]' : (item.isAssistant ? '[助手]' : `[${item.staff.jobType || item.staff.profession}]`)}
                     </ThemeText>
-                    <ThemeText variant="caption" style={{ marginLeft: 8, color: COLORS.textSecondary }} numberOfLines={1}>
+                    <ThemeText 
+                      variant="caption" 
+                      bold={item.type !== '公休' && item.type !== '年休'}
+                      style={{ marginLeft: 8, color: (item.type !== '公休' && item.type !== '年休') ? COLORS.primary : COLORS.textSecondary }} 
+                      numberOfLines={1}
+                    >
                       ({item.type})
                       {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
                       {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.duration}h</ThemeText>}

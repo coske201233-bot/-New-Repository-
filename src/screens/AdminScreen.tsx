@@ -317,9 +317,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 <TouchableOpacity 
                   style={[styles.inlineBtn, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }, isAssigning && { opacity: 0.5 }]} 
                   onPress={async () => {
-                    if (isAssigning) return;
+                    console.log('[AdminScreen] 自動割り当てボタンがクリックされました');
                     setIsAssigning(true);
                     try {
+                      console.log('[AdminScreen] ShiftEngine モジュールの読み込み中...');
                       const { generateMonthlyShifts } = require('../utils/shiftEngine');
                       await generateMonthlyShifts(currentYear, currentMonth + 1, {
                         weekdayCap: limits.weekday,
@@ -327,6 +328,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                         sunCap: limits.sun,
                         holidayCap: limits.pub
                       });
+                      console.log('[AdminScreen] シフト生成処理が正常に終了しました');
                       Alert.alert('完了', 'シフトの自動割り当てが完了しました。');
 
                       // window.location.reload() を削除 → React stateのシームレス更新に変更
@@ -348,10 +350,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                             }));
                             return [...withoutOldShifts, ...newShifts];
                           });
-                          console.log(`[AdminScreen] shifts再取得完了: ${shiftsRaw.length}件`);
+                          console.log(`[AdminScreen] shifts再取得完了: ${shiftsRaw.length}件 (State updated)`);
                         }
                       } catch (fetchErr) {
-                        console.warn('[AdminScreen] shifts再取得失敗 (UIの表示には影響なし):', fetchErr);
+                        console.error('[AdminScreen] shifts再取得失敗:', fetchErr);
                       }
                     } catch (e: any) {
                       console.error('Auto assign error:', e);
