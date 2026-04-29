@@ -169,7 +169,7 @@ export default function App() {
       <View style={[styles.container, isDesktop && styles.desktopContainer]}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 70.0 - RESPONSIVE FIX VERIFIED]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 71.0 - HOLIDAY AGGREGATION FIX]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}

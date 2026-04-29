@@ -619,14 +619,19 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     for (let day = 1; day <= daysInMonthCount; day++) {
       const date = new Date(year, month, day);
       const dateStr = getDateStr(date);
+      
+      const dayMap = requestMap.get(dateStr);
+      const sId = String(staff.id || '').trim();
       const sT = normalize(staff.name);
       
-      // requestMapを直接引くか、requestsをフィルタリングする（ここでは正確な算出のためrequestsを使用）
-      const req = requests.find(r => r && normalize(r.staffName) === sT && r.date === dateStr && r.status !== 'deleted');
+      // [V71.0] requestMap (requests + shifts) からデータを取得
+      const req = (sId && dayMap?.get(sId)) || (sT && dayMap?.get(sT));
       
       if (req) {
         if (['出勤', '日勤'].includes(req.type)) {
-          if (getDayType(date) === 'weekday' && !isHoliday(date)) workDays++; else holidayWorkDays++;
+          // 祝日出勤の判定: 詳細は明示的なフラグ(isHolidayWork)または曜日から判断
+          const isHW = req.isHolidayWork || req.details?.isHolidayWork || (getDayType(date) !== 'weekday');
+          if (!isHW) workDays++; else holidayWorkDays++;
         } else {
           // 振替は統計から除外、時間休などは加算
           if (['振替', '1日振替', '半日振替', '振替休日'].includes(req.type)) continue;
@@ -654,7 +659,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <View>
-            <ThemeText variant="h1">[BUILD: VERSION 69.0 - FINAL MOBILE LAYOUT VERIFIED]</ThemeText>
+            <ThemeText variant="h1">[BUILD: VERSION 71.0 - HOLIDAY AGGREGATION FIX]</ThemeText>
             <ThemeText variant="caption">職員の出勤状況・管理</ThemeText>
           </View>
           <View style={{ flexDirection: 'row', gap: 12 }}>

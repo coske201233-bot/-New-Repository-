@@ -25,13 +25,14 @@ interface HomeScreenProps {
   onOpenRequests?: () => void;
   onLogout?: () => void;
   isInitialized?: boolean;
+  shifts?: any[];
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ 
   onNavigateToStaff, staffList, requests, weekdayLimit,
   saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, staffViewMode = false,
   onForceCloudSync, profile, isAdminAuthenticated, onOpenRequests, onLogout,
-  isInitialized
+  isInitialized, shifts
 }) => {
   const [selectedWardDetails, setSelectedWardDetails] = useState<string | null>(null);
 
@@ -170,8 +171,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     // ---------------------------------------------------------
     const isWorkingToday = (staffName: string) => {
       const todayStr = getDateStr(new Date());
-      const shift = (requests || []).find(r => r.staffName?.trim() === staffName.trim() && r.date === todayStr && r.status === 'approved');
-      return !!shift && shift.type === '出勤';
+      const sT = staffName.trim();
+      
+      // [V71.0] requests と shifts の両方をチェック
+      const allShifts = [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
+      const shift = allShifts.find(r => (r.staffName || r.staff_name)?.trim() === sT && r.date === todayStr && r.status === 'approved');
+      
+      return !!shift && (shift.type === '出勤' || shift.type === '日勤');
     };
 
     const hospitalAttending = safeStaff.filter(s => {
@@ -264,8 +270,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     const dStr = getDateStr(target);
                     const dayType = getDayType(target);
                     
-                    const shift = (requests || []).find(r => 
-                      (r.staff_id === profile.id || r.staffName === profile.name) && 
+                    const allShifts = [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
+                    const shift = allShifts.find(r => 
+                      (r.staff_id === profile.id || r.staffName === profile.name || r.staff_name === profile.name) && 
                       r.date === dStr && 
                       r.status === 'approved'
                     );

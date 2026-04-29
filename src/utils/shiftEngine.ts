@@ -113,7 +113,7 @@ export const generateMonthlyShifts = async (
   // if (year === 2026 && month === 7) { ... }
 
   console.log('══════════════════════════════════════════════');
-  console.log(`[BUILD: VERSION 62.0 - STRICT SEQUENTIAL HOLIDAYS] 処理開始: ${year}年${month}月`);
+  console.log(`[BUILD: VERSION 71.0 - HOLIDAY AGGREGATION FIX] 処理開始: ${year}年${month}月`);
   console.log("[Engine Debug] 既存のシフトを削除します:", monthPrefix);
   console.log('══════════════════════════════════════════════');
 
@@ -330,7 +330,13 @@ export const generateMonthlyShifts = async (
         date: dateStr,
         type: '出勤',
         status: 'approved',
-        details: { isManual: false, phase, dayType, note: `V62.0 ${phase}` }
+        details: { 
+          isManual: false, 
+          phase, 
+          dayType, 
+          isHolidayWork: dayType !== 'weekday',
+          note: `V71.0 ${phase}` 
+        }
       });
       tracker.totalWorkCount++;
       tracker.workedDates.add(dateStr);
