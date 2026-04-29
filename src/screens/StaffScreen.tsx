@@ -982,7 +982,13 @@ const styles = StyleSheet.create({
   iconBtn: { padding: 8, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 10 },
   statsGrid: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 16, padding: 12, width: '100%' },
   statBox: { flex: 1, alignItems: 'center' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end', width: '100%' },
+  modalOverlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0,0,0,0.85)', 
+    justifyContent: 'flex-end', 
+    alignItems: 'stretch',
+    width: '100%'
+  },
   calendarModal: { 
     backgroundColor: '#0f172a', 
     borderTopLeftRadius: 28, 
@@ -990,12 +996,13 @@ const styles = StyleSheet.create({
     padding: 12, 
     paddingTop: 20,
     maxHeight: '92%',
-    width: '100%' 
+    width: '100%',
+    alignSelf: 'stretch'
   },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  calendarNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, width: '100%' },
+  calendarNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, width: '100%' },
   calendarContainer: { width: '100%', marginBottom: 10 },
-  calendarRow: { flexDirection: 'row', width: '100%' },
+  calendarRow: { flexDirection: 'row', width: '100%', justifyContent: 'space-between' },
   calendarHeaderCell: { flex: 1, height: 30, justifyContent: 'center', alignItems: 'center' },
   calendarDayCell: { 
     flex: 1, 
@@ -1005,7 +1012,8 @@ const styles = StyleSheet.create({
     borderRadius: 12, 
     margin: 1,
     borderWidth: 1,
-    borderColor: 'transparent'
+    borderColor: 'transparent',
+    minWidth: 0
   },
   calendarDaySelected: { backgroundColor: 'rgba(56, 189, 248, 0.2)', borderColor: '#38bdf8' },
   statusLabelContainer: { height: 18, justifyContent: 'center', alignItems: 'center' },
