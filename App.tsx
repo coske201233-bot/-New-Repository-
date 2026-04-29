@@ -166,7 +166,7 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 62.0 - STRICT SEQUENTIAL HOLIDAYS]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 64.0 - ROBUST PERSONAL CALENDAR]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}
