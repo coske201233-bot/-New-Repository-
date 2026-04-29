@@ -161,12 +161,11 @@ export default function App() {
     }
   };
 
-  const { width } = useWindowDimensions();
-  const isDesktop = Platform.OS === 'web' && width > 480;
+
 
   return (
     <SafeAreaProvider>
-      <View style={[styles.container, isDesktop && styles.desktopContainer]}>
+      <View style={styles.container}>
         <StatusBar style="light" />
 
 
@@ -219,18 +218,7 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     alignSelf: 'stretch'
   },
-  desktopContainer: {
-    maxWidth: 480,
-    alignSelf: 'center',
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderColor: '#334155',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 10,
-  },
+
   buildBanner: { 
     backgroundColor: '#1e293b', 
     paddingVertical: 4, 
