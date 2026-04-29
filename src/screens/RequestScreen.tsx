@@ -453,9 +453,27 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background, width: '100%' },
-  header: { padding: SPACING.md, marginTop: SPACING.md, width: '100%' },
-  scrollContent: { padding: SPACING.md, paddingBottom: 100, width: '100%' },
+  container: { 
+    flex: 1, 
+    backgroundColor: COLORS.background, 
+    width: '100%',
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
+  header: { 
+    padding: SPACING.md, 
+    marginTop: SPACING.md, 
+    width: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
+  scrollContent: { 
+    padding: SPACING.md, 
+    paddingBottom: 100, 
+    width: '100%',
+    alignItems: 'stretch'
+  },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.md, width: '100%' },
   requestCard: { marginBottom: SPACING.md, padding: SPACING.md, width: '100%' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm, width: '100%' },

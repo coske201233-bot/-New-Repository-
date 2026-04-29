@@ -150,9 +150,23 @@ const ShieldIcon = ({ size, color }: any) => (
 );
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
+  container: { 
+    flex: 1, 
+    backgroundColor: COLORS.background,
+    width: '100%',
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
   glassBackground: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(56, 189, 248, 0.03)' },
-  scrollContent: { flexGrow: 1, padding: SPACING.lg, justifyContent: 'center', paddingVertical: SPACING.xl },
+  scrollContent: { 
+    flexGrow: 1, 
+    padding: SPACING.lg, 
+    justifyContent: 'center', 
+    paddingVertical: SPACING.xl,
+    width: '100%',
+    alignItems: 'stretch'
+  },
   header: { alignItems: 'center', marginBottom: SPACING.xl },
   logoContainer: { marginBottom: 16 },
   title: { fontSize: 32, fontWeight: 'bold' },

@@ -141,8 +141,19 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete, onBack }) 
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  scroll: { padding: SPACING.xl },
+  container: { 
+    flex: 1, 
+    backgroundColor: COLORS.background,
+    width: '100%',
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
+  scroll: { 
+    padding: SPACING.xl,
+    width: '100%',
+    alignItems: 'stretch'
+  },
   header: { marginBottom: 30, alignItems: 'center', position: 'relative', width: '100%' },
   backButton: { position: 'absolute', left: 0, top: 0, flexDirection: 'row', alignItems: 'center', padding: 10, zIndex: 10 },
   title: { fontSize: 32, marginBottom: 8, marginTop: 40 },

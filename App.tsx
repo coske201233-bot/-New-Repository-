@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, TouchableOpacity, SafeAreaView, Alert, Platform, AppState, TextInput, ActivityIndicator, Text as RNText } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, SafeAreaView, Alert, Platform, AppState, TextInput, ActivityIndicator, Text as RNText, useWindowDimensions } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -161,12 +161,15 @@ export default function App() {
     }
   };
 
+  const { width } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && width > 480;
+
   return (
     <SafeAreaProvider>
-      <View style={styles.container}>
+      <View style={[styles.container, isDesktop && styles.desktopContainer]}>
         <StatusBar style="light" />
         <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 68.0 - COMPLETE MOBILE FULL-WIDTH RECOVERY]</ThemeText>
+          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 70.0 - RESPONSIVE FIX VERIFIED]</ThemeText>
         </View>
 
         {/* --- [STRICT BINARY ROUTING] --- */}
@@ -210,12 +213,62 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background, width: '100%', alignItems: 'stretch' },
-  buildBanner: { backgroundColor: '#1e293b', paddingVertical: 4, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#334155', width: '100%' },
+  container: { 
+    flex: 1, 
+    backgroundColor: COLORS.background, 
+    width: '100%', 
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
+  desktopContainer: {
+    maxWidth: 480,
+    alignSelf: 'center',
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: '#334155',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  buildBanner: { 
+    backgroundColor: '#1e293b', 
+    paddingVertical: 4, 
+    alignItems: 'center', 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#334155', 
+    width: '100%',
+    alignSelf: 'stretch'
+  },
   buildBannerText: { color: COLORS.primary, fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
-  content: { flex: 1, width: '100%', alignItems: 'stretch' },
-  tabBarContainer: { backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border, width: '100%', alignItems: 'stretch' },
-  tabBar: { flexDirection: 'row', height: 60, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, paddingBottom: 8, width: '100%' },
+  content: { 
+    flex: 1, 
+    width: '100%', 
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch',
+    flexDirection: 'column' 
+  },
+  tabBarContainer: { 
+    backgroundColor: COLORS.card, 
+    borderTopWidth: 1, 
+    borderTopColor: COLORS.border, 
+    width: '100%', 
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
+  tabBar: { 
+    flexDirection: 'row', 
+    height: 60, 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    paddingHorizontal: 4, 
+    paddingBottom: 8, 
+    width: '100%',
+    alignSelf: 'stretch'
+  },
   tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 8 },
 });
 

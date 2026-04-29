@@ -437,9 +437,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background, width: '100%' },
-  scrollContent: { padding: SPACING.md, width: '100%' },
-  header: { marginBottom: SPACING.lg, marginTop: SPACING.md, width: '100%' },
+  container: { 
+    flex: 1, 
+    backgroundColor: COLORS.background, 
+    width: '100%',
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
+  scrollContent: { 
+    padding: SPACING.md, 
+    width: '100%',
+    alignItems: 'stretch'
+  },
+  header: { 
+    marginBottom: SPACING.lg, 
+    marginTop: SPACING.md, 
+    width: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
   summaryRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.xl, width: '100%' },
   summaryCard: { flex: 1, padding: SPACING.sm, alignItems: 'flex-start', gap: 2 },
   summaryIcon: { backgroundColor: 'rgba(255,255,255,0.05)', padding: 6, borderRadius: BORDER_RADIUS.md, marginBottom: 2 },

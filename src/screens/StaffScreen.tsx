@@ -654,7 +654,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <View>
-            <ThemeText variant="h1">[BUILD: VERSION 68.0 - COMPLETE MOBILE FULL-WIDTH RECOVERY]</ThemeText>
+            <ThemeText variant="h1">[BUILD: VERSION 69.0 - FINAL MOBILE LAYOUT VERIFIED]</ThemeText>
             <ThemeText variant="caption">職員の出勤状況・管理</ThemeText>
           </View>
           <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -670,8 +670,16 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
       {/* --- [CLEANUP] DEBUG RENDER AREA REMOVED --- */}
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: SPACING.md, paddingBottom: 100 }}>
-        <View style={styles.staffGrid}>
+      <ScrollView 
+        style={{ flex: 1, width: '100%' }} 
+        contentContainerStyle={{ 
+          paddingHorizontal: SPACING.md, 
+          paddingBottom: 100,
+          width: '100%',
+          alignItems: 'stretch'
+        }}
+      >
+        <View style={[styles.staffGrid, { width: '100%', alignSelf: 'stretch' }]}>
           {(filteredStaff || []).map(staff => {
             if (!staff) return null;
             const stats = calculateStats(staff);
@@ -925,7 +933,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       {/* Holiday Setting Selection Modal */}
       <Modal visible={showHolidayPicker} transparent animationType="fade">
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' }}>
-          <View style={{ width: '85%', backgroundColor: '#0f172a', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+            <View style={{ width: '85%', backgroundColor: '#0f172a', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
             <ThemeText variant="h2" style={{ marginBottom: 20 }}>休日設定 (自動割当条件)</ThemeText>
             
             <TouchableOpacity 
@@ -958,8 +966,23 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background, width: '100%', alignItems: 'stretch' },
-  header: { padding: SPACING.md, paddingTop: 10, width: '100%', alignItems: 'stretch' },
+  container: { 
+    flex: 1, 
+    backgroundColor: COLORS.background, 
+    width: '100%', 
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch',
+    flexDirection: 'column'
+  },
+  header: { 
+    padding: SPACING.md, 
+    paddingTop: 10, 
+    width: '100%', 
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
   input: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,

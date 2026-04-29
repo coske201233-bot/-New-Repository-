@@ -249,8 +249,22 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  header: { flexDirection: 'row', alignItems: 'center', padding: SPACING.md, marginTop: SPACING.md },
+  container: { 
+    flex: 1, 
+    backgroundColor: COLORS.background,
+    width: '100%',
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    padding: SPACING.md, 
+    marginTop: SPACING.md,
+    width: '100%',
+    alignSelf: 'stretch'
+  },
   backBtn: { marginRight: 16 },
   filterBar: { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', paddingVertical: 8 },
   filterScroll: { paddingHorizontal: SPACING.md, gap: 8 },
@@ -258,8 +272,18 @@ const styles = StyleSheet.create({
   filterChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   batchBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10b981', marginHorizontal: SPACING.md, marginTop: 12, paddingVertical: 10, borderRadius: 8, gap: 8 },
   batchBtnText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
-  scrollContent: { padding: SPACING.md, paddingBottom: 100 },
-  requestCard: { marginBottom: SPACING.md, padding: SPACING.md },
+  scrollContent: { 
+    padding: SPACING.md, 
+    paddingBottom: 100,
+    width: '100%',
+    alignItems: 'stretch'
+  },
+  requestCard: { 
+    marginBottom: SPACING.md, 
+    padding: SPACING.md,
+    width: '100%',
+    alignSelf: 'stretch'
+  },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
   userInfo: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center' },

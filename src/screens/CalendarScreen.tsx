@@ -823,9 +823,27 @@ export const CalendarScreen: React.FC<any> = ({
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background, width: '100%' },
-  header: { padding: SPACING.md, marginTop: SPACING.md, width: '100%' },
-  calendarContainer: { marginVertical: SPACING.md, padding: SPACING.md, width: '100%' },
+  container: { 
+    flex: 1, 
+    backgroundColor: COLORS.background, 
+    width: '100%',
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
+  header: { 
+    padding: SPACING.md, 
+    marginTop: SPACING.md, 
+    width: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
+  calendarContainer: { 
+    marginVertical: SPACING.md, 
+    padding: SPACING.md, 
+    width: '100%',
+    alignItems: 'stretch'
+  },
   monthHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.lg, width: '100%' },
   weekDays: { flexDirection: 'row', marginBottom: SPACING.sm, width: '100%' },
   weekDayText: { flex: 1, textAlign: 'center', color: COLORS.textSecondary },

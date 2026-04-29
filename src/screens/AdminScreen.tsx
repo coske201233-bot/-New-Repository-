@@ -442,8 +442,21 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background, width: '100%' },
-  header: { padding: SPACING.md, paddingTop: 10, width: '100%' },
+  container: { 
+    flex: 1, 
+    backgroundColor: COLORS.background, 
+    width: '100%',
+    maxWidth: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
+  header: { 
+    padding: SPACING.md, 
+    paddingTop: 10, 
+    width: '100%',
+    alignItems: 'stretch',
+    alignSelf: 'stretch'
+  },
   itemRow: { flexDirection: 'row', alignItems: 'center', padding: 16, marginBottom: 12, backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 16, width: '100%' },
   approvalItem: { flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12, borderLeftWidth: 3, borderLeftColor: '#ef4444', width: '100%' },
   miniApproveBtn: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
