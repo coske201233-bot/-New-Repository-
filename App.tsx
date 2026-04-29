@@ -168,9 +168,7 @@ export default function App() {
     <SafeAreaProvider>
       <View style={[styles.container, isDesktop && styles.desktopContainer]}>
         <StatusBar style="light" />
-        <View style={styles.buildBanner}>
-          <ThemeText style={styles.buildBannerText}>[BUILD: VERSION 71.0 - HOLIDAY AGGREGATION FIX]</ThemeText>
-        </View>
+
 
         {/* --- [STRICT BINARY ROUTING] --- */}
         {(!logic.isInitialized) ? (

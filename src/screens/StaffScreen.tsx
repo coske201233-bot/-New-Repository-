@@ -659,7 +659,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <View>
-            <ThemeText variant="h1">[BUILD: VERSION 71.0 - HOLIDAY AGGREGATION FIX]</ThemeText>
+            <ThemeText variant="h1">職員一覧</ThemeText>
             <ThemeText variant="caption">職員の出勤状況・管理</ThemeText>
           </View>
           <View style={{ flexDirection: 'row', gap: 12 }}>
