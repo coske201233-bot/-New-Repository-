@@ -562,8 +562,8 @@ export const CalendarScreen: React.FC<any> = ({
         <View style={styles.header}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <View>
-              <ThemeText variant="h1">カレンダー</ThemeText>
-              <ThemeText variant="caption">シフト・稼働予定の確認</ThemeText>
+              <ThemeText variant="h1">カレンダー [V70.0]</ThemeText>
+              <ThemeText variant="caption">[BUILD: VERSION 70.0 - LOGGING FORCED]</ThemeText>
             </View>
             <TouchableOpacity 
               style={{ padding: 8 }} 

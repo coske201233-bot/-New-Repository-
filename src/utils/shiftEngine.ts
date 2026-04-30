@@ -184,7 +184,7 @@ export const generateMonthlyShifts = async (
   // if (year === 2026 && month === 7) { ... }
 
   console.log('══════════════════════════════════════════════');
-  console.log(`[BUILD: VERSION 71.0 - HOLIDAY AGGREGATION FIX] 処理開始: ${year}年${month}月`);
+  console.log(`[BUILD: VERSION 70.0 - LOGGING FORCED] 処理開始: ${year}年${month}月`);
   console.log("[Engine Debug] 既存のシフトを削除します:", monthPrefix);
   console.log('══════════════════════════════════════════════');
 
@@ -523,6 +523,12 @@ export const generateMonthlyShifts = async (
     if (!holidayDatesToProcess || holidayDatesToProcess.length === 0) {
       console.error("CRITICAL ERROR: holidayDates is empty or undefined!");
     } else {
+      // 休日用スタッフリストの定義 (重要: これがないと ReferenceError になる)
+      const sortedStaffList = HOLIDAY_ROTATION_ORDER.map(name => {
+        const normName = normalizeName(name);
+        return eligibleForFilter.find(s => normalizeName(s.name) === normName);
+      }).filter(s => s !== undefined) as any[];
+
       // 2. Get start index
       let currentStaffIndex = 0;
       try {
