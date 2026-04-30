@@ -513,45 +513,44 @@ export const generateMonthlyShifts = async (
       console.log(`[ShiftEngine] ${dateStr}(weekday): ${assignedCount}人を追加配置。合計 ${assignedForDay + assignedCount}/${limits.weekdayCap} 人`);
     }
 
-    // ═══════════════════════════════════════════
-    // [V75.0] USER FORCED HOLIDAY ASSIGNMENT LOOP (AFTER WEEKDAYS)
-    // ═══════════════════════════════════════════
+    console.log("Weekday generation finished. Now moving to holidays.");
     console.log("--- STARTING HOLIDAY ASSIGNMENTS ---");
+
+    // 1. Get holiday dates (Mapping to existing holidayDates array)
     const holidayDatesToProcess = holidayDates; 
-    console.log("Total holiday dates to process:", holidayDatesToProcess.length);
+    console.log("Total holiday dates to process:", holidayDatesToProcess ? holidayDatesToProcess.length : "UNDEFINED/NULL");
 
-    // 休日用スタッフリストの再取得
-    const sortedStaffList = HOLIDAY_ROTATION_ORDER.map(name => {
-      const normName = normalizeName(name);
-      return eligibleForFilter.find(s => normalizeName(s.name) === normName);
-    }).filter(s => s !== undefined) as any[];
-
-    let currentStaffIndexForHolidays = 0;
-    try {
-      currentStaffIndexForHolidays = await getPreviousMonthPointer(year, month);
-    } catch (e) {
-      currentStaffIndexForHolidays = 0;
-    }
-    console.log("Starting staff index from last month:", currentStaffIndexForHolidays);
-
-    for (const { dateStr, dayType, cap } of holidayDatesToProcess) {
-      let assignedCount = 0;
-      console.log(`Processing date: ${dateStr}, target cap: ${cap}`);
+    if (!holidayDatesToProcess || holidayDatesToProcess.length === 0) {
+      console.error("CRITICAL ERROR: holidayDates is empty or undefined!");
+    } else {
+      // 2. Get start index
+      let currentStaffIndex = 0;
+      try {
+        currentStaffIndex = await getPreviousMonthPointer(year, month);
+      } catch (e) {
+        currentStaffIndex = 0;
+      }
+      console.log("Starting staff index:", currentStaffIndex);
       
-      // USER STRUCTURE: EXACT COPY
-      while (assignedCount < cap) {
-        const person = sortedStaffList[currentStaffIndexForHolidays];
-        const tracker = trackers.get(person.id)!;
+      // 3. Loop dates
+      for (const { dateStr, dayType, cap } of holidayDatesToProcess) {
+        let assignedCount = 0;
+        console.log(`Processing date: ${dateStr}, target cap: ${cap}`);
         
-        // 重複配置ガード
-        if (!tracker.workedDates.has(dateStr)) {
-          assignShift(tracker, dateStr, dayType, 'holiday_strict_sequence');
-          console.log(`Assigned to ${dateStr}: Index ${currentStaffIndexForHolidays} (${person.name})`);
-          assignedCount++;
+        while (assignedCount < cap) {
+          const person = sortedStaffList[currentStaffIndex % sortedStaffList.length];
+          const tracker = trackers.get(person.id)!;
+          
+          // Duplicate guard
+          if (!tracker.workedDates.has(dateStr)) {
+            assignShift(tracker, dateStr, dayType, 'holiday_strict_sequence');
+            console.log(`Assigned to ${dateStr}: Index ${currentStaffIndex % sortedStaffList.length} (${person.name})`);
+            assignedCount++;
+          }
+          
+          // Safe infinite modulo progression
+          currentStaffIndex = (currentStaffIndex + 1) % sortedStaffList.length;
         }
-        
-        // Safe infinite modulo progression
-        currentStaffIndexForHolidays = (currentStaffIndexForHolidays + 1) % sortedStaffList.length;
       }
     }
     console.log("--- FINISHED HOLIDAY ASSIGNMENTS ---");
