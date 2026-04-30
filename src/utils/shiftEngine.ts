@@ -465,63 +465,61 @@ export const generateMonthlyShifts = async (
     // ═══════════════════════════════════════════
     console.log('\n[ShiftEngine] ════ Pass 2: 休日割り当て (固定順ローテーション) ════');
     
-    // [V74.0] 前月の実績をDBから参照してポインタを初期化
     let currentHolidayPtr = 0;
     try {
       currentHolidayPtr = await getPreviousMonthPointer(year, month);
-      console.log(`[ShiftEngine] ポインタ初期化: ${currentHolidayPtr} (${HOLIDAY_ROTATION_ORDER[currentHolidayPtr]})`);
+      console.log(`[ShiftEngine] 初期ポインタ取得: ${currentHolidayPtr} (${HOLIDAY_ROTATION_ORDER[currentHolidayPtr]})`);
     } catch (e) {
-      console.warn('[ShiftEngine] 前月ポインタ取得エラー。0から開始します。', e);
+      console.warn('[ShiftEngine] 前月ポインタ取得失敗。0から開始します。', e);
       currentHolidayPtr = 0;
     }
     
-    // [V74.0] 休日割当対象スタッフの抽出
     const holidayStaffList = HOLIDAY_ROTATION_ORDER.map(name => {
       const normName = normalizeName(name);
       return eligibleForFilter.find(s => normalizeName(s.name) === normName);
     }).filter(s => s !== undefined) as any[];
 
     if (holidayStaffList.length === 0) {
-      console.error('[ShiftEngine] 警告: 休日出勤の対象スタッフが見つかりません。Pass 2 をスキップします。');
+      console.error('[ShiftEngine] エラー: 休日出勤可能なスタッフが0名です。Pass 2 をスキップします。');
     } else {
       for (const { dateStr, dayType, cap } of holidayDates) {
         let assignedOnDay = manualWorkCountPerDay.get(dateStr) || 0;
-        console.log(`[ShiftEngine] ${dateStr} (${dayType}) 割当開始 (定員:${cap}, 既配置:${assignedOnDay})`);
+        console.log(`[ShiftEngine] >>> ${dateStr} (${dayType}) 割当開始。目標:${cap}, 既配置:${assignedOnDay}`);
 
-        // 目標人数を満たすまでリストを循環
-        for (let slot = assignedOnDay; slot < cap; slot++) {
-          let found = false;
+        // 無限ループ防止のため、最大試行回数を設定（スタッフリストの5倍など十分な数）
+        let attempts = 0;
+        const maxAttempts = holidayStaffList.length * 5;
+
+        while (assignedOnDay < cap && attempts < maxAttempts) {
+          attempts++;
+          const idx = currentHolidayPtr % holidayStaffList.length;
+          const staff = holidayStaffList[idx];
+          const tracker = trackers.get(staff.id)!;
           
-          // 無限ループ防止のため、スタッフ数分だけ試行
-          for (let i = 0; i < holidayStaffList.length; i++) {
-            const idx = (currentHolidayPtr + i) % holidayStaffList.length;
-            const staff = holidayStaffList[idx];
-            const tracker = trackers.get(staff.id)!;
-            
-            // 制約チェック
-            if (tracker.isWeekendOff) continue;
-            if (tracker.workedDates.has(dateStr)) continue;
-            if (hasLeave(tracker, dateStr)) continue;
-            if (hasManualShift(staff.id, dateStr)) continue;
-            if (wouldViolateStreak(dateStr, tracker.workedDates)) continue;
+          // 制約チェックの理由をログ出力
+          let rejectReason = '';
+          if (tracker.isWeekendOff) rejectReason = '土日祝休み設定';
+          else if (tracker.workedDates.has(dateStr)) rejectReason = '既に本日出勤予定';
+          else if (hasLeave(tracker, dateStr)) rejectReason = '休暇申請あり';
+          else if (hasManualShift(staff.id, dateStr)) rejectReason = '手動シフトあり';
+          else if (wouldViolateStreak(dateStr, tracker.workedDates)) rejectReason = '連勤制限違反(6連勤以上)';
 
-            // 割り当て確定
+          if (!rejectReason) {
             assignShift(tracker, dateStr, dayType, 'holiday_strict_sequence');
-            console.log(`[ShiftEngine] ${dateStr}: ${staff.name} を配置 (idx:${idx})`);
-            
-            // 次の割り当ては「今回見つかった人の次」から開始（これによって円環状に回る）
-            currentHolidayPtr = (idx + 1) % holidayStaffList.length;
-            found = true;
+            console.log(`[ShiftEngine] ${dateStr}: ${staff.name} を配置 (成功 / 試行:${attempts})`);
             assignedOnDay++;
-            break; 
+          } else {
+            // デバッグログ: 特定の日付で誰も入れない場合に備えて出力
+            // console.log(`[ShiftEngine] ${dateStr}: ${staff.name} をスキップ (${rejectReason})`);
           }
-          
-          if (!found) {
-            console.warn(`[ShiftEngine] ${dateStr}: 適格なスタッフが見つかりませんでした (Slot ${slot+1})`);
-            break;
-          }
+
+          // 成功・失敗に関わらず、インデックスを次に進める (Circular Queue Logic)
+          currentHolidayPtr = (idx + 1) % holidayStaffList.length;
         }
-        console.log(`[ShiftEngine] ${dateStr}: 最終配置数 ${assignedOnDay}/${cap}`);
+
+        if (assignedOnDay < cap) {
+          console.warn(`[ShiftEngine] ${dateStr}: 定員を満たせませんでした。最終配置: ${assignedOnDay}/${cap} (試行回数: ${attempts})`);
+        }
       }
     }
 
