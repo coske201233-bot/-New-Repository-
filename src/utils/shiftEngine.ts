@@ -184,7 +184,7 @@ export const generateMonthlyShifts = async (
   // if (year === 2026 && month === 7) { ... }
 
   console.log('══════════════════════════════════════════════');
-  console.log(`[BUILD: VERSION 70.0 - LOGGING FORCED] 処理開始: ${year}年${month}月`);
+  console.log(`[BUILD: VERSION 70.1 (TIMESTAMP: 0327)] 処理開始: ${year}年${month}月`);
   console.log("[Engine Debug] 既存のシフトを削除します:", monthPrefix);
   console.log('══════════════════════════════════════════════');
 
