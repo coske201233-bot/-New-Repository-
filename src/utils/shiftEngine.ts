@@ -467,7 +467,14 @@ export const generateMonthlyShifts = async (
     
     // [V72.0] 月ごとの開始ポインタ調整
     // 前月の実績をDBから直接参照して継続性を確保
-    let currentHolidayPtr = await getPreviousMonthPointer(year, month);
+    let currentHolidayPtr = 0;
+    try {
+      currentHolidayPtr = await getPreviousMonthPointer(year, month);
+    } catch (e) {
+      console.warn('[ShiftEngine] 前月ポインタ取得中にエラーが発生しました。0から開始します。', e);
+      currentHolidayPtr = 0;
+    }
+
     
     if (year === 2026 && month === 11) {
       // 11月は佐藤公貴から開始（固定要件がある場合のみ上書き）
@@ -477,6 +484,11 @@ export const generateMonthlyShifts = async (
 
 
     const holidayWorkedInMonth = new Set<string>(); // 月内での重複出勤防止
+
+    if (holidayOrderStaff.length === 0) {
+      console.error('[ShiftEngine] 警告: 休日出勤の対象スタッフが見つかりません。Pass 2 をスキップします。');
+    } else {
+
 
     for (const { dateStr, dayType, cap } of holidayDates) {
       let assignedOnDay = manualWorkCountPerDay.get(dateStr) || 0;
@@ -526,6 +538,8 @@ export const generateMonthlyShifts = async (
       }
       console.log(`[ShiftEngine] ${dateStr}(${dayType}): ${assignedOnDay}/${cap}人配置完了`);
     }
+    }
+
 
     // ═══════════════════════════════════════════
     // Pass 3: 平日割り当て (Relaxed Constraint)
@@ -665,12 +679,14 @@ export const generateMonthlyShifts = async (
           details:    s.details ? JSON.parse(JSON.stringify(s.details)) : null,
         }));
 
+        console.log(`[ShiftEngine] Chunk ${Math.floor(i/chunkSize) + 1} 保存中 (${cleanChunk.length}件)...`);
         const { error: insertError } = await supabase.from('shifts').upsert(cleanChunk, { onConflict: 'id' });
         if (insertError) {
-          console.error('[ShiftEngine] DB保存エラー (UPSERT):', insertError.message);
-          throw new Error(`DB保存エラー: ${insertError.message}`);
+          console.error('[ShiftEngine] DB保存エラー (UPSERT):', insertError.message, insertError);
+          throw new Error(`DB保存エラー: ${insertError.message} (Code: ${insertError.code})`);
         }
       }
+
       console.log(`[ShiftEngine] 保存成功 (UPSERT): ${generatedShifts.length}件`);
 
     } else {

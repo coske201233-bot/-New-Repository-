@@ -11,6 +11,8 @@ import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/da
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
 import * as Print from 'expo-print';
+import { generateMonthlyShifts } from '../utils/shiftEngine';
+
 
 interface AdminScreenProps {
   profile: any;
@@ -318,23 +320,24 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 <TouchableOpacity 
                   style={[styles.inlineBtn, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }, isAssigning && { opacity: 0.5 }]} 
                   onPress={async () => {
-                    console.log('[AdminScreen] 自動割り当てボタンがクリックされました');
+                    console.log('[AdminScreen] 「自動生成」ボタンが押されました。');
                     setIsAssigning(true);
                     try {
-                      console.log('[AdminScreen] ShiftEngine モジュールの読み込み中...');
-                      const { generateMonthlyShifts } = require('../utils/shiftEngine');
-                      await generateMonthlyShifts(currentYear, currentMonth + 1, {
+                      console.log('[AdminScreen] シフト生成開始: ' + currentYear + '年' + (currentMonth + 1) + '月');
+                      
+                      const result = await generateMonthlyShifts(currentYear, currentMonth + 1, {
                         weekdayCap: limits.weekday,
                         satCap: limits.sat,
                         sunCap: limits.sun,
                         holidayCap: limits.pub
                       });
-                      console.log('[AdminScreen] シフト生成処理が正常に終了しました');
+                      
+                      console.log('[AdminScreen] シフト生成完了。レコード数: ' + (result?.length || 0));
                       Alert.alert('完了', 'シフトの自動割り当てが完了しました。');
 
                       // グローバルなシフトステートを最新化
                       if (fetchShifts) {
-                        console.log('[AdminScreen] グローバルなシフトステートを再取得中...');
+                        console.log('[AdminScreen] 全体ステートをリフレッシュ中...');
                         await fetchShifts();
                       }
                       
@@ -345,13 +348,14 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                       ));
 
                     } catch (e: any) {
-                      console.error('Auto assign error:', e);
+                      console.error('[AdminScreen] 自動割り当てエラー:', e);
                       Alert.alert(
-                        'シフト自動割り当てエラー',
-                        'シフトの自動割り当てに失敗しました。\n\n' + (e.message || '不明なエラー')
+                        'エラーが発生しました',
+                        'シフト生成中に問題が発生しました。\n\n' + (e.message || '不明なエラー')
                       );
                     } finally {
                       setIsAssigning(false);
+                      console.log('[AdminScreen] 処理終了 (Loading state cleared)');
                     }
                   }}
                   disabled={isAssigning}
