@@ -460,47 +460,7 @@ export const generateMonthlyShifts = async (
       console.log(`[ShiftEngine] ${tracker.name}: 休日出勤(${holidayDateStr})の振休を週内の負荷分散により ${targetDate} に割り当てました。`);
     }
 
-    // ═══════════════════════════════════════════
-    // Pass 2: 休日・土日の割り当て (完全循環ローテーション)
-    // ═══════════════════════════════════════════
-    console.log('\n[ShiftEngine] ════ Pass 2: 休日割り当て (完全循環ローテーション) ════');
-    
-    // 1. スタッフリストの取得
-    const holidayStaffList = HOLIDAY_ROTATION_ORDER.map(name => {
-      const normName = normalizeName(name);
-      return eligibleForFilter.find(s => normalizeName(s.name) === normName);
-    }).filter(s => s !== undefined) as any[];
-
-    // 2. 開始インデックス取得
-    let currentStaffIndex = 0;
-    try {
-      currentStaffIndex = await getPreviousMonthPointer(year, month);
-      console.log(`[ShiftEngine] 初期インデックス: ${currentStaffIndex}`);
-    } catch (e) {
-      currentStaffIndex = 0;
-    }
-
-    // 3. ユーザー指定の構造を厳格に適用（日付ベースのループ）
-    for (const { dateStr, dayType, cap } of holidayDates) {
-      let assignedCount = 0;
-      console.log(`[ShiftEngine] ${dateStr}: 割り当て開始 (目標:${cap})`);
-
-      // 4. 指定された定数(cap)を満たすまで循環し続ける
-      while (assignedCount < cap) {
-        const person = holidayStaffList[currentStaffIndex];
-        const tracker = trackers.get(person.id)!;
-        
-        // 同一人物の本日内の重複のみ回避
-        if (!tracker.workedDates.has(dateStr)) {
-          assignShift(tracker, dateStr, dayType, 'holiday_strict_sequence');
-          console.log(`[ShiftEngine] ${dateStr}: ${person.name} を配置 (インデックス:${currentStaffIndex})`);
-          assignedCount++;
-        }
-        
-        // インデックスの更新（ここ以外で15という数字や制限を使わない）
-        currentStaffIndex = (currentStaffIndex + 1) % holidayStaffList.length;
-      }
-    }
+    // [Pass 2 was moved after Pass 3 per user request]
 
 
 
@@ -552,6 +512,49 @@ export const generateMonthlyShifts = async (
 
       console.log(`[ShiftEngine] ${dateStr}(weekday): ${assignedCount}人を追加配置。合計 ${assignedForDay + assignedCount}/${limits.weekdayCap} 人`);
     }
+
+    // ═══════════════════════════════════════════
+    // [V75.0] USER FORCED HOLIDAY ASSIGNMENT LOOP (AFTER WEEKDAYS)
+    // ═══════════════════════════════════════════
+    console.log("--- STARTING HOLIDAY ASSIGNMENTS ---");
+    const holidayDatesToProcess = holidayDates; 
+    console.log("Total holiday dates to process:", holidayDatesToProcess.length);
+
+    // 休日用スタッフリストの再取得
+    const sortedStaffList = HOLIDAY_ROTATION_ORDER.map(name => {
+      const normName = normalizeName(name);
+      return eligibleForFilter.find(s => normalizeName(s.name) === normName);
+    }).filter(s => s !== undefined) as any[];
+
+    let currentStaffIndexForHolidays = 0;
+    try {
+      currentStaffIndexForHolidays = await getPreviousMonthPointer(year, month);
+    } catch (e) {
+      currentStaffIndexForHolidays = 0;
+    }
+    console.log("Starting staff index from last month:", currentStaffIndexForHolidays);
+
+    for (const { dateStr, dayType, cap } of holidayDatesToProcess) {
+      let assignedCount = 0;
+      console.log(`Processing date: ${dateStr}, target cap: ${cap}`);
+      
+      // USER STRUCTURE: EXACT COPY
+      while (assignedCount < cap) {
+        const person = sortedStaffList[currentStaffIndexForHolidays];
+        const tracker = trackers.get(person.id)!;
+        
+        // 重複配置ガード
+        if (!tracker.workedDates.has(dateStr)) {
+          assignShift(tracker, dateStr, dayType, 'holiday_strict_sequence');
+          console.log(`Assigned to ${dateStr}: Index ${currentStaffIndexForHolidays} (${person.name})`);
+          assignedCount++;
+        }
+        
+        // Safe infinite modulo progression
+        currentStaffIndexForHolidays = (currentStaffIndexForHolidays + 1) % sortedStaffList.length;
+      }
+    }
+    console.log("--- FINISHED HOLIDAY ASSIGNMENTS ---");
 
     // ═══════════════════════════════════════════
     // Pass 4: ポストプロセス 連勤の強制分断 (V55.2)
