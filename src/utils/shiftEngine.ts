@@ -465,80 +465,66 @@ export const generateMonthlyShifts = async (
     // ═══════════════════════════════════════════
     console.log('\n[ShiftEngine] ════ Pass 2: 休日割り当て (固定順ローテーション) ════');
     
-    // [V72.0] 月ごとの開始ポインタ調整
-    // 前月の実績をDBから直接参照して継続性を確保
-    let currentHolidayPtr = 0;
+    // [V73.0] 前月の実績をDBから参照してポインタを初期化
+    let holidayIdx = 0;
     try {
-      currentHolidayPtr = await getPreviousMonthPointer(year, month);
+      holidayIdx = await getPreviousMonthPointer(year, month);
     } catch (e) {
-      console.warn('[ShiftEngine] 前月ポインタ取得中にエラーが発生しました。0から開始します。', e);
-      currentHolidayPtr = 0;
+      console.warn('[ShiftEngine] 前月ポインタ取得エラー。0から開始します。', e);
+      holidayIdx = 0;
     }
-
     
-    if (year === 2026 && month === 11) {
-      // 11月は佐藤公貴から開始（固定要件がある場合のみ上書き）
-      // currentHolidayPtr = 0; 
-      console.log(`[ShiftEngine] 2026年11月の特定ルール適用を検討しましたが、継続性を優先し ${HOLIDAY_ROTATION_ORDER[currentHolidayPtr]} から開始します。`);
-    }
-
-
-    const holidayWorkedInMonth = new Set<string>(); // 月内での重複出勤防止
-
-    if (holidayOrderStaff.length === 0) {
-      console.error('[ShiftEngine] 警告: 休日出勤の対象スタッフが見つかりません。Pass 2 をスキップします。');
-    } else {
-
-
     for (const { dateStr, dayType, cap } of holidayDates) {
       let assignedOnDay = manualWorkCountPerDay.get(dateStr) || 0;
+      console.log(`[ShiftEngine] ${dateStr} (${dayType}) 割り当て開始。必要数: ${cap}, 既配置(手動): ${assignedOnDay}`);
 
+      // [V73.0] 連続的な円環ループによる割り当て
       for (let slot = assignedOnDay; slot < cap; slot++) {
         let found = false;
-        // ポインタの位置から1周チェック
-        for (let i = 0; i < holidayOrderStaff.length; i++) {
-          const idx = (currentHolidayPtr + i) % holidayOrderStaff.length;
-          const staff = holidayOrderStaff[idx];
+        
+        // リストを最大1周分走査して候補を探す
+        for (let i = 0; i < HOLIDAY_ROTATION_ORDER.length; i++) {
+          const searchIdx = (holidayIdx + i) % HOLIDAY_ROTATION_ORDER.length;
+          const staffName = HOLIDAY_ROTATION_ORDER[searchIdx];
+          const normName = normalizeName(staffName);
+          
+          // 有効なスタッフを検索
+          const staff = eligibleForFilter.find(s => normalizeName(s.name) === normName);
+          if (!staff) continue;
+          
           const tracker = trackers.get(staff.id)!;
-
-          // 基本条件チェック
+          
+          // 基本制約チェック
           if (tracker.isWeekendOff) continue;
           if (tracker.workedDates.has(dateStr)) continue;
           if (hasLeave(tracker, dateStr)) continue;
           if (hasManualShift(staff.id, dateStr)) continue;
-          if (wouldViolateStreak(dateStr, tracker.workedDates)) continue;
-
-          // [V63.1] 月内公平性チェック: 全員が1回ずつ回るまで2回目は避ける
-          if (holidayWorkedInMonth.has(staff.id)) {
-            const anyOneElseNotWorked = holidayOrderStaff.some(s2 => {
-              const t2 = trackers.get(s2.id)!;
-              return !holidayWorkedInMonth.has(s2.id) && 
-                     !t2.isWeekendOff && 
-                     !t2.workedDates.has(dateStr) && 
-                     !hasLeave(t2, dateStr) && 
-                     !hasManualShift(s2.id, dateStr) && 
-                     !wouldViolateStreak(dateStr, t2.workedDates);
-            });
-            if (anyOneElseNotWorked) continue;
+          
+          // 連勤チェック（6連勤回避）
+          if (wouldViolateStreak(dateStr, tracker.workedDates)) {
+            console.log(`[ShiftEngine] ${staff.name} は連勤制限により ${dateStr} に配置できません。`);
+            continue;
           }
 
           // 配置確定
           assignShift(tracker, dateStr, dayType, 'holiday_strict_sequence');
-          holidayWorkedInMonth.add(staff.id);
-          console.log(`[ShiftEngine] ${dateStr}: ${staff.name} を配置 (固定順)`);
-          currentHolidayPtr = (idx + 1) % holidayOrderStaff.length;
+          console.log(`[ShiftEngine] ${dateStr}: ${staff.name} を配置 (インデックス ${searchIdx})`);
+          
+          // 次回の割り当ては、今回見つかった人の「次」から開始
+          holidayIdx = (searchIdx + 1) % HOLIDAY_ROTATION_ORDER.length;
           found = true;
           assignedOnDay++;
           break;
         }
+        
         if (!found) {
-          console.warn(`[ShiftEngine] ${dateStr}: 配置可能なスタッフが見つかりませんでした。`);
+          console.warn(`[ShiftEngine] ${dateStr}: 全スタッフを走査しましたが配置可能な候補がいませんでした。`);
           break;
         }
       }
-      console.log(`[ShiftEngine] ${dateStr}(${dayType}): ${assignedOnDay}/${cap}人配置完了`);
+      console.log(`[ShiftEngine] ${dateStr}: 最終配置数 ${assignedOnDay}/${cap}`);
     }
-    }
+
 
 
     // ═══════════════════════════════════════════
