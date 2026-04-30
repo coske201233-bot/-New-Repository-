@@ -33,13 +33,14 @@ interface AdminScreenProps {
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
   updateStaffList: (update: any[] | ((prev: any[]) => any[])) => Promise<any>;
   patchStaff: (id: string, updates: any) => Promise<any>;
+  fetchShifts?: () => Promise<void>;
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
   currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
-  updateStaffList, patchStaff
+  updateStaffList, patchStaff, fetchShifts
 }) => {
 
   
@@ -331,30 +332,18 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                       console.log('[AdminScreen] シフト生成処理が正常に終了しました');
                       Alert.alert('完了', 'シフトの自動割り当てが完了しました。');
 
-                      // window.location.reload() を削除 → React stateのシームレス更新に変更
-                      try {
-                        const monthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-                        const { data: shiftsRaw, error: shiftsErr } = await supabase
-                          .from('shifts')
-                          .select('*')
-                          .like('date', `${monthPrefix}%`);
-                        if (!shiftsErr && Array.isArray(shiftsRaw)) {
-                          setRequests((prev: any[]) => {
-                            // 对象月の旧シフトデータを削除し、新しいデータで置き換え
-                            const withoutOldShifts = prev.filter(
-                              r => !(String(r.id || '').startsWith('auto-') && r.date && r.date.startsWith(monthPrefix))
-                            );
-                            const newShifts = shiftsRaw.map((s: any) => ({
-                              ...s,
-                              staffName: s.staff_name || s.staffName || '',
-                            }));
-                            return [...withoutOldShifts, ...newShifts];
-                          });
-                          console.log(`[AdminScreen] shifts再取得完了: ${shiftsRaw.length}件 (State updated)`);
-                        }
-                      } catch (fetchErr) {
-                        console.error('[AdminScreen] shifts再取得失敗:', fetchErr);
+                      // グローバルなシフトステートを最新化
+                      if (fetchShifts) {
+                        console.log('[AdminScreen] グローバルなシフトステートを再取得中...');
+                        await fetchShifts();
                       }
+                      
+                      // ターゲット月の旧自動生成リクエスト（UI用）をパージ
+                      const monthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+                      setRequests((prev: any[]) => prev.filter(
+                        r => !(String(r.id || '').startsWith('auto-') && r.date && r.date.startsWith(monthPrefix))
+                      ));
+
                     } catch (e: any) {
                       console.error('Auto assign error:', e);
                       Alert.alert(

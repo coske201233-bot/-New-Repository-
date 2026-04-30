@@ -17,6 +17,77 @@ const HOLIDAY_ROTATION_ORDER = [
   '山川', '久保田', '小笠原', '森田', '駒津', '馬淵', '吉田'
 ];
 
+/**
+ * [V72.0] 前月の最終休日出勤者からローテーションを継続するためのポインタを取得します
+ */
+async function getPreviousMonthPointer(year: number, month: number): Promise<number> {
+  try {
+    const prevDate = new Date(year, month - 2, 1);
+    const prevYear = prevDate.getFullYear();
+    const prevMonth = prevDate.getMonth() + 1;
+    const prevPrefix = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+
+    console.log(`[ShiftEngine] 前月(${prevPrefix})の最終担当者を検索中...`);
+
+    const { data, error } = await supabase
+      .from('shifts')
+      .select('date, staff_name, details')
+      .like('date', `${prevPrefix}%`)
+      .eq('status', 'approved')
+      .order('date', { ascending: false });
+
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      console.log('[ShiftEngine] 前月のデータが見つかりません。ポインタを 0 にリセットします。');
+      return 0;
+    }
+
+    // 休日・祝日の最終日を特定
+    let latestHolidayDate = '';
+    for (const shift of data) {
+      const d = new Date(shift.date.replace(/-/g, '/'));
+      if (getDayType(d) !== 'weekday') {
+        latestHolidayDate = shift.date;
+        break;
+      }
+    }
+
+    if (!latestHolidayDate) {
+      console.log('[ShiftEngine] 前月に休日出勤の記録がありません。ポインタを 0 に設定します。');
+      return 0;
+    }
+
+    // その日に出勤していた全員を抽出
+    const workersOnLastDay = data
+      .filter(s => s.date === latestHolidayDate)
+      .map(s => normalizeName(s.staff_name));
+
+    console.log(`[ShiftEngine] 前月の最終休日(${latestHolidayDate})の担当者:`, workersOnLastDay);
+
+    // ローテーション順序の中で、最も後ろにいる人のインデックスを探す
+    let maxIdx = -1;
+    HOLIDAY_ROTATION_ORDER.forEach((name, idx) => {
+      if (workersOnLastDay.includes(normalizeName(name))) {
+        if (idx > maxIdx) maxIdx = idx;
+      }
+    });
+
+    if (maxIdx === -1) {
+      console.log('[ShiftEngine] 担当者がローテーションリストに見つかりません。ポインタを 0 に設定します。');
+      return 0;
+    }
+
+    const nextPtr = (maxIdx + 1) % HOLIDAY_ROTATION_ORDER.length;
+    console.log(`[ShiftEngine] ローテーションをインデックス ${nextPtr} (${HOLIDAY_ROTATION_ORDER[nextPtr]}) から再開します。`);
+    return nextPtr;
+
+  } catch (err) {
+    console.error('[ShiftEngine] 前月ポインタ取得エラー:', err);
+    return 0;
+  }
+}
+
+
 interface StaffTracker {
   id: string;
   name: string;
@@ -394,13 +465,16 @@ export const generateMonthlyShifts = async (
     // ═══════════════════════════════════════════
     console.log('\n[ShiftEngine] ════ Pass 2: 休日割り当て (固定順ローテーション) ════');
     
-    // [V65.0] 月ごとの開始ポインタ調整
-    let currentHolidayPtr = 0; 
+    // [V72.0] 月ごとの開始ポインタ調整
+    // 前月の実績をDBから直接参照して継続性を確保
+    let currentHolidayPtr = await getPreviousMonthPointer(year, month);
+    
     if (year === 2026 && month === 11) {
-      // 11月は佐藤公貴（新リストの1番目）から開始
-      currentHolidayPtr = 0;
-      console.log(`[ShiftEngine] 2026年11月の特定ルール適用: ${HOLIDAY_ROTATION_ORDER[currentHolidayPtr]} から開始します。`);
+      // 11月は佐藤公貴から開始（固定要件がある場合のみ上書き）
+      // currentHolidayPtr = 0; 
+      console.log(`[ShiftEngine] 2026年11月の特定ルール適用を検討しましたが、継続性を優先し ${HOLIDAY_ROTATION_ORDER[currentHolidayPtr]} から開始します。`);
     }
+
 
     const holidayWorkedInMonth = new Set<string>(); // 月内での重複出勤防止
 
@@ -591,13 +665,14 @@ export const generateMonthlyShifts = async (
           details:    s.details ? JSON.parse(JSON.stringify(s.details)) : null,
         }));
 
-        const { error: insertError } = await supabase.from('shifts').insert(cleanChunk);
+        const { error: insertError } = await supabase.from('shifts').upsert(cleanChunk, { onConflict: 'id' });
         if (insertError) {
-          console.error('[ShiftEngine] DB保存エラー:', insertError.message);
+          console.error('[ShiftEngine] DB保存エラー (UPSERT):', insertError.message);
           throw new Error(`DB保存エラー: ${insertError.message}`);
         }
       }
-      console.log(`[ShiftEngine] 保存成功: ${generatedShifts.length}件`);
+      console.log(`[ShiftEngine] 保存成功 (UPSERT): ${generatedShifts.length}件`);
+
     } else {
       console.warn('[ShiftEngine] 生成されたシフトが0件のため、保存をスキップしました。');
     }
