@@ -1,28 +1,17 @@
-
 const fs = require('fs');
-const content = fs.readFileSync('src/screens/AdminScreen.tsx', 'utf8');
-let stack = [];
-let line = 1;
-let col = 1;
-for (let i = 0; i < content.length; i++) {
-    const char = content[i];
-    if (char === '{') stack.push({line, col});
-    if (char === '}') {
-        if (stack.length === 0) {
-            console.log(`Extra closing brace at ${line}:${col}`);
-        } else {
-            stack.pop();
-        }
+const content = fs.readFileSync('src/utils/shiftEngine.ts', 'utf8');
+
+function checkBraces(code) {
+  let depth = 0;
+  const lines = code.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    for (const char of line) {
+      if (char === '{') depth++;
+      if (char === '}') depth--;
     }
-    if (char === '\n') {
-        line++;
-        col = 1;
-    } else {
-        col++;
-    }
+    console.log(`${i + 1}: ${depth} | ${line.substring(0, 50)}`);
+  }
 }
-if (stack.length > 0) {
-    stack.forEach(s => console.log(`Unclosed brace starting at ${s.line}:${s.col}`));
-} else {
-    console.log('Braces are balanced');
-}
+
+checkBraces(content);

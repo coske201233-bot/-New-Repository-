@@ -237,66 +237,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </View>
           </View>
 
-          {/* --- [NEW] マイスケジュール セクション (個人カレンダー) --- */}
-          {profile && (
-            <View style={{ marginBottom: SPACING.xl }}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionTitleRow}>
-                  <CalendarIcon color={COLORS.primary} size={18} />
-                  <ThemeText variant="h2">マイスケジュール</ThemeText>
-                </View>
-              </View>
-              <ThemeCard style={styles.personalCard}>
-                <View style={styles.personalHeader}>
-                  <View style={styles.avatarMini}>
-                    <ThemeText bold color="white">{profile.name?.substring(0, 1)}</ThemeText>
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <ThemeText bold variant="body">{profile.name} さん</ThemeText>
-                    <ThemeText variant="caption" color={COLORS.textSecondary}>{profile.jobType || profile.profession} / {profile.placement}</ThemeText>
-                  </View>
-                  <TouchableOpacity 
-                    onPress={() => onNavigateToStaff ? onNavigateToStaff('my-calendar') : null}
-                    style={styles.personalCalendarBtn}
-                  >
-                    <ThemeText variant="caption" color={COLORS.primary} bold>詳細カレンダー</ThemeText>
-                  </TouchableOpacity>
-                </View>
-                
-                <View style={styles.personalScheduleRow}>
-                  {[0, 1, 2].map(offset => {
-                    const target = new Date();
-                    target.setDate(target.getDate() + offset);
-                    const dStr = getDateStr(target);
-                    const dayType = getDayType(target);
-                    
-                    const allShifts = [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
-                    const shift = allShifts.find(r => 
-                      (r.staff_id === profile.id || r.staffName === profile.name || r.staff_name === profile.name) && 
-                      r.date === dStr && 
-                      r.status === 'approved'
-                    );
-                    
-                    const type = shift ? shift.type : (dayType === 'weekday' ? '出勤' : '公休');
-                    const isOff = ['公休', '年休', '休暇', '欠勤'].includes(type);
-                    
-                    return (
-                      <View key={offset} style={styles.scheduleItem}>
-                        <ThemeText variant="caption" color={COLORS.textSecondary}>
-                          {offset === 0 ? '今日' : offset === 1 ? '明日' : '明後日'}
-                        </ThemeText>
-                        <View style={[styles.scheduleBadge, { backgroundColor: isOff ? 'rgba(239, 68, 68, 0.1)' : 'rgba(14, 165, 233, 0.1)' }]}>
-                          <ThemeText bold style={{ fontSize: 13, color: isOff ? '#ef4444' : '#0ea5e9' }}>{type}</ThemeText>
-                        </View>
-                        <ThemeText style={{ fontSize: 10, marginTop: 4, opacity: 0.7 }}>{target.getMonth()+1}/{target.getDate()}</ThemeText>
-                      </View>
-                    );
-                  })}
-                </View>
-              </ThemeCard>
-            </View>
-          )}
-          
           {/* 申請承認通知（管理者のみ） */}
           {((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated) && (
             (() => {

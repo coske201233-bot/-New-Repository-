@@ -5,7 +5,7 @@ import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING } from '../theme/theme';
 import { 
   ChevronRight, Database, FileOutput, 
-  QrCode, X, Check, Shield, User, Key, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock
+  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock
 } from 'lucide-react-native';
 import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
@@ -45,10 +45,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   updateStaffList, patchStaff, fetchShifts
 }) => {
 
-  
-  const [showPersonalPassModal, setShowPersonalPassModal] = useState(false);
-  const [personalPassInput, setPersonalPassInput] = useState('');
-  
+
+
 
 
   const [editStaff, setEditStaff] = useState<any>(null);
@@ -141,33 +139,97 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
       // 行データ
       let rowsHtml = '';
-      const listToPrint = staffList.filter(s => s && s.isApproved);
+      // 長期休暇・入職前のスタッフのみ除外
+      const listToPrint = staffList.filter(s => {
+        if (!s || !s.name) return false;
+        if (s.status === '長期休暇' || s.status === '入職前') return false;
+        return true;
+      });
       listToPrint.forEach(s => {
-        let row = `<tr><td style="text-align: left; padding-left: 5px; font-weight: bold;">${s.name}</td><td>${s.jobType || ''}</td>`;
+        let row = `<tr><td style="text-align: left; padding-left: 5px; font-weight: bold;">${s.name}</td><td>${s.jobType || s.profession || ''}</td>`;
         monthInfoArr.forEach((d: any) => {
           if (!d.empty) {
             const sT = normalizeName(s.name);
-            const req = requests.find(r => r && r.date === d.dateStr && (String(r.staffId) === s.id || normalizeName(r.staffName) === sT));
+            const staffId = s.id;
             
+            // 照合ロジックを強化： staff_id(UUID)を最優先、次に名前(正規化後)で探す
+            const req = requests.find((r: any) => {
+              if (!r || r.date !== d.dateStr || r.status === 'deleted') return false;
+              
+              // 1. UUIDで直接照合 (最も確実)
+              const rStaffId = r.staff_id || r.staffId || r.user_id;
+              if (rStaffId && rStaffId === staffId) return true;
+              
+              // 2. 名前で照合 (UUIDがない場合のバックアップ)
+              const rName = normalizeName(r.staff_name || r.staffName || '');
+              if (rName && rName === sT) return true;
+              
+              return false;
+            });
             let type = '';
             if (req) {
               type = req.type;
             } else {
               const dDate = new Date(d.dateStr);
               const dtype = getDayType(dDate);
-              const isNoHoliday = (dtype !== 'weekday') && (s.monthlyNoHoliday?.[currentMonthKey] ?? s.noHoliday);
-              type = (dtype === 'weekday') ? '出勤' : (isNoHoliday ? '日勤' : '公休');
+              // 平日はデフォルト「出勤」、土日祝はデフォルト「公休」
+              // 自動生成などで「出勤」データがある場合のみ、reqによって上書きされる
+              type = (dtype === 'weekday') ? '出勤' : '公休';
             }
 
-            const isOff = ['公休', '年休', '特休', '休暇', '欠勤'].includes(type);
-            const style = isOff ? 'background-color: #fef2f2; color: #ef4444;' : '';
-            const label = type === '公休' ? '公' : (type === '日勤' || type === '出勤' ? '日' : (type === '夜勤' ? '夜' : (type === '早番' ? '早' : (type === '遅番' ? '遅' : (type ? type.charAt(0) : '')))));
-            row += `<td style="${style}">${label}</td>`;
+            // 種別ごとにスタイルと略称を決定
+            let cellStyle = '';
+            let label = '';
+
+            if (type === '出勤' || type === '日勤') {
+              cellStyle = 'background-color: #ffffff; color: #1e293b; font-weight: bold;';
+              label = '出';
+            } else if (type === '公休') {
+              cellStyle = 'background-color: #fef2f2; color: #dc2626;';
+              label = '公';
+            } else if (type === '年休' || type === '有給休暇') {
+              cellStyle = 'background-color: #f0fdf4; color: #16a34a; font-weight: bold;';
+              label = '年';
+            } else if (type === '特休') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              label = '特';
+            } else if (type === '午前休') {
+              cellStyle = 'background-color: #f0fdf4; color: #16a34a;';
+              label = '前';
+            } else if (type === '午後休') {
+              cellStyle = 'background-color: #f0fdf4; color: #16a34a;';
+              label = '後';
+            } else if (type === '夏季休暇') {
+              cellStyle = 'background-color: #fefce8; color: #ca8a04;';
+              label = '夏';
+            } else if (type === '時間休' || type === '時間給') {
+              cellStyle = 'background-color: #f0fdf4; color: #16a34a;';
+              label = '時';
+            } else if (type === '欠勤') {
+              cellStyle = 'background-color: #fff7ed; color: #ea580c;';
+              label = '欠';
+            } else {
+              cellStyle = 'background-color: #f8fafc; color: #64748b;';
+              label = type ? type.charAt(0) : '';
+            }
+
+            row += `<td style="${cellStyle}">${label}</td>`;
           }
         });
         row += '</tr>';
         rowsHtml += row;
       });
+
+      const legendHtml = `
+        <div style="display:flex; gap:16px; margin-top:8px; font-size:10px; flex-wrap:wrap;">
+          <span><span style="display:inline-block;width:14px;height:14px;background:#ffffff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>出 = 出勤</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#fef2f2;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>公 = 公休</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#f0fdf4;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>年 = 年休</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#eff6ff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>特 = 特休</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#fefce8;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>夏 = 夏季休暇</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#f0fdf4;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>前/後/時 = 午前休/午後休/時間休</span>
+        </div>
+      `;
 
       const html = `
         <html>
@@ -176,11 +238,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             <style>
               @page { size: A4 landscape; margin: 5mm; }
               body { font-family: sans-serif; padding: 10px; color: #1e293b; }
-              .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; border-bottom: 2px solid #38bdf8; padding-bottom: 5px; }
+              .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 6px; border-bottom: 2px solid #38bdf8; padding-bottom: 5px; }
               table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 2px solid #334155; }
               th, td { border: 1px solid #94a3b8; padding: 2px 1px; text-align: center; font-size: 9px; }
               th { background-color: #f1f5f9; font-weight: bold; }
               td { height: 22px; }
+              .legend { font-size: 10px; margin-top: 8px; }
             </style>
           </head>
           <body>
@@ -189,7 +252,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               <div style="font-size: 11px;">印刷日: ${new Date().toLocaleDateString('ja-JP')}</div>
             </div>
             <table><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>
-            <script>window.onload=function(){window.print();};<\\/script>
+            ${legendHtml}
+            <script>window.onload=function(){window.print();};<\/script>
           </body>
         </html>
       `;
@@ -244,27 +308,13 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
 
 
-  const handlePersonalPassUpdate = async () => {
-    if (!personalPassInput) {
-      Alert.alert('入力エラー', '新しいパスワードを入力してください。');
-      return;
-    }
-    const updatedProfile = { ...profile, password: personalPassInput };
-    setProfile(updatedProfile);
-    
-    // 同時にスタッフリストも更新して永続化（localStorage sync）をトリガー
-    await updateStaffList((prev: any[]) => prev.map(s => s && s.id === profile.id ? updatedProfile : s));
-    
-    setShowPersonalPassModal(false);
-    setPersonalPassInput('');
-    Alert.alert('完了', '個人パスワードを更新しました。');
-  };
+
 
 
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}><ThemeText variant="h1">設定 [V70.1]</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>[BUILD: VERSION 70.1 - FORCED 0327]</ThemeText></View>
+      <View style={styles.header}><ThemeText variant="h1">設定 [V72.0]</ThemeText><ThemeText variant="caption" style={{ fontSize: 9, opacity: 0.3, color: COLORS.textSecondary }}>[BUILD: VERSION 72.2 - ID MATCH]</ThemeText></View>
       <ScrollView style={{ flex: 1 }}>
         <View style={{ padding: SPACING.md }}>
 
@@ -392,16 +442,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </TouchableOpacity>
               </ThemeCard>
 
-              <ThemeCard style={styles.itemRow}>
-                <View style={styles.iconCircle}><Key size={20} color="#a855f7" /></View>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <ThemeText bold>個人パスワード変更</ThemeText>
-                  <ThemeText variant="caption" color={COLORS.textSecondary}>現在のログインユーザーのパスワードを変更します</ThemeText>
-                </View>
-                <TouchableOpacity style={[styles.inlineBtn, { backgroundColor: 'rgba(168, 85, 247, 0.1)' }]} onPress={() => setShowPersonalPassModal(true)}>
-                  <ThemeText bold color="#a855f7">変更</ThemeText>
-                </TouchableOpacity>
-              </ThemeCard>
+
 
 
 
@@ -424,11 +465,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}><LogOut size={20} color="#ef4444" /><ThemeText bold color="#ef4444" style={{ marginLeft: 10 }}>アプリからログアウト</ThemeText></TouchableOpacity>
         </View>
       </ScrollView>
-
-      {/* --- モーダル群 --- */}
-
-      <Modal visible={showPersonalPassModal} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.detailModal}><ThemeText variant="h2" style={{marginBottom:16}}>個人パスワードの変更</ThemeText><TextInput style={styles.modalInput} placeholder="新しいパスワード" secureTextEntry value={personalPassInput} onChangeText={setPersonalPassInput} placeholderTextColor={COLORS.textSecondary} /><View style={{flexDirection:'row', gap:12, marginTop:24}}><TouchableOpacity style={styles.cancelBtn} onPress={()=>setShowPersonalPassModal(false)}><ThemeText bold>キャンセル</ThemeText></TouchableOpacity><TouchableOpacity style={[styles.confirmBtn,{backgroundColor:'#a855f7'}]} onPress={handlePersonalPassUpdate}><ThemeText bold color="white">更新する</ThemeText></TouchableOpacity></View></View></View></Modal>
-
 
     </SafeAreaView>
   );

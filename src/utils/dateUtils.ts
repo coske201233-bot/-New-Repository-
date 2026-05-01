@@ -19,8 +19,13 @@ export const isHoliday = (date: Date): boolean => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
-  const dateStr = `${year}-${month}-${day}`;
-  return JAPAN_HOLIDAYS.includes(dateStr);
+  const mmdd = `${month}-${day}`;
+  const dateStr = `${year}-${mmdd}`;
+
+  // 年末年始の判定 (12/28 - 1/3)
+  const isNewYear = ['12-28', '12-29', '12-30', '12-31', '01-01', '01-02', '01-03'].includes(mmdd);
+
+  return JAPAN_HOLIDAYS.includes(dateStr) || isNewYear;
 };
 
 /**
