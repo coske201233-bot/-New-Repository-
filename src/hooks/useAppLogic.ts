@@ -206,37 +206,44 @@ export const useAppLogic = () => {
   // --- データ操作系ハンドラ ---
   const onSubmitRequest = useCallback(async (request: any) => {
     try {
-      const requestId = 'req-' + Date.now();
-      const newRequest = { 
-        id: requestId,
-        ...request, 
-        status: 'pending',
-        staff_id: auth.profile?.id || auth.user?.id,
-        staff_name: auth.profile?.name || '不明', // SQL用
-        staffName: auth.profile?.name || '不明',  // UI/JS用
-        created_at: new Date().toISOString()
-      };
-
-      // 【確定】supabase.auth.getUser() で認証UUIDを取得（profile.id は使わない）
+      // 【確定】supabase.auth.getUser() で認証UUIDを取得
       const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
       if (authError || !authUser) {
         Alert.alert('エラー', 'ログイン情報を取得できませんでした。');
         return false;
       }
 
-      // デバッグ: 送信前に内容をコンソールに出力
+      // スタッフリストから正式な日本語名を取得（IDで照合）
+      const authUid = authUser.id;
+      const staffRecord = (staff.staffList || []).find((s: any) =>
+        s.id === authUid || s.userId === authUid || s.user_id === authUid
+      );
+      // profile.nameが英字の場合でも、スタッフリストの日本語名を優先する
+      const officialName = staffRecord?.name || auth.profile?.name || '不明';
+
+      const requestId = 'req-' + Date.now();
+      const newRequest = { 
+        id: requestId,
+        ...request, 
+        status: 'pending',
+        staff_id: authUid,
+        staff_name: officialName, // SQL用（日本語正式名）
+        staffName: officialName,  // UI/JS用（日本語正式名）
+        created_at: new Date().toISOString()
+      };
+
       console.log('[DEBUG] useAppLogic Submitting:', {
-        user_id: authUser.id, // 本物のSupabase Auth UUID
-        staff_name: newRequest.staff_name,
+        user_id: authUid,
+        staff_name: officialName,
         status: newRequest.status
       });
 
-      // 直接Supabaseに挿入（user_id = auth UUID を使用）
+      // 直接Supabaseに挿入
       const { error } = await supabase.from('requests').insert([
         {
           id: newRequest.id,
-          user_id: authUser.id, // 【確定】supabase.auth.getUser()から取得したUUIDを必ず使用
-          staff_name: newRequest.staff_name,
+          user_id: authUid,
+          staff_name: officialName,
           date: newRequest.date,
           type: newRequest.type,
           status: newRequest.status,
@@ -251,14 +258,14 @@ export const useAppLogic = () => {
       // ローカルステートも更新
       req.setRequests(prev => [...prev, newRequest]);
       
-      Alert.alert('送信成功！', 'DBにstatus: pendingで書き込みました。');
+      Alert.alert('送信成功！', '休暇申請を送信しました。');
       return true;
     } catch (e: any) {
       console.error('Submission error:', e);
       Alert.alert('DB送信エラー', e.message);
       return false;
     }
-  }, [auth.user, auth.profile, req.setRequests]);
+  }, [auth.user, auth.profile, req.setRequests, staff.staffList]);
 
   const approveRequest = useCallback(async (requestId: string, status: string = 'approved') => {
     try {

@@ -86,13 +86,17 @@ export const CalendarScreen: React.FC<any> = ({
     const allData = [...requests, ...shifts].filter(r => {
       return true;
     });
-    
+
     const normalizeLocal = (n: string) => (n || '').replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/公費/g, '').toUpperCase();
     
     const extractUuid = (idStr: string): string | null => {
       if (!idStr) return null;
       const parts = idStr.split('-');
-      return parts.length >= 6 ? parts.slice(1, 6).join('-') : null;
+      // auto-UUID-DATE-... または m-UUID-DATE-... 形式 (1 + 5 + ...)
+      if (parts.length >= 6) return parts.slice(1, 6).join('-');
+      // レガシーな5連IDへの対応
+      if (parts.length === 5 && !idStr.includes('req-')) return idStr;
+      return null;
     };
 
     allData.forEach((r: any) => {
@@ -180,9 +184,24 @@ export const CalendarScreen: React.FC<any> = ({
         const dayMap = requestMap.get(dateStr);
         const sId = String(staff.id || '').trim();
         const sName = normalize(staff.name || '');
+
+        const reqById = sId ? dayMap?.get(sId) : null;
+        const reqByName = sName ? dayMap?.get(sName) : null;
         
-        // [V57.3] ID優先でルックアップ
-        const singleReq = (sId && dayMap?.get(sId)) || (sName && dayMap?.get(sName));
+        let singleReq = reqById;
+        if (!reqById) {
+          singleReq = reqByName;
+        } else if (reqByName && reqByName !== reqById) {
+          // [V72.3] ID一致と名前一致が異なる場合（自動生成シフト vs 手動リクエスト等）の優先判定
+          const isManual = (rec: any) => 
+            !!(rec.is_manual || rec.isManual) || 
+            String(rec.id || '').startsWith('m-') || 
+            String(rec.id || '').startsWith('req-');
+          
+          if (!isManual(reqById) && isManual(reqByName)) {
+            singleReq = reqByName; // 手動リクエストを優先
+          }
+        }
         const userRequests = singleReq ? [singleReq] : [];
         
         // 稼働としてカウントする種別の定義
@@ -562,8 +581,8 @@ export const CalendarScreen: React.FC<any> = ({
         <View style={styles.header}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <View>
-              <ThemeText variant="h1">カレンダー [V72.0]</ThemeText>
-              <ThemeText variant="caption" style={{ fontSize: 9, opacity: 0.3, color: COLORS.textSecondary }}>[BUILD: VERSION 72.2 - ID MATCH]</ThemeText>
+              <ThemeText variant="h1">カレンダー [V72.5]</ThemeText>
+              <ThemeText variant="caption" style={{ fontSize: 9, opacity: 0.3, color: COLORS.textSecondary }}>[BUILD: VERSION 72.5 - REQ FIX]</ThemeText>
             </View>
             <TouchableOpacity 
               style={{ padding: 8 }} 

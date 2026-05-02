@@ -21,8 +21,8 @@ export const deduplicateRequests = (list: any[]) => {
     const note = String(item.details?.note || '');
     const reason = String(item.reason || '');
 
-    // 【最優先】手動系ID接頭辞
-    if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('off-') || idStr.startsWith('u-')) return true;
+    // 【最優先】手動系ID接頭辞（req- は staff申請IDのため手動扱い）
+    if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('off-') || idStr.startsWith('u-') || idStr.startsWith('req-')) return true;
 
     // 自動系IDでも、内容が変更されていれば手動扱いとする
     if (idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-') || idStr.startsWith('aw_')) {

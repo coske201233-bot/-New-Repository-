@@ -235,15 +235,20 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
   const getReqHours = (r: any): number => {
     if (!r) return 0;
-    const h = r.hours ?? r.details?.duration ?? r.duration;
-    if (h !== undefined && h !== null && h !== '') return parseFloat(String(h));
+    
+    // [V72.6] 新しい時間保持方式（hoursプロパティまたはdetails.duration）を優先
+    // これにより時間休や時間指定の特休が正しく計算されるようになります
+    const h = r.hours ?? r.details?.duration ?? r.details?.hours;
+    const parsedH = parseFloat(String(h));
+    if (h !== undefined && h !== null && h !== '' && !isNaN(parsedH) && parsedH > 0) return parsedH;
     
     // Default values by type
     if (r.type === '1日振替') return 7.75;
     if (r.type === '半日振替') return 3.75;
-    if (['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤'].includes(r.type)) return 7.75;
-    if (r.type === '午前休') return 4.0;
-    if (r.type === '午後休') return 3.75;
+    const rType = (r.type || '').trim();
+    if (['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給'].includes(rType)) return 7.75;
+    if (rType === '午前休') return 4.0;
+    if (rType === '午後休') return 3.75;
     
     // Fallback: calculate from details if available
     if (r.details?.startTime && r.details?.endTime) {
@@ -325,8 +330,14 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     setSelectedDay(d.dateStr);
     const sId = String(selectedStaff?.id || '').trim();
     const sName = normalize(selectedStaff?.name || '');
+    const emailPrefix = selectedStaff?.email ? selectedStaff.email.split('@')[0].toUpperCase() : null;
     const dayMap = requestMap.get(d.dateStr);
-    const existing = (sId && dayMap?.get(sId)) || (sName && dayMap?.get(sName));
+    
+    const rId = sId ? dayMap?.get(sId) : null;
+    const rName = sName ? dayMap?.get(sName) : null;
+    const rEmail = emailPrefix ? dayMap?.get(emailPrefix) : null;
+    const potentialReqs = [rId, rName, rEmail].filter(Boolean);
+    const existing = potentialReqs.find(r => !['出勤', '日勤'].includes(r.type)) || potentialReqs[0];
     if (existing) {
       setSelectedType((existing.type === '日勤' || existing.type === '出勤') ? '出勤' : existing.type);
       setSelectedHours(getReqHours(existing) || 1.0);
@@ -363,8 +374,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       };
       
       const sT = normalize(selectedStaff.name);
+      const emailPrefix = selectedStaff.email ? selectedStaff.email.split('@')[0].toUpperCase() : null;
       setRequests((prev: any[]) => {
-        const without = prev.filter((r: any) => r && !( (String(r.staffId) === selectedStaff.id || normalize(r.staffName) === sT) && r.date === selectedDay ));
+        const without = prev.filter((r: any) => r && !( 
+          (String(r.staffId) === selectedStaff.id || normalize(r.staffName || r.staff_name) === sT || (emailPrefix && normalize(r.staffName || r.staff_name) === emailPrefix)) 
+          && r.date === selectedDay 
+        ));
         return [newReq, ...without];
       });
       
@@ -396,7 +411,11 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const handleDeleteCurrentDay = async (showConfirm = true) => {
     if (!selectedDay || !selectedStaff || isSaving) return;
     const sT = normalize(selectedStaff.name);
-    const existing = requests.filter((r: any) => r && ( (String(r.staffId) === selectedStaff.id || normalize(r.staffName) === sT) && r.date === selectedDay ) && r.status !== 'deleted');
+    const emailPrefix = selectedStaff.email ? selectedStaff.email.split('@')[0].toUpperCase() : null;
+    const existing = requests.filter((r: any) => r && ( 
+      (String(r.staffId) === selectedStaff.id || normalize(r.staffName || r.staff_name) === sT || (emailPrefix && normalize(r.staffName || r.staff_name) === emailPrefix)) 
+      && r.date === selectedDay 
+    ) && r.status !== 'deleted');
     
     if (existing.length === 0) {
       if (showConfirm) Alert.alert('情報', '削除する予定がありません。');
@@ -451,6 +470,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     try {
       const sId = String(selectedStaff.id || '').trim();
       const sName = normalize(selectedStaff.name);
+      const emailPrefix = selectedStaff.email ? selectedStaff.email.split('@')[0].toUpperCase() : null;
       const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
       const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
       
@@ -458,7 +478,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       monthInfo.forEach((d: MonthDay) => {
         if (d.empty) return;
         const dayMap = requestMap.get(d.dateStr);
-        const r = (sId && dayMap?.get(sId)) || (sName && dayMap?.get(sName));
+        
+        const rId = sId ? dayMap?.get(sId) : null;
+        const rName = sName ? dayMap?.get(sName) : null;
+        const rEmail = emailPrefix ? dayMap?.get(emailPrefix) : null;
+        const potentialReqs = [rId, rName, rEmail].filter(Boolean);
+        const r = potentialReqs.find(rec => !['出勤', '日勤'].includes(rec.type)) || potentialReqs[0];
         
         let type = '';
         if (r) {
@@ -543,30 +568,37 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
               const isSelected = selectedDay === d.dateStr;
               const sId = String(selectedStaff?.id || '').trim();
               const sName = normalize(selectedStaff?.name || '');
+              const emailPrefix = selectedStaff?.email ? selectedStaff.email.split('@')[0].toUpperCase() : null;
               const dayMap = requestMap.get(d.dateStr);
-              const req = (sId && dayMap?.get(sId)) || (sName && dayMap?.get(sName));
+              
+              const rId = sId ? dayMap?.get(sId) : null;
+              const rName = sName ? dayMap?.get(sName) : null;
+              const rEmail = emailPrefix ? dayMap?.get(emailPrefix) : null;
+              const potentialReqs = [rId, rName, rEmail].filter(Boolean);
+              const req = potentialReqs.find(r => !['出勤', '日勤'].includes(r.type)) || potentialReqs[0];
               
               let displayLabel = '';
               let labelColor = 'white';
               if (req) {
                 const h = getReqHours(req);
-                if (['出勤', '日勤'].includes(req.type)) {
+                const rType = (req.type || '').trim();
+                if (['出勤', '日勤'].includes(rType)) {
                   displayLabel = '出勤'; labelColor = '#38bdf8';
-                } else if (req.type === '公休') {
+                } else if (rType === '公休') {
                   displayLabel = '公休'; labelColor = '#ef4444';
-                } else if (req.type === '夏季休暇') {
+                } else if (rType === '夏季休暇') {
                   displayLabel = '夏季'; labelColor = '#ef4444';
-                } else if (req.type === '年休' || req.type === '有給休暇') {
+                } else if (['年休', '有給休暇', '年給', '有給'].includes(rType)) {
                   displayLabel = '年休'; labelColor = '#ef4444';
-                } else if (req.type === '1日振替') {
+                } else if (rType === '1日振替') {
                   displayLabel = '振(全)'; labelColor = '#ef4444';
-                } else if (req.type === '半日振替') {
+                } else if (rType === '半日振替') {
                   displayLabel = '振(半)'; labelColor = '#ef4444';
-                } else if (['時間休', '時間給', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(req.type)) {
-                  displayLabel = `${req.type.charAt(0)}(${h}h)`; labelColor = '#ef4444';
+                } else if (['時間休', '時間給', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(rType)) {
+                  displayLabel = `${rType.charAt(0)}(${h}h)`; labelColor = '#ef4444';
                 } else {
-                  displayLabel = req.type.slice(0, 2);
-                  if (['公休', '欠勤', '休暇', '全休'].includes(req.type)) labelColor = '#ef4444';
+                  displayLabel = rType.slice(0, 2);
+                  if (['公休', '欠勤', '休暇', '全休'].includes(rType)) labelColor = '#ef4444';
                 }
               } else {
                 const dDate = new Date(d.dateStr);
@@ -623,9 +655,17 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       const dayMap = requestMap.get(dateStr);
       const sId = String(staff.id || '').trim();
       const sT = normalize(staff.name);
+      // [V72.8] メールアドレスの@より前（mitsui等）も検索キーに含めることで、英字名で保存された過去データとの紐付けを強化
+      const emailPrefix = staff.email ? staff.email.split('@')[0].toUpperCase() : null;
       
-      // [V71.0] requestMap (requests + shifts) からデータを取得
-      const req = (sId && dayMap?.get(sId)) || (sT && dayMap?.get(sT));
+      // [V72.9] 照合精度の向上：ID、名前、メールプレフィックスのいずれかで「休み」が見つかればそれを優先
+      const rId = sId ? dayMap?.get(sId) : null;
+      const rName = sT ? dayMap?.get(sT) : null;
+      const rEmail = emailPrefix ? dayMap?.get(emailPrefix) : null;
+      
+      const potentialReqs = [rId, rName, rEmail].filter(Boolean);
+      // 休み（出勤・日勤以外）のデータを優先的に探す
+      const req = potentialReqs.find(r => !['出勤', '日勤'].includes(r.type)) || potentialReqs[0];
       
       if (req) {
         if (['出勤', '日勤'].includes(req.type)) {
@@ -633,14 +673,16 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           const isHW = req.isHolidayWork || req.details?.isHolidayWork || (getDayType(date) !== 'weekday');
           if (!isHW) workDays++; else holidayWorkDays++;
         } else {
-          // 振替は統計から除外、時間休などは加算
-          if (['振替', '1日振替', '半日振替', '振替休日'].includes(req.type)) continue;
+          // [V72.7] ユーザー指示に基づき「公休」「振替」を完全に除外
+          if (req.type.includes('振替') || req.type.includes('振休') || req.type === '公休') {
+            continue;
+          }
 
           const h = getReqHours(req);
-          if (h > 0) {
+          // 休暇時間としてカウントする種別を限定
+          const holidayTypes = ['年休', '有給休暇', '夏季休暇', '特休', '時間休', '時間給', '午前休', '午後休', '看護休暇', '年給', '有給'];
+          if (holidayTypes.includes((req.type || '').trim())) {
             leaveHours += h;
-          } else if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(req.type)) {
-            leaveHours += 7.75;
           }
         }
       } else {
@@ -723,7 +765,17 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         <View style={styles.modalOverlay}>
           <View style={styles.calendarModal}>
             <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }}><ThemeText variant="h2">{selectedStaff?.name || ''}</ThemeText><ThemeText variant="caption" color={COLORS.textSecondary}>{activeDate.getFullYear()}年 {activeDate.getMonth() + 1}月</ThemeText></View>
+              <View style={{ flex: 1 }}>
+                <ThemeText variant="h2">{selectedStaff?.name || ''}</ThemeText>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>{activeDate.getFullYear()}年 {activeDate.getMonth() + 1}月</ThemeText>
+                  {selectedStaff && (
+                    <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                      <ThemeText variant="caption" color="#38bdf8" bold>休暇合計: {calculateStats(selectedStaff).leaveHours}h</ThemeText>
+                    </View>
+                  )}
+                </View>
+              </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
                 {Platform.OS === 'web' && ( <TouchableOpacity onPress={handlePrint} style={styles.iconBtn}><Printer size={22} color="#38bdf8" /></TouchableOpacity> )}
                 <TouchableOpacity onPress={() => setIsCalendarModalVisible(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity>

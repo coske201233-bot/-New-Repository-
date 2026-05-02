@@ -41,7 +41,7 @@ export const STAFF_MAP = {
   isLocked: 'is_locked', 
   lockedMonths: 'locked_months' 
 };
-const REQ_MAP = { staffName: 'staff_name', createdAt: 'created_at' };
+const REQ_MAP = { staffName: 'staff_name', staffId: 'staff_id', userId: 'user_id', createdAt: 'created_at' };
 const MSG_MAP = { fromId: 'from_id', fromName: 'from_name', toId: 'to_id', createdAt: 'created_at' };
 
 import { normalizeName } from './dateUtils';
@@ -184,7 +184,7 @@ export const cloudStorage = {
       return clientTime >= cloudTime;
     }).map(r => {
       const obj: any = {};
-      const validKeys = ['id', 'staffName', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
+      const validKeys = ['id', 'staffName', 'staffId', 'userId', 'staff_id', 'user_id', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
       
       const details = { ...(r.details || {}) };
       if (r.updatedAt) details.updatedAt = r.updatedAt;

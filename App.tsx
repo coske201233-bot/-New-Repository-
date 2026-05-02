@@ -138,6 +138,7 @@ export default function App() {
       shifts,
       fetchShifts,
       isLoadingShifts,
+      onSubmitRequest,
     };
 
     const handleNavigateToStaff = (mode?: string) => {

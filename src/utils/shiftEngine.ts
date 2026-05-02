@@ -29,6 +29,9 @@ interface StaffTracker {
 const extractUuid = (id: string) => {
   if (!id) return '';
   const parts = id.split('-');
+  // auto-UUID-DATE-... または m-UUID-DATE-... 形式 (1 + 5 + ...)
+  if (parts.length >= 6) return parts.slice(1, 6).join('-');
+  // それ以外（req-TIMESTAMP など）はそのまま、または末尾5要素（レガシー対応）
   if (parts.length >= 5) return parts.slice(-5).join('-');
   return id;
 };
@@ -112,11 +115,11 @@ export const generateMonthlyShifts = async (
       }
     });
     (currentRequests || []).forEach(r => {
-      if (r.type === '出勤') {
-        const dKey = r.date.substring(0, 10);
-        const sId = String(r.user_id || r.staff_id || extractUuid(r.id) || '').trim();
-        if (sId) manualDayMap.set(`${dKey}_${sId}`, r);
-      }
+      const dKey = r.date.substring(0, 10);
+      const sId = String(r.user_id || r.staff_id || extractUuid(r.id) || '').trim();
+      const sName = normalizeName(r.staff_name || r.staffName || '');
+      if (sId) manualDayMap.set(`${dKey}_${sId}`, r);
+      if (sName) manualDayMap.set(`${dKey}_name_${sName}`, r);
     });
     const manualShifts = Array.from(manualDayMap.values());
 
@@ -216,8 +219,17 @@ export const generateMonthlyShifts = async (
       });
     });
 
-    const hasManualShift = (staffId: string, dateStr: string): boolean =>
-      (manualShifts || []).some((ms: any) => ms.staff_id === staffId && ms.date.substring(0, 10) === dateStr);
+    const hasManualShift = (staffId: string, dateStr: string): boolean => {
+      const tracker = trackers.get(staffId);
+      const normName = tracker ? normalizeName(tracker.name) : '';
+      return (manualShifts || []).some((ms: any) => {
+        const msId = String(ms.staff_id || ms.user_id || extractUuid(ms.id) || '').trim();
+        const msName = normalizeName(ms.staff_name || ms.staffName || '');
+        const dateMatch = ms.date.substring(0, 10) === dateStr;
+        if (!dateMatch) return false;
+        return (msId && msId === staffId) || (msName && normName && msName === normName);
+      });
+    };
 
     const generatedShifts: any[] = [];
 

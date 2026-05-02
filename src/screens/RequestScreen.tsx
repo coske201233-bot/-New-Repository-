@@ -16,9 +16,10 @@ interface RequestScreenProps {
   profile: any;
   isAdminAuthenticated: boolean;
   onForceCloudSync?: () => Promise<boolean>;
+  onSubmitRequest?: (request: any) => Promise<boolean>;
 }
 
-export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setRequests, onDeleteRequest, approveRequest, profile, isAdminAuthenticated, onForceCloudSync }) => {
+export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setRequests, onDeleteRequest, approveRequest, profile, isAdminAuthenticated, onForceCloudSync, onSubmitRequest }) => {
   const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者') || profile?.role?.includes('管理者')) || isAdminAuthenticated;
   const [showForm, setShowForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -133,18 +134,12 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     setIsSubmitting(true);
     
     try {
-      const now = new Date().toISOString();
+      const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated;
+      
       const requestPayload = {
-        id: `m-${Date.now()}`,
-        staff_id: profile.id,
-        staff_name: nameStr,
-        staffName: nameStr, // UI互換用
         type: newRequest.type,
         date: newRequest.date,
         reason: newRequest.reason,
-        status: isManager ? 'approved' : 'pending', // ユーザー指示: status: 'pending' をハードコーディング（管理者は即承認）
-        created_at: now,
-        updated_at: now,
         details: (newRequest.type === '時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '特休') ? {
           duration: duration
         } : (newRequest.type === '午前休' || newRequest.type === '午後休' || newRequest.type === '半日振替' || newRequest.type === '1日振替') ? {
@@ -152,47 +147,15 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
         } : null
       };
 
-      // 【確定】supabase.auth.getUser() で認証UUIDを取得（profile.id は使わない）
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-      if (authError || !authUser) {
-        if (Platform.OS === 'web') window.alert('エラー: ログイン情報を取得できませんでした。');
-        else Alert.alert('エラー', 'ログイン情報を取得できませんでした。');
-        return;
-      }
-
-      // デバッグ: 送信前に内容をコンソールに出力
-      console.log('[DEBUG] Submitting Request Payload:', {
-        user_id: authUser.id, // 本物のSupabase Auth UUID
-        staff_name: requestPayload.staff_name,
-        date: requestPayload.date,
-        status: requestPayload.status
-      });
-
-      const { error } = await supabase.from('requests').insert([
-        {
-          id: requestPayload.id,
-          user_id: authUser.id, // 【確定】supabase.auth.getUser()から取得したUUIDを必ず使用
-          staff_name: requestPayload.staff_name,
-          date: requestPayload.date,
-          type: requestPayload.type,
-          status: requestPayload.status,
-          reason: requestPayload.reason,
-          details: requestPayload.details,
-          created_at: requestPayload.created_at
+      if (onSubmitRequest) {
+        const success = await onSubmitRequest(requestPayload);
+        if (success) {
+          setShowForm(false);
+          setNewRequest({ type: '年休', date: '', reason: '', startTime: '08:30', endTime: '17:15', hours: 1.0 });
         }
-      ]);
-
-      if (error) throw error;
-
-      // ローカルUIの即時更新用
-      setRequests(prev => [requestPayload, ...prev]);
-      setShowForm(false);
-      setNewRequest({ type: '年休', date: '', reason: '', startTime: '08:30', endTime: '17:15', hours: 1.0 });
-      
-      if (Platform.OS === 'web') {
-        window.alert('データベースへの書き込みが完了しました');
       } else {
-        Alert.alert('送信成功！', 'データベースへの書き込みが完了しました');
+        // フォールバック（通常は App.tsx から渡されるはず）
+        throw new Error('送信関数が設定されていません');
       }
     } catch (err: any) {
       console.error('Submit Error:', err);
@@ -355,7 +318,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
               <View style={styles.inputGroup}>
                 <ThemeText variant="label">種類</ThemeText>
                 <View style={styles.typeSelector}>
-                  {['年休', '時間休', '振替', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '午前休', '午後休', '特休'].map((t) => (
+                  {['年休', '時間休', '振替', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '特休'].map((t) => (
                     <TouchableOpacity 
                       key={t}
                       style={[styles.typeOption, newRequest.type === t && styles.typeOptionActive]}
