@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { supabase } from '../utils/supabase';
+import { cloudStorage } from '../utils/cloudStorage';
 
 export const useShiftData = () => {
   const [shifts, setShifts] = useState<any[]>([]);
@@ -9,12 +10,7 @@ export const useShiftData = () => {
     setIsLoadingShifts(true);
     try {
       console.log('[ShiftEngine] Global fetch: データベースからシフトデータを取得中...');
-      const { data, error } = await supabase
-        .from('shifts')
-        .select('*')
-        .limit(100000);
-      
-      if (error) throw error;
+      const data = await cloudStorage.fetchShifts();
       
       // データが正常に取得できた場合のみ更新し、不用意に空にしない
       if (data) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Platform, Alert } from 'react-native';
 import { useAuthSession } from './useAuthSession';
 import { useStaffData } from './useStaffData';
@@ -22,6 +22,19 @@ export const useAppLogic = () => {
   const req = useRequestData();
   const config = useConfigData();
   const shifts = useShiftData();
+  
+  // [V74.6] useRef を使用してリフェッチ関数の最新状態を保持（クロージャ停滞防止）
+  const fetchersRef = React.useRef({
+    fetchRequests: req.fetchRequests,
+    fetchShifts: shifts.fetchShifts
+  });
+
+  React.useEffect(() => {
+    fetchersRef.current = {
+      fetchRequests: req.fetchRequests,
+      fetchShifts: shifts.fetchShifts
+    };
+  }, [req.fetchRequests, shifts.fetchShifts]);
 
   // Removed shadowed state to use auth.isAdminAuthenticated instead  
   // 初期化フロー: 厳格な3秒タイムアウトガードを導入（アプリの「初期化中」画面で固まるのを防止）
@@ -50,8 +63,8 @@ export const useAppLogic = () => {
             }
             
             // シニアアーキテクト指令: クラウド優先（SSOT）統合
-            const staffDataRaw = await cloudStorage.fetchStaff().catch(() => []);
-            const reqDataRaw = await cloudStorage.fetchRequests().catch(() => []);
+            const staffDataRaw = await cloudStorage.fetchStaff().catch(() => null);
+            const reqDataRaw = await cloudStorage.fetchRequests().catch(() => null);
             
             let staffData = Array.isArray(staffDataRaw) ? staffDataRaw : [];
             let reqData = Array.isArray(reqDataRaw) ? reqDataRaw : [];
@@ -68,18 +81,23 @@ export const useAppLogic = () => {
                 }
               }
             }
-
-            if (reqData.length === 0) {
-              if (Platform.OS === 'web') {
-                const r = localStorage.getItem('proto_request_data');
-                if (r) {
-                  try { 
-                    const parsed = JSON.parse(r);
-                    if (Array.isArray(parsed) && parsed.length > 0) reqData = parsed;
-                  } catch (e) { console.warn('proto_request_data parse error'); }
-                }
+            
+            // [CRITICAL V73.9] クラウドが正常に0件を返した場合は、ローカルマージをスキップしてまっさらにする
+            let finalReqs = reqDataRaw || [];
+            
+            if (Platform.OS === 'web' && (!reqDataRaw || reqDataRaw.length === 0)) {
+              // 完全に新規ユーザーか、通信エラーの場合のみLocalStorageを参照
+              const localR = localStorage.getItem('proto_request_data');
+              if (localR && (!reqDataRaw)) { // fetchRequests が失敗(null/undefined)した時のみ
+                try {
+                  const parsed = JSON.parse(localR);
+                  if (Array.isArray(parsed)) finalReqs = parsed;
+                } catch(e) {}
               }
             }
+
+            req.setRequests(finalReqs);
+            console.log('✅ Initial Data Loaded [V74.6]:', finalReqs.length);
 
             // シニアアーキテクト指令: エポメラル・テスト用モックデータ注入 (SupabaseもLocalも空の場合)
             if (staffData.length === 0) {
@@ -94,7 +112,6 @@ export const useAppLogic = () => {
             
             if (mounted) {
                 staff.setStaffList(staffData);
-                req.setRequests(reqData);
             }
         } catch (error: any) {
             console.warn('Initialization notice:', error.message);
@@ -119,7 +136,8 @@ export const useAppLogic = () => {
   useEffect(() => {
     if (auth.profile && isInitialized) {
       console.log('Auth confirmed. Refreshing protected data...');
-      sync.handleForceCloudSync();
+      fetchersRef.current.fetchRequests();
+      fetchersRef.current.fetchShifts();
     }
   }, [auth.profile, isInitialized]);
 
@@ -222,14 +240,19 @@ export const useAppLogic = () => {
       const officialName = staffRecord?.name || auth.profile?.name || '不明';
 
       const requestId = 'req-' + Date.now();
+      const now = new Date().toISOString();
       const newRequest = { 
         id: requestId,
         ...request, 
         status: 'pending',
         staff_id: authUid,
-        staff_name: officialName, // SQL用（日本語正式名）
-        staffName: officialName,  // UI/JS用（日本語正式名）
-        created_at: new Date().toISOString()
+        staffId: authUid,
+        user_id: authUid,
+        staff_name: officialName, 
+        staffName: officialName, 
+        created_at: now,
+        updatedAt: now,
+        details: { ...(request.details || {}), updatedAt: now }
       };
 
       console.log('[DEBUG] useAppLogic Submitting:', {
@@ -242,6 +265,7 @@ export const useAppLogic = () => {
       const { error } = await supabase.from('requests').insert([
         {
           id: newRequest.id,
+          staff_id: authUid, // [V75.3] Added staff_id
           user_id: authUid,
           staff_name: officialName,
           date: newRequest.date,
@@ -249,23 +273,43 @@ export const useAppLogic = () => {
           status: newRequest.status,
           reason: newRequest.reason,
           details: newRequest.details,
-          created_at: newRequest.created_at
+          created_at: now
         }
       ]);
       
       if (error) throw error;
+      
+      // 2. shiftsテーブルも更新（V73.0 整合性確保）
+      const shiftPayload = {
+        id: newRequest.id,
+        staff_id: authUid,
+        staff_name: officialName,
+        date: newRequest.date,
+        type: newRequest.type,
+        status: newRequest.status,
+        is_manual: true,
+        details: newRequest.details,
+        created_at: now
+      };
+      
+      // cloudStorage.upsertShifts 自体の中でエラーが throw されるため、
+      // ここで await するだけで失敗時は catch ブロックへ飛びます。
+      await cloudStorage.upsertShifts([shiftPayload]);
 
-      // ローカルステートも更新
+      // 【重要】DB保存が成功した場合のみ、ローカルステートを更新
       req.setRequests(prev => [...prev, newRequest]);
+      
+      // 非同期で再取得
+      shifts.fetchShifts(); 
       
       Alert.alert('送信成功！', '休暇申請を送信しました。');
       return true;
     } catch (e: any) {
-      console.error('Submission error:', e);
-      Alert.alert('DB送信エラー', e.message);
+      console.error('[V75.2] Submission error:', e);
+      Alert.alert('送信失敗', 'データベースへの保存に失敗しました。しばらく時間をおいて再度お試しください。\n詳細: ' + (e.message || '不明なエラー'));
       return false;
     }
-  }, [auth.user, auth.profile, req.setRequests, staff.staffList]);
+  }, [auth.user, auth.profile, req.setRequests, staff.staffList, shifts]);
 
   const approveRequest = useCallback(async (requestId: string, status: string = 'approved') => {
     try {
@@ -276,7 +320,9 @@ export const useAppLogic = () => {
       const newRequests = req.requests.map(r => r.id === requestId ? newWithStatus : r);
       
       req.setRequests(newRequests);
-      await cloudStorage.upsertRequests([newWithStatus]);
+      // V73.0: 統合保存関数を使用して両方のテーブルを更新
+      await cloudStorage.upsertRequestsAndShifts([newWithStatus]);
+      shifts.fetchShifts();
     } catch (e) {
       console.error('Approve/Reject request error:', e);
       throw e;
@@ -305,9 +351,10 @@ export const useAppLogic = () => {
       });
       req.setRequests(newRequests);
 
-      if (Platform.OS === 'web') {
-        window.location.reload();
-      }
+      // V73.0: shiftsテーブルも一括更新して不整合を防止
+      const approvedItems = newRequests.filter(r => ids.includes(r.id));
+      await cloudStorage.upsertRequestsAndShifts(approvedItems);
+      shifts.fetchShifts();
     } catch (e: any) {
       console.error('Bulk approve error:', e);
       Alert.alert('エラー', 'エラー: ' + e.message);
@@ -346,10 +393,6 @@ export const useAppLogic = () => {
         r.id === requestId ? { ...r, status: 'rejected', updatedAt: now } : r
       );
       req.setRequests(newRequests);
-
-      if (Platform.OS === 'web') {
-        window.location.reload();
-      }
     } catch (e: any) {
       console.error('Reject error:', e);
       Alert.alert('エラー', 'エラー: ' + e.message);
@@ -472,16 +515,15 @@ export const useAppLogic = () => {
         await shifts.fetchShifts();
         await config.refreshConfigs();
         
-        if (s && s.length > 0) staff.setStaffList(s);
-        if (r && r.length > 0) {
-          // [CRITICAL FIX] setRequests ではなく processAndSetRequests を使用して
-          // AsyncStorage への永続化を確実に行う
-          await req.processAndSetRequests(r, true);
-        }
+        // 修正: データが 0 件であっても、それを最新状態として反映する
+        staff.setStaffList(s || []);
         
-        if (Platform.OS === 'web' && s?.length > 0) {
-          localStorage.setItem('proto_staff_data', JSON.stringify(s));
-          localStorage.setItem('proto_request_data', JSON.stringify(r));
+        // [CRITICAL FIX] 0件でも空リストを渡してステートとキャッシュをクリアする
+        await req.processAndSetRequests(r || [], true);
+        
+        if (Platform.OS === 'web') {
+          localStorage.setItem('proto_staff_data', JSON.stringify(s || []));
+          localStorage.setItem('proto_request_data', JSON.stringify(r || []));
         }
         return true;
       } catch (e) {
@@ -519,6 +561,28 @@ export const useAppLogic = () => {
       handleForceCloudSync();
     }
   }, [auth.profile?.id, isInitialized]);
+
+  // [V74.6] 超高速リアルタイム同期設定 (弾丸仕様)
+  useEffect(() => {
+    if (!isInitialized) return;
+    
+    console.log('--- [REALTIME] Subscribing to cloud changes (V74.6)... ---');
+    const channel = cloudStorage.subscribeToChanges(async (payload) => {
+      const { eventType, table } = payload;
+      
+      // [V74.6] useRef経由で最新の関数を呼び出す（Stale Closure 対策）
+      if (table === 'requests' || table === 'shifts') {
+        console.log(`--- [REALTIME_TRIGGER] Refreshing ${table} data due to ${eventType} ---`);
+        fetchersRef.current.fetchRequests();
+        fetchersRef.current.fetchShifts();
+      }
+    });
+    
+    return () => {
+      console.log('--- [REALTIME] Cleaning up subscription ---');
+      cloudStorage.unsubscribe(channel);
+    };
+  }, [isInitialized]); // Dependency を最小限にして再接続を抑制
 
   return useMemo(() => ({
     ...auth,

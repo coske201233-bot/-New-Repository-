@@ -50,7 +50,16 @@ export const deduplicateRequests = (list: any[]) => {
       return;
     }
     
-    const keyBase = `${normalizeName(item.staffName)}-${item.date}`;
+    // [V74.4] UUIDによる鍵生成を優先しつつ、救済ロジックとID移行措置
+    let sId = (item.staffId || item.staff_id || item.userId || item.user_id || '').trim();
+    
+    // 佐藤公貴さんのID移行に伴う救済措置 (OLD -> NEW)
+    if (sId === '70eb22b7-90a1-46b8-b120-0b9e67121e61') {
+      sId = '902d91d7-3ae9-4b5e-8db3-a08f33c4ec7b';
+    }
+
+    const keyBase = sId ? `${sId}-${item.date}` : `${normalizeName(item.staffName || '')}-${item.date}`;
+    
     // 時間給は「daily」の枠とは別に保持できるようにする
     const isHourly = item.type === '時間給';
     const key = `${keyBase}-${isHourly ? 'hourly-' + item.id : 'daily'}`;
@@ -82,20 +91,35 @@ export const deduplicateRequests = (list: any[]) => {
     }
     // 3. 手動優先
     else if (isManNew && !wasManOld) {
-      isPriority = true;
+      isPriority = true; // 手動は常に自動を上書き
     } else if (!isManNew && wasManOld) {
-      isPriority = false;
+      isPriority = false; // 自動は手動を上書きできない
     } 
-    // 4. 更新時間優先
+    // 4. 更新時間優先 (同じ「手動」同士、または同じ「自動」同士の場合)
     else {
       const timeNew = getTime(item);
       const timeOld = getTime(existing);
       
-      isPriority = timeNew > timeOld;
-      
-      // ステータスが承認済みのものを優先（時間が同じ場合）
-      if (timeNew === timeOld && !isPriority) {
-        isPriority = (item.status === 'approved' && existing.status !== 'approved');
+      if (timeNew !== timeOld) {
+        isPriority = timeNew > timeOld;
+      } else {
+        // 時刻が全く同じ場合、ステータスが承認済みのものを優先
+        if (item.status === 'approved' && existing.status !== 'approved') {
+          isPriority = true;
+        } else if (item.status !== 'approved' && existing.status === 'approved') {
+          isPriority = false;
+        } else {
+          // それでも決着がつかない場合は、管理者による手動調整 (m-) を最優先、次にモバイル申請 (req-)
+          const isMNew = String(item.id).startsWith('m-');
+          const isMOld = String(existing.id).startsWith('m-');
+          if (isMNew && !isMOld) {
+            isPriority = true;
+          } else if (!isMNew && isMOld) {
+            isPriority = false;
+          } else {
+            isPriority = String(item.id).startsWith('req-');
+          }
+        }
       }
     }
 
@@ -107,20 +131,40 @@ export const deduplicateRequests = (list: any[]) => {
     }
   });
 
-  // 修正後の2次パス: 同一日の「daily」な手動申請がある場合、自動生成分を削除
+  // 修正後の2次パス: 優先順位の低いデータを一括排除
   const tempResults = Array.from(map.values());
-  const dailyManuals = new Set();
+  const dailyManuals = new Set(); // m- (管理者調整)
+  const dailyRequests = new Set(); // req- (モバイル申請)
+
   tempResults.forEach(r => { 
-    if (r.type !== '時間給' && isManual(r)) {
-      dailyManuals.add(`${normalizeName(r.staffName)}-${r.date}`);
+    const sId = (r.staffId || r.staff_id || r.userId || r.user_id || '').trim();
+    const key = sId ? `${sId}-${r.date}` : `${normalizeName(r.staffName || '')}-${r.date}`;
+    if (r.type !== '時間給') {
+      if (String(r.id).startsWith('m-')) {
+        dailyManuals.add(key);
+      } else if (isManual(r)) {
+        dailyRequests.add(key);
+      }
     } 
   });
 
   const cleanList = tempResults.filter(r => {
-    if (r.type !== '時間給' && !isManual(r) && dailyManuals.has(`${normalizeName(r.staffName)}-${r.date}`)) {
+    if (r.type === '時間給') return true;
+    const sId = (r.staffId || r.staff_id || r.userId || r.user_id || '').trim();
+    const key = sId ? `${sId}-${r.date}` : `${normalizeName(r.staffName || '')}-${r.date}`;
+    
+    // 1. 管理者調整 (m-) がある場合、それ以外のすべての同日データ (req-, auto-) を排除
+    if (!String(r.id).startsWith('m-') && dailyManuals.has(key)) {
       if (!discardedIds.includes(r.id)) discardedIds.push(r.id);
       return false;
     }
+    
+    // 2. 手動申請 (req-) がある場合、自動生成 (auto-) を排除
+    if (!isManual(r) && (dailyManuals.has(key) || dailyRequests.has(key))) {
+      if (!discardedIds.includes(r.id)) discardedIds.push(r.id);
+      return false;
+    }
+    
     return true;
   });
 

@@ -41,7 +41,7 @@ export const STAFF_MAP = {
   isLocked: 'is_locked', 
   lockedMonths: 'locked_months' 
 };
-const REQ_MAP = { staffName: 'staff_name', staffId: 'staff_id', userId: 'user_id', createdAt: 'created_at' };
+const REQ_MAP = { staffName: 'staff_name', staffId: 'staff_id', staff_id: 'staff_id', userId: 'user_id', createdAt: 'created_at' };
 const MSG_MAP = { fromId: 'from_id', fromName: 'from_name', toId: 'to_id', createdAt: 'created_at' };
 
 import { normalizeName } from './dateUtils';
@@ -179,8 +179,10 @@ export const cloudStorage = {
       const clientTime = r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
       const cloudTime = cloudUpdateMap.get(r.id) || 0;
       
-      // クライアント側が「新しい」または「同等（レガシーデータ含む）」の場合、
-      // あるいはクラウドに存在しない場合に保存を許可
+      // クライアント側がタイムスタンプを持っていないのに、クラウド側が持っている場合は上書き禁止
+      if (clientTime === 0 && cloudTime > 0) return false;
+      
+      // クライアント側がクラウドより新しい（または等しい）場合のみ上書きを許可
       return clientTime >= cloudTime;
     }).map(r => {
       const obj: any = {};
@@ -213,33 +215,92 @@ export const cloudStorage = {
        console.error('❌ Requests sync error:', error);
        let msg = `Save failed: ${error.message} (${error.code})`;
        if (error.code === '42501') msg = '申請の更新権限がないか、他人の申請を操作しようとしました(RLS制約)。';
-       if (typeof window !== 'undefined') {
-         console.warn('%c[SECURITY ERROR]', 'color: red; font-weight: bold;', msg);
-       }
        throw new Error(msg);
     }
     console.log(`✅ ${filtered.length} requests synced to cloud successfully (Safe-Upsert)`);
+  },
+  async upsertShifts(shifts: any[]) {
+    if (!shifts || shifts.length === 0) return;
+    const filtered = shifts.map(s => {
+      const obj: any = {};
+      // [V75.2] shiftsテーブルには updated_at カラムがないため除外する
+      const validKeys = ['id', 'staff_id', 'staff_name', 'date', 'type', 'status', 'is_manual', 'details', 'created_at'];
+      validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });
+      if (obj.staff_name) obj.staff_name = normalizeName(obj.staff_name);
+      return obj;
+    });
+    const { error } = await supabase.from('shifts').upsert(filtered, { onConflict: 'id' });
+    if (error) {
+      console.error('❌ Shifts sync error:', error);
+      throw error;
+    }
+    console.log(`✅ ${filtered.length} shifts synced to cloud successfully`);
+  },
+  async fetchShifts() {
+    try {
+      const { data, error } = await supabase.from('shifts').select('*').limit(100000);
+      if (error) throw error;
+      return data || [];
+    } catch (err) {
+      console.error('Fetch shifts error:', err);
+      return [];
+    }
+  },
+  /**
+   * [CRITICAL V73.0] requests と shifts の両方をアトミックに（疑似的に）更新し不整合を防止
+   */
+  async upsertRequestsAndShifts(requests: any[]) {
+    if (!requests || requests.length === 0) return;
+    
+    // 1. requests への保存
+    await this.upsertRequests(requests);
+    
+    // 2. shifts へのマッピングと保存
+    const shiftPayloads = requests.map(r => ({
+      id: r.id,
+      staff_id: r.staff_id || r.staffId || r.userId || r.user_id,
+      staff_name: r.staff_name || r.staffName,
+      date: r.date,
+      type: r.type,
+      status: r.status,
+      is_manual: !!(r.isManual || r.is_manual || String(r.id).startsWith('m-') || String(r.id).startsWith('req-')),
+      details: r.details,
+      updated_at: r.updatedAt || r.updated_at || new Date().toISOString()
+    }));
+    
+    await this.upsertShifts(shiftPayloads);
   },
   async upsertSingleRequest(r: any) {
     // 安全のため、単一更新も共通の Safe-Upsert ロジックを通す
     await this.upsertRequests([r]);
   },
-  async deleteRequest(id: string) {
-    const { error } = await supabase.from('requests').delete().eq('id', id);
-    if (error) {
-      console.error('Request deletion error:', error);
-      throw error;
+   async deleteRequest(id: string) {
+    // requests テーブルから削除
+    const { error: err1 } = await supabase.from('requests').delete().eq('id', id);
+    if (err1) {
+      console.error('Request deletion error:', err1);
+      throw err1;
     }
+    // shifts テーブルからも削除（V73.0 整合性確保）
+    const { error: err2 } = await supabase.from('shifts').delete().eq('id', id);
+    if (err2) {
+      console.error('Shift deletion error:', err2);
+    }
+    console.log(`✅ Record ${id} deleted from both tables.`);
   },
   async deleteRequests(ids: string[]) {
     if (!ids || ids.length === 0) return;
-    // URL length limit prevention (chunk into 50 ids at a time)
     const chunkSize = 50;
     for (let i = 0; i < ids.length; i += chunkSize) {
       const chunk = ids.slice(i, i + chunkSize);
-      const { error } = await supabase.from('requests').delete().in('id', chunk);
-      if (error) throw error;
+      // requests から削除
+      const { error: err1 } = await supabase.from('requests').delete().in('id', chunk);
+      if (err1) throw err1;
+      // shifts から削除
+      const { error: err2 } = await supabase.from('shifts').delete().in('id', chunk);
+      if (err2) console.error('Bulk shift deletion error:', err2);
     }
+    console.log(`✅ ${ids.length} records deleted from both tables.`);
   },
 
   /**
@@ -284,22 +345,33 @@ export const cloudStorage = {
     console.log(`Smart-Sync completed. Resulting in ${cleanList.length} unified requests.`);
   },
 
-  // --- Realtime ---
-  subscribeToChanges(callback: () => void) {
+  // --- Realtime (V74.6 Bulletproof) ---
+  subscribeToChanges(callback: (payload: any) => void) {
+    console.log('--- [REALTIME] Initializing Subscription (shifts, requests) ---');
     const channel = supabase
-      .channel('schema-db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, () => {
-        console.log('Cloud data changed, triggering sync...');
-        callback();
+      .channel('db-changes-v74')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, (payload) => {
+        console.log('--- [REALTIME_DEBUG] Request Event:', payload.eventType, 'ID:', payload.new?.id || payload.old?.id);
+        callback(payload);
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'staff' }, () => {
-        callback();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, (payload) => {
+        console.log('--- [REALTIME_DEBUG] Shift Event:', payload.eventType, 'ID:', payload.new?.id || payload.old?.id);
+        callback(payload);
       })
-      .subscribe();
+      .subscribe((status, err) => {
+        console.log(`--- [REALTIME_STATUS] Status: ${status} ---`);
+        if (err) console.error('--- [REALTIME_ERROR] Connection failed:', err);
+        if (status === 'SUBSCRIBED') {
+          console.log('--- [REALTIME_READY] Listening for changes in public.shifts and public.requests ---');
+        }
+      });
     return channel;
   },
-  unsubscribe(channel: any) {
-    supabase.removeChannel(channel);
+  async unsubscribe(channel: any) {
+    if (channel) {
+      console.log('--- [REALTIME] Removing channel subscription ---');
+      await supabase.removeChannel(channel);
+    }
   },
 
   // --- Config ---

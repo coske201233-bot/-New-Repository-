@@ -106,14 +106,32 @@ export const CalendarScreen: React.FC<any> = ({
       if (!map.has(dateKey)) map.set(dateKey, new Map<string, any>());
       const dayMap = map.get(dateKey)!;
       
-      // [V57.6] 照合キーを ID 優先にするが、IDの揺れ（staff_id vs user_id）に備え名前でも保持
-      const extractedId = extractUuid(r.id);
-      const sId = String(r.staff_id || r.staffId || r.user_id || extractedId || '').trim();
+      // [V74.4] UUID（staff_id）による紐付けを最優先。ID移行の救済処置を含む。
+      let extractedId = extractUuid(r.id);
+      
+      const rawId = String(r.staff_id || r.staffId || r.user_id || r.userId || extractedId || '').trim();
       const sName = normalizeLocal(r.staffName || r.staff_name || '');
       
-      const keys = [sId, sName].filter(Boolean);
-      keys.forEach(key => {
-        const existing = dayMap.get(key);
+      // [V75.0] UNIFIED UUID RESOLUTION:
+      // データ型をUUIDに完全統一。名前ベースのフォールバックを廃止。
+      let resolvedId = '';
+      if (rawId && rawId.length > 5) {
+        resolvedId = rawId;
+      } else if (sName) {
+        // 名簿からUUIDを特定する。特定できないデータは表示対象外とする（データ型の混在を避けるため）
+        const staffEntry = (staffList || []).find(s => normalizeLocal(s.name) === sName);
+        if (staffEntry?.id) {
+          resolvedId = staffEntry.id;
+        }
+      }
+
+      if (!resolvedId) {
+        console.warn('[V75.0] Orphan record (No UUID match):', r);
+        return;
+      }
+
+      const key = resolvedId; // キーは純粋なUUIDのみ
+      const existing = dayMap.get(key);
         
         const isManualEntry = (rec: any) => 
           !!(rec.is_manual || rec.isManual) || 
@@ -138,11 +156,21 @@ export const CalendarScreen: React.FC<any> = ({
           const isOffOld = isOff(existing.type);
 
           if (isManNew && !wasManOld) {
-            isBetter = true; // 手動は常に自動を上書き
+            isBetter = true; 
           } else if (!isManNew && wasManOld) {
-            isBetter = false; // 自動は手動を上書きできない
+            isBetter = false; 
           } else if (isManNew && wasManOld) {
-            isBetter = getTime(r) > getTime(existing); // 共に手動なら新しい方を優先
+            // 共に手動の場合の優先順位判定
+            const isMNew = String(r.id).startsWith('m-');
+            const isMOld = String(existing.id).startsWith('m-');
+            
+            if (isMNew && !isMOld) {
+              isBetter = true; // 管理者による手動調整を最優先
+            } else if (!isMNew && isMOld) {
+              isBetter = false; // 既存が管理者調整なら、申請はそれを上書きできない
+            } else {
+              isBetter = getTime(r) > getTime(existing); // 同じ種類同士なら新しい方を優先
+            }
           } else {
             // 共に自動の場合、安全のため公休（休み）を優先
             isBetter = isOffNew && !isOffOld;
@@ -152,7 +180,6 @@ export const CalendarScreen: React.FC<any> = ({
         if (isBetter) {
           dayMap.set(key, r);
         }
-      });
     });
 
     return map;
@@ -185,23 +212,7 @@ export const CalendarScreen: React.FC<any> = ({
         const sId = String(staff.id || '').trim();
         const sName = normalize(staff.name || '');
 
-        const reqById = sId ? dayMap?.get(sId) : null;
-        const reqByName = sName ? dayMap?.get(sName) : null;
-        
-        let singleReq = reqById;
-        if (!reqById) {
-          singleReq = reqByName;
-        } else if (reqByName && reqByName !== reqById) {
-          // [V72.3] ID一致と名前一致が異なる場合（自動生成シフト vs 手動リクエスト等）の優先判定
-          const isManual = (rec: any) => 
-            !!(rec.is_manual || rec.isManual) || 
-            String(rec.id || '').startsWith('m-') || 
-            String(rec.id || '').startsWith('req-');
-          
-          if (!isManual(reqById) && isManual(reqByName)) {
-            singleReq = reqByName; // 手動リクエストを優先
-          }
-        }
+        const singleReq = sId ? dayMap?.get(sId) : null;
         const userRequests = singleReq ? [singleReq] : [];
         
         // 稼働としてカウントする種別の定義
@@ -377,43 +388,69 @@ export const CalendarScreen: React.FC<any> = ({
     });
 
     // [V61.4] requests と shifts 両方のテーブルを更新して状態の不整合を防ぐ
-    for (const req of newReqs) {
-      // 確実なマッチングのために、UUIDのチェックも追加
-      const extractedId = extractUuid(req.id);
-      const staff = staffList.find(s => s.id === extractedId || normalizeName(s.name) === normalizeName(req.staffName));
-      if (staff) {
-        // 1. shiftsテーブルの更新（updated_atカラムは存在しないため除外）
-        await supabase.from('shifts').upsert({
-          id: req.id,
+    // [V75.2] STRICT ERROR HANDLING & UUID VALIDATION
+    try {
+      for (const r of newReqs) {
+        const extractedId = extractUuid(r.id);
+        const staff = staffList.find(s => s.id === extractedId || normalizeName(s.name) === normalizeName(r.staffName));
+        
+        if (!staff || !staff.id) {
+          console.error('[V75.2] Failed to resolve UUID for staff:', r.staffName);
+          Alert.alert('保存エラー', `${r.staffName}さんのUUIDを特定できません。名簿を確認してください。`);
+          continue;
+        }
+
+        // 1. shiftsテーブルの更新
+        const { error: sErr } = await supabase.from('shifts').upsert({
+          id: r.id,
           staff_id: staff.id,
           staff_name: staff.name,
-          date: req.date,
-          type: req.type,
+          date: r.date,
+          type: r.type,
           status: 'approved',
           is_manual: true,
-          details: req.details
+          details: r.details
         });
+
+        if (sErr) {
+          console.error('[V75.2] Shifts Upsert Error:', sErr);
+          Alert.alert('DB保存失敗(Shifts)', `${staff.name}さんの保存に失敗しました: ${sErr.message}`);
+          throw sErr;
+        }
 
         // 2. requestsテーブルの更新（同期割れ防止）
-        await supabase.from('requests').upsert({
-          id: req.id,
-          staff_name: req.staffName,
-          date: req.date,
-          type: req.type,
+        const { error: rErr } = await supabase.from('requests').upsert({
+          id: r.id,
+          staff_id: staff.id, // [V75.3] Added staff_id column
+          staff_name: r.staffName,
+          date: r.date,
+          type: r.type,
           status: 'approved',
-          reason: req.reason,
-          details: { ...req.details, isManual: true, updatedAt: req.updatedAt },
+          reason: r.reason,
+          details: { ...r.details, isManual: true, updatedAt: r.updatedAt },
           is_manual: true
         });
-      }
-    }
 
-    setRequests((prev: any[]) => [...prev, ...newReqs]);
-    setIsAddStaffModalVisible(false);
-    setIsTypeModalVisible(false);
-    setSelectedStaffToAdd([]);
-    setSelectedType('出勤');
-    fetchShifts(); // 最新の状態を再取得
+        if (rErr) {
+          console.error('[V75.2] Requests Upsert Error:', rErr);
+          Alert.alert('DB保存失敗(Requests)', `${staff.name}さんの申請保存に失敗しました: ${rErr.message}`);
+          throw rErr;
+        }
+      }
+
+      setRequests((prev: any[]) => [...prev, ...newReqs]);
+      setIsAddStaffModalVisible(false);
+      setIsTypeModalVisible(false);
+      setSelectedStaffToAdd([]);
+      setSelectedType('出勤');
+      
+      // 保存完了後に確実に再取得
+      await fetchShifts();
+      Alert.alert('完了', 'シフトを保存しました。');
+      
+    } catch (err: any) {
+      console.error('[V75.2] Critical Save Failure:', err);
+    }
   };
 
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
@@ -467,7 +504,8 @@ export const CalendarScreen: React.FC<any> = ({
         const getDisplayLabel = (item: any) => {
           const name = item.staff.name;
           const type = item.type || '';
-          if (type === '時間休' || type === '時間給') return `${name}(${item.details?.duration || '?'}h)`;
+          const duration = item.details?.duration ?? item.hours ?? item.details?.hours;
+          if (type === '時間休' || type === '時間給') return `${name}(${duration ?? '?'}h)`;
           if (type === '午前休') return `${name}(前)`;
           if (type === '午後休') return `${name}(後)`;
           if (type.includes('振替') || type.includes('振休')) return `${name}(振)`;
@@ -581,8 +619,8 @@ export const CalendarScreen: React.FC<any> = ({
         <View style={styles.header}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <View>
-              <ThemeText variant="h1">カレンダー [V72.5]</ThemeText>
-              <ThemeText variant="caption" style={{ fontSize: 9, opacity: 0.3, color: COLORS.textSecondary }}>[BUILD: VERSION 72.5 - REQ FIX]</ThemeText>
+              <ThemeText variant="h1">カレンダー [V75.2]</ThemeText>
+              <ThemeText variant="caption" style={{ fontSize: 9, opacity: 0.3, color: COLORS.textSecondary }}>[BUILD: VERSION 75.2 - ROBUST SAVE & UUID]</ThemeText>
             </View>
             <TouchableOpacity 
               style={{ padding: 8 }} 
@@ -650,7 +688,9 @@ export const CalendarScreen: React.FC<any> = ({
                       <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginLeft: 8 }} numberOfLines={1}>
                         ({item.type}{item.isHomeVisit ? ' / 訪問' : (item.isAssistant ? ' / 助手' : '')})
                         {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
-                        {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details.duration}h</ThemeText>}
+                        {(!item.details?.startTime && (item.details?.duration ?? item.hours ?? item.details?.hours) !== undefined) && (
+                          <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold' }}> {item.details?.duration ?? item.hours ?? item.details?.hours}h</ThemeText>
+                        )}
                         {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                       </ThemeText>
                     </View>
@@ -693,7 +733,9 @@ export const CalendarScreen: React.FC<any> = ({
                     >
                       ({item.type})
                       {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
-                      {(!item.details?.startTime && item.details?.duration) && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.duration}h</ThemeText>}
+                      {(!item.details?.startTime && (item.details?.duration ?? item.hours ?? item.details?.hours) !== undefined) && (
+                        <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details?.duration ?? item.hours ?? item.details?.hours}h</ThemeText>
+                      )}
                       {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
                     </ThemeText>
                   </View>

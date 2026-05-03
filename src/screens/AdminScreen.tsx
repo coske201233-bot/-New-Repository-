@@ -5,7 +5,7 @@ import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING } from '../theme/theme';
 import { 
   ChevronRight, Database, FileOutput, 
-  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock
+  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle
 } from 'lucide-react-native';
 import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
@@ -149,20 +149,24 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         let row = `<tr><td style="text-align: left; padding-left: 5px; font-weight: bold;">${s.name}</td><td>${s.jobType || s.profession || ''}</td>`;
         monthInfoArr.forEach((d: any) => {
           if (!d.empty) {
-            const sT = normalizeName(s.name);
             const staffId = s.id;
+            const staffNameNormalized = normalizeName(s.name);
             
-            // 照合ロジックを強化： staff_id(UUID)を最優先、次に名前(正規化後)で探す
+            // 照合ロジックを強化 (V74.3)
             const req = requests.find((r: any) => {
               if (!r || r.date !== d.dateStr || r.status === 'deleted') return false;
               
-              // 1. UUIDで直接照合 (最も確実)
-              const rStaffId = r.staff_id || r.staffId || r.user_id;
+              // 1. UUIDで直接照合
+              const rStaffId = r.staff_id || r.staffId || r.user_id || r.userId;
               if (rStaffId && rStaffId === staffId) return true;
               
-              // 2. 名前で照合 (UUIDがない場合のバックアップ)
+              // 2. ID文字列からの抽出照合
+              const extractedId = r.id?.includes('-') ? r.id.split('-').slice(1, 6).join('-') : null;
+              if (extractedId && extractedId === staffId) return true;
+              
+              // 3. 名前による最終照合 (IDが取れない場合の救済)
               const rName = normalizeName(r.staff_name || r.staffName || '');
-              if (rName && rName === sT) return true;
+              if (rName && rName === staffNameNormalized) return true;
               
               return false;
             });
@@ -314,7 +318,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}><ThemeText variant="h1">設定 [V72.0]</ThemeText><ThemeText variant="caption" style={{ fontSize: 9, opacity: 0.3, color: COLORS.textSecondary }}>[BUILD: VERSION 72.2 - ID MATCH]</ThemeText></View>
+      <View style={styles.header}><ThemeText variant="h1">設定 [V74.6]</ThemeText><ThemeText variant="caption" style={{ fontSize: 9, opacity: 0.3, color: COLORS.textSecondary }}>[BUILD: VERSION 74.6 - BULLETPROOF SYNC]</ThemeText></View>
       <ScrollView style={{ flex: 1 }}>
         <View style={{ padding: SPACING.md }}>
 
@@ -418,6 +422,55 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                       <ThemeText bold color="#38bdf8" style={{marginLeft:6}}>実行</ThemeText>
                     </>
                   )}
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[styles.inlineBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)', marginLeft: 8 }]} 
+                  onPress={async () => {
+                    const monthName = `${currentYear}年${currentMonth + 1}月`;
+                    Alert.alert(
+                      '全データ削除',
+                      `${monthName} の「全スタッフ」のシフトと申請データをすべて削除しますか？\n(この操作は取り消せません)`,
+                      [
+                        { text: 'キャンセル', style: 'cancel' },
+                        { 
+                          text: '削除する', 
+                          style: 'destructive', 
+                          onPress: async () => {
+                            setIsAssigning(true);
+                            try {
+                              const prefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+                              
+                              // 1. shifts テーブルから削除
+                              await supabase.from('shifts')
+                                .delete()
+                                .like('date', `${prefix}%`);
+                              
+                              // 2. requests テーブルから削除
+                              await supabase.from('requests')
+                                .delete()
+                                .like('date', `${prefix}%`);
+                              
+                              // 3. ローカルステートを更新
+                              setRequests(prev => prev.filter(r => !r.date?.startsWith(prefix)));
+                              
+                              if (fetchShifts) await fetchShifts();
+                              
+                              Alert.alert('完了', `${monthName} の全データを削除しました。`);
+                            } catch (e: any) {
+                              Alert.alert('エラー', '削除中にエラーが発生しました: ' + e.message);
+                            } finally {
+                              setIsAssigning(false);
+                            }
+                          }
+                        }
+                      ]
+                    );
+                  }}
+                  disabled={isAssigning}
+                >
+                  <XCircle size={18} color="#ef4444" />
+                  <ThemeText bold color="#ef4444" style={{marginLeft:6}}>全削除</ThemeText>
                 </TouchableOpacity>
 
                 {canUndoAutoAssign && !isAssigning && (

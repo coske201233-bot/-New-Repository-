@@ -67,9 +67,9 @@ export const useRequestData = () => {
       });
 
       // 2. Perform CLOUD update FIRST (Source of Truth)
-      // This fulfills the user's requirement for "verified with 200 OK"
+      // V73.0: 統合保存関数を使用して requests と shifts の両方を同期
       if (toUpsert.length > 0) {
-        await cloudStorage.upsertRequests(toUpsert);
+        await cloudStorage.upsertRequestsAndShifts(toUpsert);
       }
       if (discardedIds.length > 0) {
         await cloudStorage.deleteRequests(discardedIds);
@@ -120,6 +120,17 @@ export const useRequestData = () => {
     });
   }, []);
 
+  const fetchRequests = useCallback(async () => {
+    try {
+      const data = await cloudStorage.fetchRequests();
+      if (data) {
+        await processAndSetRequests(data, true);
+      }
+    } catch (e) {
+      console.error('Fetch requests error:', e);
+    }
+  }, [processAndSetRequests]);
+
   return useMemo(() => ({ 
     requests, 
     setRequests, 
@@ -127,6 +138,7 @@ export const useRequestData = () => {
     setRequestsHistory, 
     updateRequests,
     processAndSetRequests,
-    mergeCloudRequests
-  }), [requests, requestsHistory, updateRequests, processAndSetRequests, mergeCloudRequests]);
+    mergeCloudRequests,
+    fetchRequests
+  }), [requests, requestsHistory, updateRequests, processAndSetRequests, mergeCloudRequests, fetchRequests]);
 };

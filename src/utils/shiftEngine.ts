@@ -143,22 +143,19 @@ export const generateMonthlyShifts = async (
     // Step B: 承認済み休暇申請
     const { data: approvedLeaves } = await supabase
       .from('requests')
-      .select('staff_name, user_id, date, type, status')
+      .select('staff_name, user_id, staff_id, date, type, status')
       .like('date', `${monthPrefix}%`)
       .eq('status', 'approved')
       .not('type', 'in', '("出勤")');
 
     const leaveSet = new Set<string>();
     (approvedLeaves || []).forEach((r: any) => {
-      const uid = r.user_id || extractUuid(r.id);
+      const uid = r.staff_id || r.user_id || extractUuid(r.id);
       if (uid && r.date) leaveSet.add(`uid__${uid}__${r.date}`);
-      if (r.staff_name && r.date) leaveSet.add(`name__${normalizeName(r.staff_name)}__${r.date}`);
     });
 
     const hasLeave = (tracker: StaffTracker, dateStr: string): boolean => {
-      const normName = normalizeName(tracker.name);
-      return leaveSet.has(`uid__${tracker.id}__${dateStr}`) ||
-        (normName ? leaveSet.has(`name__${normName}__${dateStr}`) : false);
+      return leaveSet.has(`uid__${tracker.id}__${dateStr}`);
     };
 
     // Step C: 月の全日程を分類
@@ -198,8 +195,7 @@ export const generateMonthlyShifts = async (
       };
       (manualShifts || []).forEach((ms: any) => {
         const msId = String(ms.staff_id || ms.user_id || extractUuid(ms.id) || '').trim();
-        const msName = normalizeName(ms.staff_name || ms.staffName || '');
-        if ((msId && msId === staff.id) || (msName && msName === normalizeName(staff.name))) {
+        if (msId && msId === staff.id) {
           const dKey = ms.date.substring(0, 10);
           if (ms.type === '出勤') {
             tracker.workedDates.add(dKey);
@@ -212,22 +208,16 @@ export const generateMonthlyShifts = async (
       trackers.set(staff.id, tracker);
       (prevShifts || []).forEach((ps: any) => {
         const psId = String(ps.staff_id || ps.user_id || extractUuid(ps.id) || '').trim();
-        const psName = normalizeName(ps.staff_name || '');
-        if ((psId && psId === staff.id) || (psName && psName === normalizeName(staff.name))) {
+        if (psId && psId === staff.id) {
           tracker.workedDates.add(ps.date.substring(0, 10));
         }
       });
     });
 
     const hasManualShift = (staffId: string, dateStr: string): boolean => {
-      const tracker = trackers.get(staffId);
-      const normName = tracker ? normalizeName(tracker.name) : '';
       return (manualShifts || []).some((ms: any) => {
         const msId = String(ms.staff_id || ms.user_id || extractUuid(ms.id) || '').trim();
-        const msName = normalizeName(ms.staff_name || ms.staffName || '');
-        const dateMatch = ms.date.substring(0, 10) === dateStr;
-        if (!dateMatch) return false;
-        return (msId && msId === staffId) || (msName && normName && msName === normName);
+        return (msId && msId === staffId && ms.date.substring(0, 10) === dateStr);
       });
     };
 
@@ -340,33 +330,33 @@ export const generateMonthlyShifts = async (
             const staffOnLastDate = recentShifts.filter(s => s.date === lastDate);
             console.log(`[ShiftEngine] 引継ぎ基準日: ${lastDate}, スタッフ: [${staffOnLastDate.map(s => s.staff_name).join(', ')}]`);
 
-            // staff_id優先 → 名前フォールバックの照合
+            // [V75.0] STRICT UUID MATCHING: 
+            // 履歴レコードをまずUUIDに解決し、UUID同士で厳格に比較する。
             const indices = staffOnLastDate.map(row => {
-              const dbId = row.staff_id;
-              const dbName = row.staff_name;
+              const dbId = row.staff_id || row.staffId || extractUuid(row.id);
+              const dbName = normalizeName(row.staff_name || row.staffName || '');
+              
+              // 1. レコードの人物をUUIDに解決する
+              let resolvedPersonId = '';
+              if (dbId && dbId.length > 5) {
+                resolvedPersonId = dbId;
+              } else if (dbName) {
+                // 名前しか無い場合は、現在のスタッフリストからIDを逆引きする
+                const matchedStaff = eligibleForFilter.find(s => normalizeName(s.name) === dbName);
+                if (matchedStaff) resolvedPersonId = matchedStaff.id;
+              }
 
-              // 1. staff_id（UUID）で直接照合（最優先）
-              if (dbId) {
-                const idx = sortedStaffList.findIndex((s: any) => s.id === dbId);
+              // 2. 解決されたUUIDを使って、ローテーションリスト内での位置を特定する
+              if (resolvedPersonId) {
+                const idx = sortedStaffList.findIndex((s: any) => s.id === resolvedPersonId);
                 if (idx !== -1) {
-                  console.log(`[ShiftEngine]   ID照合成功: "${dbName}" → index:${idx}`);
+                  console.log(`[ShiftEngine]   照合成功: index:${idx} (${dbName})`);
                   return idx;
                 }
               }
 
-              // 2. 名前照合（フォールバック）
-              const cleanDb = sanitize(dbName);
-              const normDb = normalizeName(dbName);
-              let idx = sortedStaffList.findIndex((s: any) => sanitize(s.name) === cleanDb);
-              if (idx === -1) idx = sortedStaffList.findIndex((s: any) => normalizeName(s.name) === normDb);
-              if (idx === -1) {
-                idx = sortedStaffList.findIndex((s: any) => {
-                  const n = sanitize(s.name);
-                  return n.includes(cleanDb) || cleanDb.includes(n);
-                });
-              }
-              console.log(`[ShiftEngine]   名前照合: "${dbName}" → "${cleanDb}" → index:${idx}`);
-              return idx;
+              console.warn(`[ShiftEngine]   照合失敗: "${dbName}" (ID:${dbId}) がリストに見つけられません`);
+              return -1;
             }).filter(i => i !== -1);
 
             console.log(`[ShiftEngine] マッチしたインデックス: [${indices.join(', ')}]`);

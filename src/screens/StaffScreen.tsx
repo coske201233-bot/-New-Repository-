@@ -27,6 +27,8 @@ interface StaffScreenProps {
   setCurrentDate: (d: Date | ((prev: Date) => Date)) => void;
   onForceCloudSync?: () => Promise<boolean>;
   onLogout?: () => void;
+  fetchShifts?: () => Promise<void>;
+  shifts?: any[];
 }
 
 interface MonthDay {
@@ -41,7 +43,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     staffList, setStaffList, 
     requests, setRequests, onDeleteRequest, isPrivileged, profile, 
     currentDate, setCurrentDate,
-    shifts, fetchShifts, isLoadingShifts // [V54.0]
+    fetchShifts, shifts
   } = props;
 
   // --- [CRITICAL: FALLBACK UI FOR WSOD PREVENTION] ---
@@ -237,10 +239,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     if (!r) return 0;
     
     // [V72.6] 新しい時間保持方式（hoursプロパティまたはdetails.duration）を優先
-    // これにより時間休や時間指定の特休が正しく計算されるようになります
     const h = r.hours ?? r.details?.duration ?? r.details?.hours;
     const parsedH = parseFloat(String(h));
-    if (h !== undefined && h !== null && h !== '' && !isNaN(parsedH) && parsedH > 0) return parsedH;
+    if (h !== undefined && h !== null && h !== '' && !isNaN(parsedH)) return parsedH;
     
     // Default values by type
     if (r.type === '1日振替') return 7.75;
@@ -383,22 +384,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         return [newReq, ...without];
       });
       
-      await cloudStorage.upsertRequests([newReq]);
+      // [V75.2] CORRECT SAVE LOGIC: Use cloudStorage directly
+      await cloudStorage.upsertRequestsAndShifts([newReq]);
       
-      // [V53.2] shiftsテーブルも同期（全体カレンダーとの不整合を解消）
-      const shiftPayload = {
-        id: newReq.id,
-        staff_id: selectedStaff.id,
-        staff_name: selectedStaff.name,
-        date: selectedDay,
-        type: type,
-        status: 'approved',
-        is_manual: true, // 【V53.6】手動フラグを付与
-        details: newReq.details
-      };
-      await supabase.from('shifts').upsert(shiftPayload);
-      
-      await fetchShifts(); // 再取得して表示を更新
+      if (fetchShifts) {
+        await fetchShifts(); // 表示を最新の状態に更新
+      }
       Alert.alert('完了', '保存しました');
     } catch (e) {
       console.error('Confirm Shift Error:', e);
