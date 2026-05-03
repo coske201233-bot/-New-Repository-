@@ -311,24 +311,23 @@ export const generateMonthlyShifts = async (
         console.log(`[ShiftEngine] 引継ぎ用データ取得件数: ${recentShifts?.length ?? 0}件`);
 
         if (recentShifts && recentShifts.length > 0) {
-          // holiday_strict_sequence フェーズを優先検索
-          let lastShift = recentShifts.find(s => s.details?.phase === 'holiday_strict_sequence');
+          // [V75.4] 厳格な時系列ソート: DBからの順序を信じず、メモリ上でも日付降順にソート
+          const chronologicalShifts = [...recentShifts].sort((a, b) => b.date.localeCompare(a.date));
 
-          if (!lastShift) {
-            console.log('[ShiftEngine] フェーズ未検出。日付ベースで検索します');
-            lastShift = recentShifts.find(s => {
-              const d = new Date(String(s.date).replace(/-/g, '/'));
-              const day = d.getDay();
-              const mmdd = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-              const isNewYear = ['12-28', '12-29', '12-30', '12-31', '01-01', '01-02', '01-03'].includes(mmdd);
-              return day === 0 || day === 6 || isNewYear;
-            });
-          }
+          // 1. 休日・週末のシフトのみを抽出
+          const holidayHistory = chronologicalShifts.filter(s => {
+            const d = new Date(String(s.date).replace(/-/g, '/'));
+            const day = d.getDay();
+            const mmdd = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            const isNewYear = ['12-28', '12-29', '12-30', '12-31', '01-01', '01-02', '01-03'].includes(mmdd);
+            return day === 0 || day === 6 || isNewYear;
+          });
 
-          if (lastShift) {
-            const lastDate = lastShift.date;
-            const staffOnLastDate = recentShifts.filter(s => s.date === lastDate);
-            console.log(`[ShiftEngine] 引継ぎ基準日: ${lastDate}, スタッフ: [${staffOnLastDate.map(s => s.staff_name).join(', ')}]`);
+          if (holidayHistory.length > 0) {
+            // 2. 時系列で正真正銘「最後」の休日を取得
+            const lastDate = holidayHistory[0].date;
+            const staffOnLastDate = holidayHistory.filter(s => s.date === lastDate);
+            console.log(`[ShiftEngine] 引継ぎ基準日(最新休日): ${lastDate}, スタッフ: [${staffOnLastDate.map(s => s.staff_name).join(', ')}]`);
 
             // [V75.0] STRICT UUID MATCHING: 
             // 履歴レコードをまずUUIDに解決し、UUID同士で厳格に比較する。
