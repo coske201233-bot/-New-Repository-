@@ -50,7 +50,7 @@ export const cloudStorage = {
   // --- Staff ---
   async fetchStaff() {
     try {
-      const { data, error } = await supabase.from('staff').select('*').limit(10000);
+      const { data, error } = await supabase.from('staff').select('*').order('rotation_order', { ascending: true, nullsFirst: false }).limit(10000);
       if (error) throw error;
       const result = (data || []).map(s => mapFromSql(s, STAFF_MAP));
       if (typeof window !== 'undefined' && result.length > 0) {

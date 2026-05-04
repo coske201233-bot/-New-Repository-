@@ -123,8 +123,8 @@ export const generateMonthlyShifts = async (
     });
     const manualShifts = Array.from(manualDayMap.values());
 
-    // Step A: スタッフ取得
-    const { data: staffData, error: staffError } = await supabase.from('staff').select('*');
+    // Step A: スタッフ取得 (rotation_order順で取得、未設定は後回し)
+    const { data: staffData, error: staffError } = await supabase.from('staff').select('*').order('rotation_order', { ascending: true, nullsFirst: false });
     if (staffError) throw staffError;
 
     const eligibleForFilter = (staffData || []).filter(staff => {
@@ -286,10 +286,23 @@ export const generateMonthlyShifts = async (
     if (!holidayDates || holidayDates.length === 0) {
       console.error('CRITICAL ERROR: holidayDates is empty!');
     } else {
-      const sortedStaffList = HOLIDAY_ROTATION_ORDER.map(name => {
-        const normName = normalizeName(name);
-        return eligibleForFilter.find(s => normalizeName(s.name) === normName);
-      }).filter(s => s !== undefined) as any[];
+      // [V75.8] ローテーション参加者のみの純粋なリストを構築
+      // 土日祝休みの人はインデックス計算を狂わせるため、配列から完全に除外する
+      let sortedStaffList = eligibleForFilter.filter(s => 
+        (s.rotation_order !== null && s.rotation_order !== undefined && s.rotation_order !== '') &&
+        (s.no_holiday !== true && s.no_holiday !== 'true' && s.noHoliday !== true)
+      );
+
+      // [V75.9] 念のための最終強制ソート (DB順を信用しつつ、JS側でも念押し)
+      sortedStaffList.sort((a, b) => {
+        const orderA = parseInt(String(a.rotation_order), 10) || 999;
+        const orderB = parseInt(String(b.rotation_order), 10) || 999;
+        return orderA - orderB;
+      });
+
+      // [V75.9] 評価直前の最終配列を完全ログ出力
+      console.log("[ShiftEngine] Current Rotation Array:", sortedStaffList.map((s, i) => `[${i}] ${s.name} (order: ${s.rotation_order})`));
+      console.log(`[ShiftEngine] Rotation List (${sortedStaffList.length}名):`, sortedStaffList.map((s, i) => `${i}:${s.name}(RO:${s.rotation_order})`).join(', '));
 
       const sanitize = (str: any) => String(str || '').replace(/[\s\u3000]/g, '');
       let currentStaffIndex = 0;
@@ -305,14 +318,15 @@ export const generateMonthlyShifts = async (
           .gte('date', getDateStr(searchStartDate))
           .lte('date', getDateStr(searchEndDate))
           .in('type', ['出勤', '日勤'])
-          .order('date', { ascending: false });
+          .order('date', { ascending: false })
+          .limit(10000); // [V75.5] 大規模データでも直近分が漏れないように制限拡張
 
         if (rErr) throw rErr;
         console.log(`[ShiftEngine] 引継ぎ用データ取得件数: ${recentShifts?.length ?? 0}件`);
 
         if (recentShifts && recentShifts.length > 0) {
-          // [V75.4] 厳格な時系列ソート: DBからの順序を信じず、メモリ上でも日付降順にソート
-          const chronologicalShifts = [...recentShifts].sort((a, b) => b.date.localeCompare(a.date));
+          // [V75.5] STRICT ARRAY SORTING: 確実に最新日付が最初に来るように JavaScript 側でも再ソート
+          const chronologicalShifts = [...recentShifts].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
           // 1. 休日・週末のシフトのみを抽出
           const holidayHistory = chronologicalShifts.filter(s => {
@@ -324,60 +338,44 @@ export const generateMonthlyShifts = async (
           });
 
           if (holidayHistory.length > 0) {
-            // 2. 時系列で正真正銘「最後」の休日を取得
-            const lastDate = holidayHistory[0].date;
+            // 2. 時系列で絶対的な「最後」の休日を取得
+            const lastShift = holidayHistory[0];
+            const lastDate = lastShift.date;
             const staffOnLastDate = holidayHistory.filter(s => s.date === lastDate);
-            console.log(`[ShiftEngine] 引継ぎ基準日(最新休日): ${lastDate}, スタッフ: [${staffOnLastDate.map(s => s.staff_name).join(', ')}]`);
-
-            // [V75.0] STRICT UUID MATCHING: 
-            // 履歴レコードをまずUUIDに解決し、UUID同士で厳格に比較する。
-            const indices = staffOnLastDate.map(row => {
-              const dbId = row.staff_id || row.staffId || extractUuid(row.id);
-              const dbName = normalizeName(row.staff_name || row.staffName || '');
+            
+            // [V76.4] 詳細なログ出力とフォールバック照合の追加
+            const indicesOnLastDay = staffOnLastDate.map(row => {
+              const staffId = row.staff_id || row.staffId;
+              const staffName = normalizeName(row.staff_name || row.staffName || "");
               
-              // 1. レコードの人物をUUIDに解決する
-              let resolvedPersonId = '';
-              if (dbId && dbId.length > 5) {
-                resolvedPersonId = dbId;
-              } else if (dbName) {
-                // 名前しか無い場合は、現在のスタッフリストからIDを逆引きする
-                const matchedStaff = eligibleForFilter.find(s => normalizeName(s.name) === dbName);
-                if (matchedStaff) resolvedPersonId = matchedStaff.id;
+              // 1. UUID で検索
+              let idx = -1;
+              if (staffId) {
+                idx = sortedStaffList.findIndex(s => s.id === staffId);
               }
-
-              // 2. 解決されたUUIDを使って、ローテーションリスト内での位置を特定する
-              if (resolvedPersonId) {
-                const idx = sortedStaffList.findIndex((s: any) => s.id === resolvedPersonId);
-                if (idx !== -1) {
-                  console.log(`[ShiftEngine]   照合成功: index:${idx} (${dbName})`);
-                  return idx;
-                }
+              
+              // 2. UUID で見つからない場合は名前で検索 (セーフティネット)
+              if (idx === -1 && staffName) {
+                idx = sortedStaffList.findIndex(s => normalizeName(s.name) === staffName);
               }
+              
+              return idx;
+            }).filter(idx => idx !== -1);
 
-              console.warn(`[ShiftEngine]   照合失敗: "${dbName}" (ID:${dbId}) がリストに見つけられません`);
-              return -1;
-            }).filter(i => i !== -1);
-
-            console.log(`[ShiftEngine] マッチしたインデックス: [${indices.join(', ')}]`);
-
-            if (indices.length > 0) {
-              // 昇順ソートしてから「次の人が同日セットにいない人」を最終担当者とする
-              const sortedIndices = [...indices].sort((a, b) => a - b);
-              let lastIdx = sortedIndices[sortedIndices.length - 1];
-              for (const idx of sortedIndices) {
-                const nextIdx = (idx + 1) % sortedStaffList.length;
-                if (!sortedIndices.includes(nextIdx)) {
-                  lastIdx = idx;
-                  break;
-                }
-              }
-              currentStaffIndex = (lastIdx + 1) % sortedStaffList.length;
-              console.log(`[ShiftEngine] 月またぎ引継ぎ成功: 前月最後(${lastDate})の次 → index:${currentStaffIndex} = ${sortedStaffList[currentStaffIndex]?.name}`);
+            // 2. STRICTLY find the mathematical maximum using Math.max
+            let tailIndex = indicesOnLastDay.length > 0 ? Math.max(...indicesOnLastDay) : -1;
+    
+            // 3. Set the last assigned index
+            if (tailIndex !== -1) {
+              const lastAssignedIndex = tailIndex;
+              currentStaffIndex = (lastAssignedIndex + 1) % sortedStaffList.length;
+              console.log(`[CarryOver Debug] V76.4 SUCCESS: Date: ${lastDate}, Names: ${staffOnLastDate.map(s => s.staff_name || s.staffName).join('/')}, Indices: ${indicesOnLastDay.join(', ')}, Tail: ${lastAssignedIndex} -> Next: ${currentStaffIndex}(${sortedStaffList[currentStaffIndex]?.name})`);
             } else {
-              console.warn('[ShiftEngine] 引継ぎ失敗: スタッフがリストに見つかりません。index=0から開始。');
+              console.warn(`[CarryOver Debug] V76.4 FAILED: 最終日のスタッフをリストから特定できませんでした。Names: ${staffOnLastDate.map(s => s.staff_name || s.staffName).join('/')}`);
+              currentStaffIndex = 0; // フォールバック
             }
           } else {
-            console.warn('[ShiftEngine] 前月の休日シフトが見つかりません。index=0から開始。');
+            console.warn('[ShiftEngine] 前月の休日シフトが見つかりません。');
           }
         }
       } catch (e) {

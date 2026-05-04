@@ -619,8 +619,8 @@ export const CalendarScreen: React.FC<any> = ({
         <View style={styles.header}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <View>
-              <ThemeText variant="h1">カレンダー [V75.2]</ThemeText>
-              <ThemeText variant="caption" style={{ fontSize: 9, opacity: 0.3, color: COLORS.textSecondary }}>[BUILD: VERSION 75.2 - ROBUST SAVE & UUID]</ThemeText>
+              <ThemeText variant="h1">カレンダー [V76.4]</ThemeText>
+              <ThemeText variant="caption" style={{ fontSize: 9, opacity: 0.3, color: COLORS.textSecondary }}>[BUILD: VERSION 76.4 - VERBOSE LOGS & FALLBACK]</ThemeText>
             </View>
             <TouchableOpacity 
               style={{ padding: 8 }} 
