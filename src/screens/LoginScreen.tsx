@@ -52,7 +52,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToSetup }
             <View style={styles.logoContainer}>
               <ShieldIcon size={64} color={COLORS.primary} />
             </View>
-            <ThemeText variant="h1" style={styles.title}>Shift Manager</ThemeText>
+            <ThemeText variant="h1" style={styles.title}>シフトビルダーRE</ThemeText>
             <ThemeText variant="caption" style={styles.subtitle}>SECURE AUTHENTICATION</ThemeText>
           </View>
 

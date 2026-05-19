@@ -8,7 +8,6 @@ import { getDayType, getDateStr } from '../utils/dateUtils';
 import { sortStaffByName } from '../utils/staffUtils';
 import { getCurrentLimit } from '../utils/limitUtils';
 
-const hospitalPlacements = ['２F', '４F', '訪問リハ', 'フォロー', '兼務', '管理', '外来', '助手'];
 
 interface HomeScreenProps {
   onNavigateToStaff?: (ward: string) => void;
@@ -26,14 +25,21 @@ interface HomeScreenProps {
   onLogout?: () => void;
   isInitialized?: boolean;
   shifts?: any[];
+  professions?: string[];
+  placements?: string[];
+  roles?: string[];
+  statuses?: string[];
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ 
   onNavigateToStaff, staffList, requests, weekdayLimit,
   saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, staffViewMode = false,
   onForceCloudSync, profile, isAdminAuthenticated, onOpenRequests, onLogout,
-  isInitialized, shifts
+  isInitialized, shifts, 
+  professions = ['PT', 'OT', 'ST', '助手'], 
+  placements = ['２F', '包括', '4F', '外来', 'フォロー', '兼務', '管理', '事務', '排尿管理', '訪問リハ']
 }) => {
+  const hospitalPlacements = placements;
   const [selectedWardDetails, setSelectedWardDetails] = useState<string | null>(null);
 
   // シニアアーキテクト指令: 厳格な配列検証と防弾レンダリング (VERSION 43.0)
@@ -84,41 +90,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     // 2. 統計情報の計算 (React.useMemoで最適化)
     // ---------------------------------------------------------
     const stats = React.useMemo(() => {
-      // isApprovedがデフォルトfalseの場合があるため、ダッシュボードの集計にはすべてsafeStaffを使用
-      
-      const ptCount = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return data.job === 'PT' && !isExcluded(s);
-      }).length;
-
-      const otCount = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return data.job === 'OT' && !isExcluded(s);
-      }).length;
-
-      const stCount = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return data.job === 'ST' && !isExcluded(s);
-      }).length;
+      // 職種別集計を動的に行う
+      const profCounts: Record<string, number> = {};
+      professions.forEach(p => {
+        profCounts[p] = safeStaff.filter(s => {
+          const data = getStaffData(s);
+          return data.job === p && !isExcluded(s);
+        }).length;
+      });
 
       const hospital = safeStaff.filter(s => {
         const data = getStaffData(s);
-        const isAssistant = data.job === '助手' || data.role === '助手' || data.placement === '助手';
-        const isVisit = data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ';
         const isInactive = data.status === '長期休暇' || data.status === '入職前';
-        return !isAssistant && !isVisit && !isInactive;
-      }).length;
-
-      const visit = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return data.status !== '長期休暇' && data.status !== '入職前' && 
-               (data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ');
-      }).length;
-
-      const assistant = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return data.status !== '長期休暇' && data.status !== '入職前' && 
-               (data.job === '助手' || data.role === '助手' || data.placement === '助手');
+        return !isExcluded(s) && !isInactive;
       }).length;
 
       const inactive = safeStaff.filter(s => {
@@ -126,20 +110,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         return data.status === '長期休暇';
       }).length;
 
-      const hokatsuCount = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return data.status !== '長期休暇' && data.status !== '入職前' && 
-               (data.role === '包括' || data.placement === '包括' || data.job === '包括');
-      }).length;
-
-      const hainyoCount = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return data.status !== '長期休暇' && data.status !== '入職前' && 
-               (data.role === '排尿' || data.role === '排尿支援' || data.placement === '排尿' || data.placement === '排尿支援');
-      }).length;
-      
-      return { inactive, assistant, visit, hospital, ptCount, otCount, stCount, hokatsuCount, hainyoCount };
-    }, [safeStaff]);
+      return { inactive, hospital, profCounts };
+    }, [safeStaff, professions]);
 
     // ---------------------------------------------------------
     // 3. 部署別集計 (院内内訳)
@@ -208,13 +180,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     // ---------------------------------------------------------
     // 6. 表示用配列の構築
     // ---------------------------------------------------------
-    const professionCounts = [
-      { label: 'PT', count: stats.ptCount, color: COLORS.primary },
-      { label: 'OT', count: stats.otCount, color: '#10b981' },
-      { label: 'ST', count: stats.stCount, color: '#f59e0b' },
-      { label: '包括', count: stats.hokatsuCount, color: '#ec4899' },
-      { label: '排尿支援', count: stats.hainyoCount, color: '#f43f5e' },
-    ];
+    const professionCounts = professions.map((p, idx) => {
+      const colors = [COLORS.primary, '#10b981', '#f59e0b', '#ec4899', '#f43f5e', '#8b5cf6', '#06b6d4'];
+      return {
+        label: p,
+        count: stats.profCounts[p] || 0,
+        color: colors[idx % colors.length]
+      };
+    });
 
     return (
       <SafeAreaView style={styles.container}>

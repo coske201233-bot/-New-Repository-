@@ -8,22 +8,27 @@ import { User, MapPin, Shield, CheckCircle2, Briefcase, ChevronLeft } from 'luci
 interface SetupScreenProps {
   onComplete: (profile: any) => void;
   onBack: () => void;
+  professions?: string[];
+  roles?: string[];
+  placements?: string[];
 }
 
-export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete, onBack }) => {
+export const SetupScreen: React.FC<SetupScreenProps> = ({ 
+  onComplete, onBack, 
+  professions = ['PT', 'OT', 'ST', '助手'], 
+  roles: masterRoles = ['科長', '係長', '主査', '主任', '主事', '会計年度'], 
+  placements = ['外来', '２F', '包括', '４F', '排尿', '兼務', 'フォロー', '管理', '事務', '訪問リハ'] 
+}) => {
   const [name, setName] = useState('');
-  const [placement, setPlacement] = useState('外来');
-  const [jobType, setJobType] = useState('PT');
-  const [role, setRole] = useState('主事');
+  const [placement, setPlacement] = useState(placements[0] || '');
+  const [jobType, setJobType] = useState(professions[0] || '');
+  const [role, setRole] = useState(masterRoles[0] || '');
   const [selectedRoles, setSelectedRoles] = useState<string[]>(['一般職員']);
   const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [pendingRole, setPendingRole] = useState<string | null>(null);
 
-  const placements = ['外来', '２F', '包括', '４F', '排尿', '兼務', 'フォロー', '管理', '事務', '訪問リハ'];
-  const professions = ['PT', 'OT', 'ST', '助手'];
-  const p_roles = ['科長', '係長', '主査', '主任', '主事', '会計年度'];
-  const roles = ['一般職員', 'シフト管理者'];
+  const app_roles = ['一般職員', 'シフト管理者'];
   const ADMIN_PASSWORD = '1114';
 
   const handleRoleToggle = (role: string) => {
@@ -112,9 +117,9 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete, onBack }) 
         </View>
 
         <SelectionGroup label="職種" icon={Briefcase} options={professions} value={jobType} onChange={setJobType} />
-        <SelectionGroup label="役割" icon={Briefcase} options={p_roles} value={role} onChange={setRole} />
+        <SelectionGroup label="役割" icon={Briefcase} options={masterRoles} value={role} onChange={setRole} />
         <SelectionGroup label="配置" icon={MapPin} options={placements} value={placement} onChange={setPlacement} />
-        <SelectionGroup label="アプリ権限" icon={Shield} options={roles} value={selectedRoles} onChange={handleRoleToggle} isMulti />
+        <SelectionGroup label="アプリ権限" icon={Shield} options={app_roles} value={selectedRoles} onChange={handleRoleToggle} isMulti />
 
         <TouchableOpacity style={styles.button} onPress={handleFinish}>
           <ThemeText bold color="white">はじめる</ThemeText>

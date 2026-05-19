@@ -62,33 +62,35 @@ export const useAppLogic = () => {
               }
             }
             
-            // シニアアーキテクト指令: クラウド優先（SSOT）統合
-            const staffDataRaw = await cloudStorage.fetchStaff().catch(() => null);
-            const reqDataRaw = await cloudStorage.fetchRequests().catch(() => null);
+            // [V48.0] Supabaseが未設定の場合は、クラウド通信を完全にスキップしてローカル優先
+            let staffData: any[] = [];
+            let reqData: any[] = [];
+
+            if (isSupabaseConfigured) {
+              console.log('--- [CLOUD_FETCH] ---');
+              const staffDataRaw = await cloudStorage.fetchStaff().catch(() => null);
+              const reqDataRaw = await cloudStorage.fetchRequests().catch(() => null);
+              staffData = Array.isArray(staffDataRaw) ? staffDataRaw : [];
+              reqData = Array.isArray(reqDataRaw) ? reqDataRaw : [];
+            } else {
+              console.log('⚠️ [LOCAL_ONLY] Supabase is disabled. Skipping cloud fetch.');
+            }
             
-            let staffData = Array.isArray(staffDataRaw) ? staffDataRaw : [];
-            let reqData = Array.isArray(reqDataRaw) ? reqDataRaw : [];
-            
-            // localStorageはクラウドが空の場合のフォールバックとしてのみ使用
+            // クラウドが空、または通信オフの場合はローカルストレージから復旧
             if (staffData.length === 0) {
-              if (Platform.OS === 'web') {
-                const s = localStorage.getItem('proto_staff_data');
-                if (s) {
-                  try { 
-                    const parsed = JSON.parse(s);
-                    if (Array.isArray(parsed) && parsed.length > 0) staffData = parsed;
-                  } catch (e) { console.warn('proto_staff_data parse error'); }
-                }
+              const s = await AsyncStorage.getItem(STORAGE_KEYS.STAFF_LIST);
+              if (s) {
+                try { 
+                  const parsed = JSON.parse(s);
+                  if (Array.isArray(parsed) && parsed.length > 0) staffData = parsed;
+                } catch (e) { console.warn('staff_data parse error'); }
               }
             }
             
-            // [CRITICAL V73.9] クラウドが正常に0件を返した場合は、ローカルマージをスキップしてまっさらにする
-            let finalReqs = reqDataRaw || [];
-            
-            if (Platform.OS === 'web' && (!reqDataRaw || reqDataRaw.length === 0)) {
-              // 完全に新規ユーザーか、通信エラーの場合のみLocalStorageを参照
-              const localR = localStorage.getItem('proto_request_data');
-              if (localR && (!reqDataRaw)) { // fetchRequests が失敗(null/undefined)した時のみ
+            let finalReqs = reqData;
+            if (finalReqs.length === 0) {
+              const localR = await AsyncStorage.getItem(STORAGE_KEYS.REQUESTS);
+              if (localR) {
                 try {
                   const parsed = JSON.parse(localR);
                   if (Array.isArray(parsed)) finalReqs = parsed;
@@ -97,15 +99,15 @@ export const useAppLogic = () => {
             }
 
             req.setRequests(finalReqs);
-            console.log('✅ Initial Data Loaded [V74.6]:', finalReqs.length);
+            console.log('✅ Initial Data Loaded [V48.0]:', finalReqs.length);
 
-            // シニアアーキテクト指令: エポメラル・テスト用モックデータ注入 (SupabaseもLocalも空の場合)
+            // モックデータ注入 (完全な新規の場合)
             if (staffData.length === 0) {
-              staffData = Array.from({ length: 16 }, (_, i) => ({
+              staffData = Array.from({ length: 5 }, (_, i) => ({
                 id: `mock-s-${i}`,
-                name: `Staff ${String.fromCharCode(65 + i)}`,
+                name: `スタッフ ${String.fromCharCode(65 + i)}`,
                 role: i === 0 ? '管理者' : '一般職員',
-                profession: '看護師',
+                profession: '専門職',
                 isApproved: true
               }));
             }
@@ -265,41 +267,40 @@ export const useAppLogic = () => {
         status: newRequest.status
       });
 
-      // 直接Supabaseに挿入
-      const { error } = await supabase.from('requests').insert([
-        {
+      if (isSupabaseConfigured) {
+        const { error } = await supabase.from('requests').insert([
+          {
+            id: newRequest.id,
+            staff_id: trueStaffId, // [V76.3] Strict UUID
+            user_id: authUid,
+            staff_name: officialName,
+            date: newRequest.date,
+            type: newRequest.type,
+            status: newRequest.status,
+            hours: newRequest.hours, // [STRICT REFACTOR] 専用カラムへ保存
+            reason: newRequest.reason,
+            details: newRequest.details,
+            created_at: now
+          }
+        ]);
+        if (error) throw error;
+
+        // 2. shiftsテーブルも更新（V73.0 整合性確保）
+        const shiftPayload = {
           id: newRequest.id,
           staff_id: trueStaffId, // [V76.3] Strict UUID
-          user_id: authUid,
           staff_name: officialName,
           date: newRequest.date,
           type: newRequest.type,
           status: newRequest.status,
-          hours: newRequest.hours, // [STRICT REFACTOR] 専用カラムへ保存
-          reason: newRequest.reason,
+          is_manual: true,
           details: newRequest.details,
           created_at: now
-        }
-      ]);
-      
-      if (error) throw error;
-      
-      // 2. shiftsテーブルも更新（V73.0 整合性確保）
-      const shiftPayload = {
-        id: newRequest.id,
-        staff_id: trueStaffId, // [V76.3] Strict UUID
-        staff_name: officialName,
-        date: newRequest.date,
-        type: newRequest.type,
-        status: newRequest.status,
-        is_manual: true,
-        details: newRequest.details,
-        created_at: now
-      };
-      
-      // cloudStorage.upsertShifts 自体の中でエラーが throw されるため、
-      // ここで await するだけで失敗時は catch ブロックへ飛びます。
-      await cloudStorage.upsertShifts([shiftPayload]);
+        };
+        await cloudStorage.upsertShifts([shiftPayload]);
+      } else {
+        console.log('📝 [LOCAL_SAVE] Request saved locally only.');
+      }
 
       // 【重要】DB保存が成功した場合のみ、ローカルステートを更新
       req.setRequests(prev => [...prev, newRequest]);
@@ -326,7 +327,11 @@ export const useAppLogic = () => {
       
       req.setRequests(newRequests);
       // V73.0: 統合保存関数を使用して両方のテーブルを更新
-      await cloudStorage.upsertRequestsAndShifts([newWithStatus]);
+      if (isSupabaseConfigured) {
+        await cloudStorage.upsertRequestsAndShifts([newWithStatus]);
+      } else {
+        console.log('✅ [LOCAL_UPDATE] Request status updated locally.');
+      }
       shifts.fetchShifts();
     } catch (e) {
       console.error('Approve/Reject request error:', e);
@@ -358,7 +363,9 @@ export const useAppLogic = () => {
 
       // V73.0: shiftsテーブルも一括更新して不整合を防止
       const approvedItems = newRequests.filter(r => ids.includes(r.id));
-      await cloudStorage.upsertRequestsAndShifts(approvedItems);
+      if (isSupabaseConfigured) {
+        await cloudStorage.upsertRequestsAndShifts(approvedItems);
+      }
       shifts.fetchShifts();
     } catch (e: any) {
       console.error('Bulk approve error:', e);
@@ -369,7 +376,11 @@ export const useAppLogic = () => {
   const cancelRequest = useCallback(async (requestId: string) => {
     try {
       // 物理削除
-      await cloudStorage.deleteRequest(requestId);
+      if (isSupabaseConfigured) {
+        await cloudStorage.deleteRequest(requestId);
+      } else {
+        console.log('🗑️ [LOCAL_DELETE] Request removed locally.');
+      }
       const newRequests = req.requests.filter(r => r.id !== requestId);
       req.setRequests(newRequests);
     } catch (e) {
@@ -387,12 +398,14 @@ export const useAppLogic = () => {
       const updatedItem = req.requests.find(r => r.id === requestId);
       if (!updatedItem) return;
 
-      const { error } = await supabase
-        .from('requests')
-        .update({ status: 'rejected' })
-        .eq('id', requestId);
+      if (isSupabaseConfigured) {
+        const { error } = await supabase
+          .from('requests')
+          .update({ status: 'rejected' })
+          .eq('id', requestId);
 
-      if (error) throw error;
+        if (error) throw error;
+      }
 
       Alert.alert('完了', '却下・取り消しが完了しました');
 
@@ -404,7 +417,9 @@ export const useAppLogic = () => {
       req.setRequests(newRequests);
       
       // V73.0: 却下時もシフトテーブルとの同期を強制し、不整合を防止
-      await cloudStorage.upsertRequestsAndShifts([newWithStatus]);
+      if (isSupabaseConfigured) {
+        await cloudStorage.upsertRequestsAndShifts([newWithStatus]);
+      }
       shifts.fetchShifts();
     } catch (e: any) {
       console.error('Reject error:', e);
@@ -419,7 +434,9 @@ export const useAppLogic = () => {
       auth.setProfile(newProfile);
       const newStaffList = staff.staffList.map(s => s.id === auth.profile?.id ? newProfile : s);
       staff.setStaffList(newStaffList);
-      await cloudStorage.upsertStaff(newStaffList);
+      if (isSupabaseConfigured) {
+        await cloudStorage.upsertStaff(newStaffList);
+      }
     }
   }, [auth.profile, auth.setProfile, staff.staffList, staff.setStaffList]);
 
@@ -548,6 +565,10 @@ export const useAppLogic = () => {
   }, [staff.setStaffList, req.setRequests, shifts.fetchShifts]);
 
   const handleForceSave = useCallback(async () => {
+      if (!isSupabaseConfigured) {
+        Alert.alert('情報', '現在ローカルモードです。クラウドへの保存はスキップされます。');
+        return true;
+      }
       setIsSyncing(true);
       try {
         await cloudStorage.upsertStaff(staff.staffList);

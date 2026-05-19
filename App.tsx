@@ -139,6 +139,12 @@ export default function App() {
       fetchShifts,
       isLoadingShifts,
       onSubmitRequest,
+      // 動的属性リストの共有
+      professions: logic.professions,
+      roles: logic.roles,
+      placements: logic.placements,
+      statuses: logic.statuses,
+      updateConfigValue: logic.updateConfigValue,
     };
 
     const handleNavigateToStaff = (mode?: string) => {
@@ -151,10 +157,10 @@ export default function App() {
     };
 
     switch (currentTab) {
-      case 'home': return <HomeScreen onNavigateToStaff={handleNavigateToStaff} {...commonProps} />;
+      case 'home': return <HomeScreen onNavigateToStaff={handleNavigateToStaff} {...commonProps} professions={logic.professions} roles={logic.roles} placements={logic.placements} statuses={logic.statuses} />;
       case 'calendar': return <CalendarScreen {...commonProps} />;
       case 'requests': return <RequestScreen {...commonProps} />;
-      case 'staff': return <StaffScreen {...commonProps} isPrivileged={isAdminAuthenticated} />;
+      case 'staff': return <StaffScreen {...commonProps} isPrivileged={isAdminAuthenticated} professions={logic.professions} roles={logic.roles} placements={logic.placements} statuses={logic.statuses} />;
       case 'admin': return <AdminScreen {...commonProps} />;
       case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={approveRequest} handleBulkApprove={handleBulkApprove} deleteRequest={onDeleteRequest} handleReject={handleReject} />;
       case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab('admin')} />;
@@ -179,7 +185,13 @@ export default function App() {
         ) : (!logic.user) ? (
           /* --- [AUTH FLOW] --- */
           showSetup ? (
-            <SetupScreen onComplete={setProfile} onBack={() => setShowSetup(false)} />
+            <SetupScreen 
+              onComplete={setProfile} 
+              onBack={() => setShowSetup(false)} 
+              professions={logic.professions}
+              roles={logic.roles}
+              placements={logic.placements}
+            />
           ) : (
             <LoginScreen onLogin={logic.handleLogin} />
           )

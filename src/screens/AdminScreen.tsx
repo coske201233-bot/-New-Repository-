@@ -1,17 +1,17 @@
-import React, { useState } from 'react';
 import { StyleSheet, View, ScrollView, TouchableOpacity, TextInput, Alert, Modal, ActivityIndicator, SafeAreaView, Platform } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
-import { COLORS, SPACING } from '../theme/theme';
+import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { 
   ChevronRight, Database, FileOutput, 
-  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle
+  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle, Plus, Trash2, List
 } from 'lucide-react-native';
 import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
 import * as Print from 'expo-print';
 import { generateMonthlyShifts } from '../utils/shiftEngine';
+import { STORAGE_KEYS } from '../utils/storage';
 
 
 interface AdminScreenProps {
@@ -36,13 +36,19 @@ interface AdminScreenProps {
   updateStaffList: (update: any[] | ((prev: any[]) => any[])) => Promise<any>;
   patchStaff: (id: string, updates: any) => Promise<any>;
   fetchShifts?: () => Promise<void>;
+  professions?: string[];
+  roles?: string[];
+  placements?: string[];
+  statuses?: string[];
+  updateConfigValue?: (key: string, val: any) => Promise<void>;
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
   currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
-  updateStaffList, patchStaff, fetchShifts
+  updateStaffList, patchStaff, fetchShifts,
+  professions = [], roles = [], placements = [], statuses = [], updateConfigValue
 }) => {
 
 
@@ -81,12 +87,17 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const pendingRequests = Array.isArray(requests) ? requests.filter(r => r && (r.status === 'pending' || !r.status)) : [];
 
   // --- Constant Options (Custom Hospital Structure) ---
-  const PROFESSION_OPTS = ['PT', 'OT', 'ST', '助手'];
-  const PLACEMENT_OPTS = ['２F', '包括', '4F', '外来', 'フォロー', '兼務', '管理', '事務', '排尿管理', '訪問リハ'];
-  const POSITION_OPTS = ['科長', '科長補佐', '係長', '主査', '主任', '主事', '会計年度'];
-  const STATUS_OPTS = ['常勤', '時短勤務', '長期休暇', 'その他'];
+  const PROFESSION_OPTS = professions;
+  const PLACEMENT_OPTS = placements;
+  const POSITION_OPTS = roles;
+  const STATUS_OPTS = statuses;
   const HOLIDAY_SETTING_OPTS = [{ label: '設定なし', value: false }, { label: '土日祝休み', value: true }];
   const ROLE_OPTS = [{ label: '一般スタッフ', value: ['スタッフ'] }, { label: 'シフト管理者', value: ['管理者', 'スタッフ'] }];
+
+  // マスター編集用の状態
+  const [showMasterModal, setShowMasterModal] = useState(false);
+  const [masterType, setMasterType] = useState<'professions' | 'roles' | 'placements' | 'statuses'>('professions');
+  const [newItem, setNewItem] = useState('');
 
   // --- Handlers ---
 
@@ -464,12 +475,118 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   <DropdownSelector label="日曜" value={limits.sun} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('sun', v, currentMonthStr)} style={{flex:1}} />
                   <DropdownSelector label="祝日" value={limits.pub} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('pub', v, currentMonthStr)} style={{flex:1}} />
                 </View>
+
+                <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 24 }}>⚙️ マスターデータ管理</ThemeText>
+                
+                {[
+                  { id: 'professions', label: '職種', icon: User, color: '#38bdf8', items: professions, key: STORAGE_KEYS.PROFESSIONS },
+                  { id: 'roles', label: '役職', icon: Shield, color: '#f59e0b', items: roles, key: STORAGE_KEYS.ROLES },
+                  { id: 'placements', label: '配置', icon: FileText, color: '#10b981', items: placements, key: STORAGE_KEYS.PLACEMENTS },
+                  { id: 'statuses', label: 'ステータス', icon: List, color: '#a855f7', items: statuses, key: STORAGE_KEYS.STATUSES }
+                ].map(master => (
+                  <ThemeCard key={master.id} style={styles.itemRow}>
+                    <View style={[styles.iconCircle, { backgroundColor: `${master.color}20` }]}><master.icon size={20} color={master.color} /></View>
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <ThemeText bold>{master.label}マスター</ThemeText>
+                      <ThemeText variant="caption" color={COLORS.textSecondary}>{master.items.join(', ')}</ThemeText>
+                    </View>
+                    <TouchableOpacity 
+                      style={[styles.inlineBtn, { backgroundColor: 'rgba(255,255,255,0.05)' }]} 
+                      onPress={() => {
+                        setMasterType(master.id as any);
+                        setShowMasterModal(true);
+                      }}
+                    >
+                      <Edit3 size={18} color={COLORS.textSecondary} />
+                      <ThemeText bold color={COLORS.textSecondary} style={{marginLeft:6}}>編集</ThemeText>
+                    </TouchableOpacity>
+                  </ThemeCard>
+                ))}
               </View>
             </View>
           ) : null}
           <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}><LogOut size={20} color="#ef4444" /><ThemeText bold color="#ef4444" style={{ marginLeft: 10 }}>アプリからログアウト</ThemeText></TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Master Editor Modal */}
+      <Modal visible={showMasterModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <ThemeCard style={styles.detailModal}>
+            <View style={styles.pickerHeader}>
+              <ThemeText variant="h2">{
+                masterType === 'professions' ? '職種' :
+                masterType === 'roles' ? '役職' :
+                masterType === 'placements' ? '配置' : 'ステータス'
+              }マスター編集</ThemeText>
+              <TouchableOpacity onPress={() => setShowMasterModal(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity>
+            </View>
+            
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 20 }}>
+              <TextInput 
+                style={[styles.modalInput, { flex: 1, marginBottom: 0 }]} 
+                placeholder="新しい項目名" 
+                placeholderTextColor={COLORS.textSecondary}
+                value={newItem}
+                onChangeText={setNewItem}
+              />
+              <TouchableOpacity 
+                style={[styles.confirmBtn, { flex: 0, width: 52 }]} 
+                onPress={async () => {
+                  if (!newItem.trim()) return;
+                  const currentList = masterType === 'professions' ? professions :
+                                      masterType === 'roles' ? roles :
+                                      masterType === 'placements' ? placements : statuses;
+                  if (currentList.includes(newItem.trim())) {
+                    Alert.alert('エラー', '既に登録されています');
+                    return;
+                  }
+                  const nextList = [...currentList, newItem.trim()];
+                  const key = masterType === 'professions' ? STORAGE_KEYS.PROFESSIONS :
+                              masterType === 'roles' ? STORAGE_KEYS.ROLES :
+                              masterType === 'placements' ? STORAGE_KEYS.PLACEMENTS : STORAGE_KEYS.STATUSES;
+                  
+                  if (updateConfigValue) {
+                    await updateConfigValue(key, nextList);
+                    setNewItem('');
+                  }
+                }}
+              >
+                <Plus size={24} color="white" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 300 }}>
+              {(masterType === 'professions' ? professions :
+                masterType === 'roles' ? roles :
+                masterType === 'placements' ? placements : statuses).map((item, idx) => (
+                <View key={idx} style={styles.pickerItem}>
+                  <ThemeText style={{ fontSize: 16 }}>{item}</ThemeText>
+                  <TouchableOpacity onPress={async () => {
+                    const currentList = masterType === 'professions' ? professions :
+                                        masterType === 'roles' ? roles :
+                                        masterType === 'placements' ? placements : statuses;
+                    const nextList = currentList.filter(i => i !== item);
+                    const key = masterType === 'professions' ? STORAGE_KEYS.PROFESSIONS :
+                                masterType === 'roles' ? STORAGE_KEYS.ROLES :
+                                masterType === 'placements' ? STORAGE_KEYS.PLACEMENTS : STORAGE_KEYS.STATUSES;
+                    
+                    if (updateConfigValue) {
+                      await updateConfigValue(key, nextList);
+                    }
+                  }}>
+                    <Trash2 size={18} color="#ef4444" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity style={[styles.cancelBtn, { marginTop: 20 }]} onPress={() => setShowMasterModal(false)}>
+              <ThemeText bold>閉じる</ThemeText>
+            </TouchableOpacity>
+          </ThemeCard>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );

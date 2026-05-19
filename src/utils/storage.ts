@@ -16,6 +16,10 @@ export const STORAGE_KEYS = {
   STAFF_VIEW_MODE: '@staff_view_mode',
   STAFF_LIST: '@staff_list',
   ADMIN_PASSWORD: '@admin_password',
+  PROFESSIONS: '@professions',
+  ROLES: '@roles',
+  PLACEMENTS: '@placements',
+  STATUSES: '@statuses',
 };
 
 export const saveData = async (key: string, value: any) => {

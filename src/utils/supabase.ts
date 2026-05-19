@@ -5,24 +5,18 @@ import { createClient } from '@supabase/supabase-js';
  * 環境変数の解決がWindows環境で不安定なため、
  * Supabaseの接続情報を直接コードに埋め込みます。
  */
-const supabaseUrl = "https://nizhtuzqmtlgfqmxpybb.supabase.co";
-const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5pemh0dXpxbXRsZ2ZxbXhweWJiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwOTU1OTIsImV4cCI6MjA4OTY3MTU5Mn0.L8zZrPWZM9Gas7fd8047MV1ob_1Cti7W2zLOoiQ8o4Y";
+const supabaseUrl = "https://placeholder-project.supabase.co";
+const supabaseAnonKey = "DISABLED_TO_PROTECT_PRODUCTION_DATA";
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
+    persistSession: false, // 本番への永続化もオフ！
   },
-  global: {
-    fetch: (...args) => fetch(...args), // Prevent fetch deadlocks
-  }
 });
 
 /**
- * [V46.0] 常にReadyとする
+ * [V47.0] 開発用ロックダウンモード
  */
-export const isSupabaseAuthReady = true;
+export const isSupabaseAuthReady = false;
 
-console.log("[V46.0 - HARDCODED BYPASS] Supabase Initialized with static credentials.");
+console.log("⚠️ [V47.0 - SAFE LOCKDOWN] Supabase is DISABLED to protect production data.");

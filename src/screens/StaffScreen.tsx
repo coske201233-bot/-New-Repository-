@@ -29,6 +29,10 @@ interface StaffScreenProps {
   onLogout?: () => void;
   fetchShifts?: () => Promise<void>;
   shifts?: any[];
+  professions?: string[];
+  roles?: string[];
+  placements?: string[];
+  statuses?: string[];
 }
 
 interface MonthDay {
@@ -43,7 +47,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     staffList, setStaffList, 
     requests, setRequests, onDeleteRequest, isPrivileged, profile, 
     currentDate, setCurrentDate,
-    fetchShifts, shifts
+    fetchShifts, shifts,
+    professions = [], roles = [], placements = [], statuses = []
   } = props;
 
   // --- [CRITICAL: FALLBACK UI FOR WSOD PREVENTION] ---
@@ -119,10 +124,10 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regAppRole, setRegAppRole] = useState('一般スタッフ');
-  const [regTitle, setRegTitle] = useState('主事');
-  const [regJobType, setRegJobType] = useState('PT');
-  const [regPlacement, setRegPlacement] = useState('4F');
-  const [regStatus, setRegStatus] = useState('常勤');
+  const [regTitle, setRegTitle] = useState(roles[0] || '');
+  const [regJobType, setRegJobType] = useState(professions[0] || '');
+  const [regPlacement, setRegPlacement] = useState(placements[0] || '');
+  const [regStatus, setRegStatus] = useState(statuses[0] || '常勤');
   const [editingStaff, setEditingStaff] = useState<any>(null);
   const [regHolidaySetting, setRegHolidaySetting] = useState(false);
   const [showHolidayPicker, setShowHolidayPicker] = useState(false);
@@ -135,10 +140,10 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
   // Multi-choice options (Custom Hospital Structure)
   const APP_ROLES = ['管理者', '一般スタッフ'];
-  const JOB_TYPES = ['PT', 'OT', 'ST', '助手'];
-  const TITLES = ['科長', '科長補佐', '係長', '主査', '主任', '主事', '会計年度'];
-  const PLACEMENTS = ['２F', '包括', '4F', '外来', 'フォロー', '兼務', '管理', '事務', '排尿管理', '訪問リハ'];
-  const STATUSES = ['常勤', '時短勤務', '長期休暇', 'その他'];
+  const JOB_TYPES = professions;
+  const TITLES = roles;
+  const PLACEMENTS = placements;
+  const STATUSES = statuses;
 
   const handleOpenRegistration = (staffToEdit: any) => {
     if (!staffToEdit) return;
