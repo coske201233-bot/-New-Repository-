@@ -25,9 +25,16 @@ export const useRequestData = () => {
     setRequests(cleanList);
     await saveData(STORAGE_KEYS.REQUESTS, cleanList);
 
-    // クラウド側への反映が必要なものを特定（ローカルでの変更分など）
-    // マージ元がクラウドであれば、ローカル側の古いデータがクラウドに押し戻されないようにする必要があるが、
-    // 現在は deduplicateRequests が最新を維持しているため、cleanList 全体を upsert しても安全
+    // [CRITICAL BUGFIX] クラウド側で重複排除によって不要となったゾンビデータを物理削除
+    if (isFromCloud && discardedIds.length > 0) {
+      try {
+        await cloudStorage.deleteRequests(discardedIds);
+        console.log(`[CLEANUP] Deleted ${discardedIds.length} discarded requests from cloud.`);
+      } catch (e) {
+        console.warn('[CLEANUP] Failed to delete discarded requests from cloud:', e);
+      }
+    }
+
     return { cleanList, discardedIds };
   }, []);
 
