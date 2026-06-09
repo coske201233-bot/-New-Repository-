@@ -36,9 +36,14 @@ export const useAppLogic = () => {
     };
   }, [req.fetchRequests, shifts.fetchShifts]);
 
-  // Removed shadowed state to use auth.isAdminAuthenticated instead  
-  // 初期化フロー: 厳格な3秒タイムアウトガードを導入（アプリの「初期化中」画面で固まるのを防止）
+  // 初期化フロー: 認証セッション解決後に実行
   useEffect(() => {
+    // 1. すでに初期化されている場合はスキップ
+    if (isInitialized) return;
+    
+    // 2. 認証準備ができるまで待機
+    if (!auth.isAuthReady) return;
+
     let mounted = true;
     
     // [CRITICAL VERSION 48.62] 1.0秒後に強制的に初期化フラグを立てるフェイルセーフ
@@ -62,9 +67,16 @@ export const useAppLogic = () => {
               }
             }
             
-            // シニアアーキテクト指令: クラウド優先（SSOT）統合
-            const staffDataRaw = await cloudStorage.fetchStaff().catch(() => null);
-            const reqDataRaw = await cloudStorage.fetchRequests().catch(() => null);
+            // 認証済みセッションがある場合のみ、クラウドから取得を試みる
+            let staffDataRaw = null;
+            let reqDataRaw = null;
+            if (auth.user) {
+              console.log('[FORCE_INIT] Fetching staff and requests from cloud (user authenticated)');
+              staffDataRaw = await cloudStorage.fetchStaff().catch(() => null);
+              reqDataRaw = await cloudStorage.fetchRequests().catch(() => null);
+            } else {
+              console.log('[FORCE_INIT] Skipping cloud fetch: no authenticated user session');
+            }
             
             let staffData = Array.isArray(staffDataRaw) ? staffDataRaw : [];
             let reqData = Array.isArray(reqDataRaw) ? reqDataRaw : [];
@@ -128,7 +140,7 @@ export const useAppLogic = () => {
       mounted = false; 
       clearTimeout(failsafeTimer);
     };
-  }, [isInitialized]); // Dependency added to allow timeout re-check if needed, though mounted guard handles it
+  }, [auth.isAuthReady, auth.user, isInitialized]);
 
 
 
@@ -597,6 +609,8 @@ export const useAppLogic = () => {
     };
   }, [isInitialized]); // Dependency を最小限にして再接続を抑制
 
+  const isAppReady = isInitialized && auth.isAuthReady;
+
   return useMemo(() => ({
     ...auth,
     ...staff,
@@ -610,7 +624,7 @@ export const useAppLogic = () => {
     activeDate,
     setActiveDate,
     isSyncing,
-    isInitialized,
+    isInitialized: isAppReady,
     isSupabaseConfigured,
     handleLogin,
     handleAdminMasterLogin,
@@ -631,7 +645,7 @@ export const useAppLogic = () => {
     handleReject,
     handleBulkApprove
   }), [
-    auth, staff, req, config, shifts, currentTab, showSetup, activeDate, isSyncing, isInitialized,
+    auth, staff, req, config, shifts, currentTab, showSetup, activeDate, isSyncing, isAppReady,
     handleLogin, handleAdminMasterLogin, handleRegister, onSubmitRequest, cancelRequest, approveRequest,
     onDeleteRequest, onAutoAssign, onUndoAutoAssign, onUpdateAvatar, onResetStaffPassword, handleLogout,
     handleForceCloudSync, handleForceSave, isSupabaseConfigured, staff.patchStaff, handleReject, handleBulkApprove

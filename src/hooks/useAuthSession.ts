@@ -237,6 +237,8 @@ export const useAuthSession = () => {
     }
   };
 
+  const isAuthReady = isInitialized && !isCheckingProfile;
+
   return { 
     user,
     profile, 
@@ -246,6 +248,7 @@ export const useAuthSession = () => {
     sessionDuration, 
     isInitialized, 
     isCheckingProfile,
+    isAuthReady,
     loadError,
     loadProfile,
     login,
