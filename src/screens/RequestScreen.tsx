@@ -66,7 +66,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     if (!confirmed) return;
 
     try {
-      const { error } = await supabase.from('requests').delete().eq('id', id);
+      const { error } = await supabase.from('requests').delete().eq('id::text', id);
       if (error) throw error;
 
       // ローカルステートも即座に更新

@@ -160,65 +160,89 @@ export const cloudStorage = {
   async upsertRequests(requests: any[]) {
     if (!requests || requests.length === 0) return;
 
-    // 1. 最新のクラウド状態を取得して比較する（Safe-Upsert）
-    const targetIds = requests.map(r => r.id);
-    const { data: cloudItems } = await supabase
-      .from('requests')
-      .select('id, details')
-      .in('id', targetIds);
+    try {
+      // 1. 最新のクラウド状態を取得して比較する（Safe-Upsert）
+      const targetIds = requests.map(r => r.id);
 
-    const cloudUpdateMap = new Map();
-    if (cloudItems) {
-      cloudItems.forEach(item => {
-        const uAt = item.details?.updatedAt || item.details?.updated_at || 0;
-        cloudUpdateMap.set(item.id, typeof uAt === 'string' ? new Date(uAt).getTime() : 0);
+      const { data: cloudItems, error: selectError } = await supabase
+        .from('requests')
+        .select('id, details')
+       .in('id', targetIds);
+
+      if (selectError) {
+        console.warn('[upsertRequests] Select failed:', selectError.message);
+      }
+
+      const cloudUpdateMap = new Map();
+      if (cloudItems) {
+        cloudItems.forEach(item => {
+          const uAt = item.details?.updatedAt || item.details?.updated_at || 0;
+          cloudUpdateMap.set(item.id, typeof uAt === 'string' ? new Date(uAt).getTime() : 0);
+        });
+      }
+
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      const filtered = requests.filter(r => {
+        const clientTime = r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
+        const cloudTime = cloudUpdateMap.get(r.id) || 0;
+        
+        // クライアント側がタイムスタンプを持っていないのに、クラウド側が持っている場合は上書き禁止
+        if (clientTime === 0 && cloudTime > 0) return false;
+        
+        // クライアント側がクラウドより新しい（または等しい）場合のみ上書きを許可
+        return clientTime >= cloudTime;
+      }).map(r => {
+        const obj: any = {};
+        const validKeys = ['id', 'staffName', 'staffId', 'userId', 'staff_id', 'user_id', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
+        
+        const details = { ...(r.details || {}) };
+        if (r.updatedAt) details.updatedAt = r.updatedAt;
+        if (r.source) details.source = r.source;
+        if (r.isManual !== undefined) details.isManual = r.isManual;
+        if (r.priority !== undefined) details.priority = r.priority;
+        if (r.hours !== undefined) obj.hours = r.hours; // [STRICT REFACTOR] カラムへ直接セット
+        if (r.locked !== undefined) details.locked = r.locked;
+        
+        const payload = { 
+          ...r, 
+          staffName: normalizeName(r.staffName || ''),
+          details 
+        };
+        validKeys.forEach(k => { if (payload[k] !== undefined) obj[k] = payload[k]; });
+        if (r.hours !== undefined) obj.hours = r.hours; // 明示的にhoursを保持
+        
+        const mapped = mapToSql(obj, REQ_MAP);
+        
+        // [STRICT UUID VALIDATION] DBがUUID型を要求しているカラムについて、UUID形式以外の値が入っていた場合はクリアする
+        if (mapped.user_id) {
+          if (typeof mapped.user_id !== 'string' || !uuidRegex.test(mapped.user_id)) {
+            mapped.user_id = null;
+          }
+        }
+        if (mapped.staff_id) {
+          if (typeof mapped.staff_id !== 'string' || !uuidRegex.test(mapped.staff_id)) {
+            mapped.staff_id = null;
+          }
+        }
+        return mapped;
       });
-    }
 
-    const filtered = requests.filter(r => {
-      const clientTime = r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
-      const cloudTime = cloudUpdateMap.get(r.id) || 0;
-      
-      // クライアント側がタイムスタンプを持っていないのに、クラウド側が持っている場合は上書き禁止
-      if (clientTime === 0 && cloudTime > 0) return false;
-      
-      // クライアント側がクラウドより新しい（または等しい）場合のみ上書きを許可
-      return clientTime >= cloudTime;
-    }).map(r => {
-      const obj: any = {};
-      const validKeys = ['id', 'staffName', 'staffId', 'userId', 'staff_id', 'user_id', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
-      
-      const details = { ...(r.details || {}) };
-      if (r.updatedAt) details.updatedAt = r.updatedAt;
-      if (r.source) details.source = r.source;
-      if (r.isManual !== undefined) details.isManual = r.isManual;
-      if (r.priority !== undefined) details.priority = r.priority;
-      if (r.hours !== undefined) obj.hours = r.hours; // [STRICT REFACTOR] カラムへ直接セット
-      if (r.locked !== undefined) details.locked = r.locked;
-      
-      const payload = { 
-        ...r, 
-        staffName: normalizeName(r.staffName || ''),
-        details 
-      };
-      validKeys.forEach(k => { if (payload[k] !== undefined) obj[k] = payload[k]; });
-      if (r.hours !== undefined) obj.hours = r.hours; // 明示的にhoursを保持
-      return mapToSql(obj, REQ_MAP);
-    });
+      if (filtered.length === 0) {
+        console.log('No newer requests to sync. Skipping upsert.');
+        return;
+      }
 
-    if (filtered.length === 0) {
-      console.log('No newer requests to sync. Skipping upsert.');
-      return;
+      const { error } = await supabase.from('requests').upsert(filtered, { onConflict: 'id' });
+      if (error) {
+         console.error('❌ Requests sync error in upsert:', error);
+         // [CRITICAL GUARD] エラーはコンソール出力し、アプリのクラッシュを防ぐため throw しない
+      } else {
+         console.log(`✅ ${filtered.length} requests synced to cloud successfully (Safe-Upsert)`);
+      }
+    } catch (err) {
+      console.error('❌ upsertRequests crashed with unhandled exception:', err);
     }
-
-    const { error } = await supabase.from('requests').upsert(filtered, { onConflict: 'id' });
-    if (error) {
-       console.error('❌ Requests sync error:', error);
-       let msg = `Save failed: ${error.message} (${error.code})`;
-       if (error.code === '42501') msg = '申請の更新権限がないか、他人の申請を操作しようとしました(RLS制約)。';
-       throw new Error(msg);
-    }
-    console.log(`✅ ${filtered.length} requests synced to cloud successfully (Safe-Upsert)`);
   },
   async upsertShifts(shifts: any[]) {
     if (!shifts || shifts.length === 0) return;
@@ -253,24 +277,28 @@ export const cloudStorage = {
   async upsertRequestsAndShifts(requests: any[]) {
     if (!requests || requests.length === 0) return;
     
-    // 1. requests への保存
-    await this.upsertRequests(requests);
-    
-    // 2. shifts へのマッピングと保存
-    const shiftPayloads = requests.map(r => ({
-      id: r.id,
-      staff_id: r.staff_id || r.staffId || r.userId || r.user_id,
-      staff_name: r.staff_name || r.staffName,
-      date: r.date,
-      type: r.type,
-      status: r.status,
-      is_manual: !!(r.isManual || r.is_manual || String(r.id).startsWith('m-') || String(r.id).startsWith('req-')),
-      hours: r.hours ?? r.details?.hours ?? r.details?.duration,
-      details: r.details,
-      updated_at: r.updatedAt || r.updated_at || new Date().toISOString()
-    }));
-    
-    await this.upsertShifts(shiftPayloads);
+    try {
+      // 1. requests への保存 (内部でエラーはキャッチされます)
+      await this.upsertRequests(requests);
+      
+      // 2. shifts へのマッピングと保存
+      const shiftPayloads = requests.map(r => ({
+        id: r.id,
+        staff_id: r.staff_id || r.staffId || r.userId || r.user_id,
+        staff_name: r.staff_name || r.staffName,
+        date: r.date,
+        type: r.type,
+        status: r.status,
+        is_manual: !!(r.isManual || r.is_manual || String(r.id).startsWith('m-') || String(r.id).startsWith('req-')),
+        hours: r.hours ?? r.details?.hours ?? r.details?.duration,
+        details: r.details,
+        updated_at: r.updatedAt || r.updated_at || new Date().toISOString()
+      }));
+      
+      await this.upsertShifts(shiftPayloads);
+    } catch (err) {
+      console.error('❌ upsertRequestsAndShifts crashed with unhandled exception:', err);
+    }
   },
   async upsertSingleRequest(r: any) {
     // 安全のため、単一更新も共通の Safe-Upsert ロジックを通す
@@ -278,13 +306,13 @@ export const cloudStorage = {
   },
    async deleteRequest(id: string) {
     // requests テーブルから削除
-    const { error: err1 } = await supabase.from('requests').delete().eq('id', id);
+    const { error: err1 } = await supabase.from('requests').delete().eq('id::text', id);
     if (err1) {
       console.error('Request deletion error:', err1);
       throw err1;
     }
     // shifts テーブルからも削除（V73.0 整合性確保）
-    const { error: err2 } = await supabase.from('shifts').delete().eq('id', id);
+    const { error: err2 } = await supabase.from('shifts').delete().eq('id::text', id);
     if (err2) {
       console.error('Shift deletion error:', err2);
     }
@@ -295,11 +323,12 @@ export const cloudStorage = {
     const chunkSize = 50;
     for (let i = 0; i < ids.length; i += chunkSize) {
       const chunk = ids.slice(i, i + chunkSize);
+      const orCondition = chunk.map(id => `id::text.eq.${id}`).join(',');
       // requests から削除
-      const { error: err1 } = await supabase.from('requests').delete().in('id', chunk);
+      const { error: err1 } = await supabase.from('requests').delete().or(orCondition);
       if (err1) throw err1;
       // shifts から削除
-      const { error: err2 } = await supabase.from('shifts').delete().in('id', chunk);
+      const { error: err2 } = await supabase.from('shifts').delete().or(orCondition);
       if (err2) console.error('Bulk shift deletion error:', err2);
     }
     console.log(`✅ ${ids.length} records deleted from both tables.`);

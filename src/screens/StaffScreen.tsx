@@ -429,7 +429,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         
         // [V53.3] shiftsテーブルからも削除
         await supabase.from('shifts').delete()
-          .eq('staff_id', selectedStaff.id)
+          .eq('staff_id::text', selectedStaff.id)
           .eq('date', selectedDay);
         
         await fetchShifts();

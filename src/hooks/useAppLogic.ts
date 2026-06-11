@@ -359,10 +359,11 @@ export const useAppLogic = () => {
     try {
       if (!ids || ids.length === 0) return;
 
+      const orCondition = ids.map(id => `id::text.eq.${id}`).join(',');
       const { error } = await supabase
         .from('requests')
         .update({ status: 'approved' })
-        .in('id', ids);
+        .or(orCondition);
 
       if (error) throw error;
 
@@ -411,7 +412,7 @@ export const useAppLogic = () => {
       const { error } = await supabase
         .from('requests')
         .update({ status: 'rejected' })
-        .eq('id', requestId);
+        .eq('id::text', requestId);
 
       if (error) throw error;
 

@@ -455,7 +455,7 @@ export const CalendarScreen: React.FC<any> = ({
             const staff = staffList.find(s => normalizeName(s.name) === normalizeName(staffName));
             if (staff) {
               await supabase.from('shifts').delete()
-                .eq('staff_id', staff.id)
+                .eq('staff_id::text', staff.id)
                 .eq('date', dateStr)
                 .eq('is_manual', true);
             }
@@ -497,7 +497,7 @@ export const CalendarScreen: React.FC<any> = ({
       const staffIds = staffs.filter(Boolean).map(s => s.id);
       if (staffIds.length > 0) {
         await supabase.from('shifts').delete()
-          .in('staff_id', staffIds)
+          .in('staff_id::text', staffIds)
           .eq('date', dateStr)
           .eq('is_manual', true);
       }
