@@ -214,7 +214,7 @@ export const cloudStorage = {
         
         const mapped = mapToSql(obj, REQ_MAP);
         
-       
+
         return mapped;
       });
 
@@ -313,8 +313,7 @@ export const cloudStorage = {
     const chunkSize = 50;
     for (let i = 0; i < ids.length; i += chunkSize) {
       const chunk = ids.slice(i, i + chunkSize);
-      const orCondition = chunk.map(id => `id::text.eq.${id}`).join(',');
-      // requests から削除
+      
       const { error: err1 } = await supabase.from('requests').delete().or(orCondition);
       if (err1) throw err1;
       // shifts から削除
