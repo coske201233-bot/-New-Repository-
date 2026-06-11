@@ -203,9 +203,13 @@ export const cloudStorage = {
         if (r.priority !== undefined) details.priority = r.priority;
         if (r.hours !== undefined) obj.hours = r.hours; // [STRICT REFACTOR] カラムへ直接セット
         if (r.locked !== undefined) details.locked = r.locked;
-        
+        let correctId = r.id;
+                if (correctId && !String(correctId).startsWith('m-') && !String(correctId).startsWith('req-')) {
+                  correctId = 'm-' + correctId;
+                }
         const payload = { 
-          ...r, 
+          ...r,
+          id: correctId, // 💡 補正したIDを適用します
           staffName: normalizeName(r.staffName || ''),
           details 
         };
@@ -296,8 +300,7 @@ export const cloudStorage = {
   },
    async deleteRequest(id: string) {
     // requests テーブルから削除
-    const { error: err1 } = await supabase.from('requests').delete().eq('id::text', id);
-    if (err1) {
+    const { error: err1 } = await supabase.from('requests').delete().eq('id',id);
       console.error('Request deletion error:', err1);
       throw err1;
     }
@@ -313,11 +316,11 @@ export const cloudStorage = {
     const chunkSize = 50;
     for (let i = 0; i < ids.length; i += chunkSize) {
       const chunk = ids.slice(i, i + chunkSize);
-      
-      const { error: err1 } = await supabase.from('requests').delete().or(orCondition);
+
+      const { error: err1 } = await supabase.from('requests').delete().in('id', chunk);
       if (err1) throw err1;
       // shifts から削除
-      const { error: err2 } = await supabase.from('shifts').delete().or(orCondition);
+      const { error: err2 } = await supabase.from('shifts').delete().in('id', chunk);
       if (err2) console.error('Bulk shift deletion error:', err2);
     }
     console.log(`✅ ${ids.length} records deleted from both tables.`);
