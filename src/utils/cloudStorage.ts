@@ -305,7 +305,7 @@ export const cloudStorage = {
       throw err1;
     }
     // shifts テーブルからも削除（V73.0 整合性確保）
-    const { error: err2 } = await supabase.from('shifts').delete().eq('id::text', id);
+    const { error: err2 } = await supabase.from('shifts').delete().eq('id', id);
     if (err2) {
       console.error('Shift deletion error:', err2);
     }
