@@ -16,16 +16,34 @@ export default async function handler(req: any, res: any) {
     return res.status(400).json({ error: 'Missing required parameters' });
   }
 
-  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+  // ✨ 先頭に EXPO_PUBLIC_ を付けた変数から取得するように修正します
+  const supabaseServiceKey = process.env.EXPO_PUBLIC_SUPABASE_SERVICE_ROLE_KEY || '';
+
+  // 💡 厳密な存在チェック（未定義エラーによるクラッシュを防ぎます）
+  if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('❌ Supabase credentials missing: URLまたはService Role Keyが設定されていません。');
+      return res.status(500).json({ error: 'Database configuration missing' });
+    }
+
+  // 💡 一般用クライアント
+  const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+  // ✨ 特権用クライアント
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  });
 
   if (!supabaseServiceKey) {
     return res.status(500).json({ error: 'Server configuration error: Service Role Key is missing.' });
   }
 
   // 1. 標準クライアントでリクエスタの権限を確認
-  const supabase = createClient(supabaseUrl, supabaseAnonKey);
   const token = authHeader.replace('Bearer ', '');
   
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
@@ -46,14 +64,6 @@ export default async function handler(req: any, res: any) {
   if (!isAdmin) {
     return res.status(403).json({ error: 'Forbidden: Admin privileges required.' });
   }
-
-  // 3. Admin クライアントでパスワードをリセット
-  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  });
 
   const { data: updateData, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
     targetUserId,

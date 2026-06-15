@@ -300,7 +300,8 @@ export const cloudStorage = {
   },
    async deleteRequest(id: string) {
     // requests テーブルから削除
-    const { error: err1 } = await supabase.from('requests').delete().eq('id',id);
+    const { error: err1 } = await supabase.from('requests').delete().eq('id', id);
+    if (err1) {
       console.error('Request deletion error:', err1);
       throw err1;
     }

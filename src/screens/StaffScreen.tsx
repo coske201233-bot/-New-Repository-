@@ -46,6 +46,16 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     fetchShifts, shifts
   } = props;
 
+  const [selectedStaff, setSelectedStaff] = useState<any>(null);
+  const [isCalendarModalVisible, setIsCalendarModalVisible] = useState(false);
+  const activeDate = currentDate || new Date();
+  const setActiveDate = setCurrentDate;
+  
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [selectedType, setSelectedType] = useState('出勤');
+  const [selectedHours, setSelectedHours] = useState(1.0);
+  const [isSaving, setIsSaving] = useState(false);
+
   // --- [CRITICAL: FALLBACK UI FOR WSOD PREVENTION] ---
   if (!staffList || !requests) {
     return (
@@ -65,16 +75,6 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const isAdminAuthenticated = props.isAdminAuthenticated || isPrivileged;
   const userRole = isAdminAuthenticated ? 'admin' : 'staff';
 
-  const [selectedStaff, setSelectedStaff] = useState<any>(null);
-  const [isCalendarModalVisible, setIsCalendarModalVisible] = useState(false);
-  const activeDate = currentDate || new Date();
-  const setActiveDate = setCurrentDate;
-  
-  const [selectedDay, setSelectedDay] = useState<string | null>(null);
-  const [selectedType, setSelectedType] = useState('出勤');
-  const [selectedHours, setSelectedHours] = useState(1.0);
-  const [isSaving, setIsSaving] = useState(false);
-
   useEffect(() => {
     if (fetchShifts) fetchShifts();
   }, [fetchShifts, activeDate]);
@@ -82,24 +82,18 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   // --- [CRITICAL: FORCE RE-FETCH ON FOCUS & DEBUG] ---
   // タブが切り替わってこのコンポーネントがマウントされるたびにクラウドから最新データを取得します
   useEffect(() => {
-    console.log('--- [STAFF_SCREEN] Tab focused, triggering cloud sync & debug fetch... ---');
     const runDebugFetch = async () => {
       try {
         const { data, error } = await supabase.from('staff').select('*');
-
         if (error) {
           console.error("FETCH ERROR:", error);
-          setDebugError(error.message);
-        } else {
-          console.log("FETCHED DATA:", data);
-          setDebugStaffList(data || []);
+        } else if (data) {
+          setDebugStaffList(data);
         }
-      } catch (e: any) {
+      } catch (e) {
         console.error("DEBUG FETCH EXCEPTION:", e);
-        setDebugError(e.message);
       }
     };
-
     runDebugFetch();
   }, []);
 
@@ -182,8 +176,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         position: regTitle, // 役職 (Title)
         role: (isMasterAdmin || regAppRole === '管理者') ? '管理者,スタッフ' : 'スタッフ', // アプリ権限 (permissions)
         profession: regJobType, // 職種 (jobType)
+
         placement: regPlacement,
-        status: regStatus,
+        status:regStatus,
         no_holiday: regHolidaySetting,
         is_approved: isMasterAdmin || regStatus === '承認済み',
       };
@@ -193,15 +188,29 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       );
 
       if (editingStaff) {
-        // UPDATE
-        const { error } = await Promise.race([
-          supabase.from('staff').update(payload).eq('id', editingStaff.id),
-          timeoutPromise
-        ]) as any;
+        // UPDATE (サーバーサイドAPI経由で安全にRLSを貫通)
+        const updatePromise = async () => {
+          const response = await fetch('/api/update-staff-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              staffId: editingStaff.id, // 厳密なUUIDをサーバーへ送信
+              payload: payload          // 更新用データ（position, placement, statusなど）
+            })
+          });
+          if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.error || 'サーバー側での更新に失敗しました');
+          }
+          return await response.json();
+        };
 
-        if (error) {
-          console.error("UPDATE ERROR:", error);
-          setStatusMsg("❌ 保存に失敗しました: " + (error.message || "不明なエラー"));
+        // タイムアウト監視付きでAPIを実行
+        try {
+          await Promise.race([updatePromise(), timeoutPromise]);
+        } catch (err: any) {
+          console.error("API ROUTE FETCH ERROR:", err);
+          setStatusMsg("❌ 保存に失敗しました: " + err.message);
           setIsSaving(false);
           return;
         }
@@ -210,9 +219,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         if (props.onForceCloudSync) {
           props.onForceCloudSync();
         }
-        setTimeout(() => {
-          setStatusMsg('');
-        }, 3000);
+        setTimeout(() => { setStatusMsg(''); }, 3000);
       }
     } catch (error: any) {
       console.error("INSERT ERROR:", error);
@@ -229,9 +236,10 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
   
   const filteredStaff = useMemo(() => {
-    if (!Array.isArray(staffList)) return [];
-    return [...staffList.filter(s => s)].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [staffList]);
+  // ✨ Supabaseから直接取ってきた、正しいUUID（id）を保持している debugStaffList を使って一覧を作ります
+      if (!Array.isArray(debugStaffList)) return [];
+      return [...debugStaffList.filter(s => s)].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }, [debugStaffList]); // 💡 監視対象も debugStaffList に変更
 
   const normalize = (n: string) => (n || '').replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/公費/g, '').toUpperCase();
 
