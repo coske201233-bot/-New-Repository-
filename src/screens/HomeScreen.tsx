@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, ScrollView, SafeAreaView, TouchableOpacity, Modal, Platform, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, View, ScrollView, SafeAreaView, TouchableOpacity, Modal, Platform, ActivityIndicator, Animated } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
@@ -26,15 +26,28 @@ interface HomeScreenProps {
   onLogout?: () => void;
   isInitialized?: boolean;
   shifts?: any[];
+  isSyncing?: boolean;
+  isLoadingShifts?: boolean;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ 
   onNavigateToStaff, staffList, requests, weekdayLimit,
   saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, staffViewMode = false,
   onForceCloudSync, profile, isAdminAuthenticated, onOpenRequests, onLogout,
-  isInitialized, shifts
+  isInitialized, shifts, isSyncing, isLoadingShifts
 }) => {
   const [selectedWardDetails, setSelectedWardDetails] = useState<string | null>(null);
+
+  // 💡 ログイン直後のチラつきを物理的にブラインド（目隠し）するためのアニメーション
+  const [fadeAnim] = useState(new Animated.Value(0));
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 350, // 350ミリ秒かけてふわっと表示
+      useNativeDriver: true,
+    }).start();
+  }, []);
 
   // シニアアーキテクト指令: 厳格な配列検証と防弾レンダリング (VERSION 43.0)
   const safeStaff = Array.isArray(staffList) ? staffList : [];
@@ -218,7 +231,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
     return (
       <SafeAreaView style={styles.container}>
-        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <Animated.View style={{ flex: 1, opacity: fadeAnim, width: '100%' }}>
+          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           <View style={[styles.header, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
             <View>
               <ThemeText variant="h1">ダッシュボード</ThemeText>
@@ -238,9 +252,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </View>
 
           {/* 申請承認通知（管理者のみ） */}
-          {((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated) && (
+          {isInitialized && ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated) && (
             (() => {
-              const pendingCount = (requests || []).filter(r => r.status === 'pending').length;
+              // 💡 データ取得中（isSyncing や isLoadingShifts が true）の時は、赤い帯を絶対に画面に出さない
+              if (isSyncing || isLoadingShifts) return null;
+              if (!requests || requests.length === 0) return null;
+              const pendingCount = requests.filter(r => r.status === 'pending').length;
               if (pendingCount > 0) {
                 return (
                   <TouchableOpacity onPress={onOpenRequests} style={styles.notificationBanner} activeOpacity={0.8}>
@@ -340,7 +357,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </View>
             </View>
           </Modal>
-        </ScrollView>
+          </ScrollView>
+        </Animated.View>
       </SafeAreaView>
     );
   } catch (error) {

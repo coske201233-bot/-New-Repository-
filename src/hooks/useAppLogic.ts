@@ -201,7 +201,26 @@ export const useAppLogic = () => {
     // 2. 初期化完了フラグをリセットし、次回ログイン時に再フェッチを走らせる
     setIsInitialized(false);
     
-    // 3. 認証関連のログアウト処理
+    // 3. AsyncStorage に保存されている古いキャッシュを完全に焼き払う
+    try {
+      await AsyncStorage.removeItem('supabase.auth.token');
+      await AsyncStorage.removeItem('@requests');
+      await AsyncStorage.removeItem('requests');
+      await AsyncStorage.removeItem('@staff_list');
+      await AsyncStorage.removeItem('shifts');
+      await AsyncStorage.removeItem('@profile');
+      
+      // Supabaseが生成した認証トークンキーをすべて消去する
+      const keys = await AsyncStorage.getAllKeys();
+      const authKeys = keys.filter(key => key.includes('auth-token') || key.includes('supabase'));
+      for (const k of authKeys) {
+        await AsyncStorage.removeItem(k);
+      }
+    } catch (e) {
+      console.error("AsyncStorage clear error:", e);
+    }
+    
+    // 4. 認証関連のログアウト処理
     await auth.logout();
     setCurrentTab('home');
     auth.setIsAdminAuthenticated(false);

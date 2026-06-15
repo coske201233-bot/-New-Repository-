@@ -134,6 +134,7 @@ export default function App() {
       onUndoAutoAssign,
       canUndoAutoAssign,
       isInitialized,
+      isSyncing: logic.isSyncing,
       // [V54.0] グローバルなシフトステートを全ての画面で共有
       shifts,
       fetchShifts,

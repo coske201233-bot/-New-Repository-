@@ -233,7 +233,6 @@ export const useAuthSession = () => {
     await saveData(STORAGE_KEYS.PROFILE, null);
     if (typeof window !== 'undefined') {
       localStorage.clear();
-      window.location.href = '/';
     }
   };
 
