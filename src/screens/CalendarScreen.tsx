@@ -1161,7 +1161,7 @@ export const CalendarScreen: React.FC<any> = ({
               ))}
             </View>
 
-            {(selectedType === '時間休' || selectedType === '時間給' || selectedType === '特休' || selectedType === '看護休暇' || selectedType === '時間外' || selectedType === '時間外出勤') && (
+            {(selectedType === '時間休' || selectedType === '特休') && (
               <View style={{ marginBottom: 20 }}>
                 <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>

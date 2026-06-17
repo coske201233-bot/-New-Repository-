@@ -230,8 +230,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   };
 
   // Constants
-  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '時間外', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '空欄'];
-  const HOUR_SELECTOR_TYPES = ['時間休', '時間外', '時間外出勤', '振替＋時間休', '特休', '時間給', '看護休暇', '午前休', '午後休'];
+  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '空欄'];
+  const HOUR_SELECTOR_TYPES = ['時間休', '振替＋時間休', '特休'];
 
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
   
