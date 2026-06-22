@@ -606,7 +606,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                 } else if (rType === '特休＋時間休') {
                   const sp = req.details?.specialHours ?? 0;
                   const hr = req.details?.hourlyHours ?? 0;
-                  displayLabel = `特(${sp}時${hr})`; labelColor = '#ef4444';
+                  displayLabel = `特${sp}時${hr}`; labelColor = '#ef4444';
                 } else if (['時間休', '時間給', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(rType)) {
                   displayLabel = `${rType.charAt(0)}(${h}h)`; labelColor = '#ef4444';
                 } else {

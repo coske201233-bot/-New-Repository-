@@ -680,7 +680,7 @@ export const CalendarScreen: React.FC<any> = ({
             else if (type === '特休＋時間休') {
               const sp = item.details?.specialHours ?? 0;
               const hr = item.details?.hourlyHours ?? 0;
-              label = `(特${sp}時${hr})`;
+              label = `特${sp}時${hr}`;
             }
             else if (type === '午前休') label = `(前)`;
             else if (type === '午後休') label = `(後)`;
