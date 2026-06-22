@@ -15,7 +15,7 @@ export const exportShiftToPDF = async (staffName: string, requests: any[], curre
     return `${y}-${m}-${d}`;
   };
 
-  const leaveTypes = ['年休', '有給休暇', '時間休', '看護休暇', '振替', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '公休', '午前振替', '午後振替'];
+  const leaveTypes = ['年休', '有給休暇', '時間休', '看護休暇', '振替', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '公休', '午前振替', '午後振替', '特休＋時間休'];
 
   let rowsHtml = '';
   for (let d = 1; d <= daysInMonth; d++) {
@@ -40,10 +40,15 @@ export const exportShiftToPDF = async (staffName: string, requests: any[], curre
     }
     
     // Style for holiday rows
-    const rowClass = type === 'sat' ? 'sat-row' : (type === 'sun' || type === 'holiday') ? 'holiday-row' : '';
-    const statusText = isWork ? '出勤' : (req?.type || '公休');
-    let statusClass = isWork ? 'status-work' : 'status-off';
-    if (statusText.includes('振替')) statusClass = 'status-transfer';
+     const rowClass = type === 'sat' ? 'sat-row' : (type === 'sun' || type === 'holiday') ? 'holiday-row' : '';
+     let statusText = isWork ? '出勤' : (req?.type || '公休');
+     if (req && req.type === '特休＋時間休') {
+       const sp = req.details?.specialHours ?? 0;
+       const hr = req.details?.hourlyHours ?? 0;
+       statusText = `特休${sp}h＋時間休${hr}h`;
+     }
+     let statusClass = isWork ? 'status-work' : 'status-off';
+     if (statusText.includes('振替') || statusText.includes('時間休')) statusClass = 'status-transfer';
 
     rowsHtml += `
       <tr class="${rowClass}">

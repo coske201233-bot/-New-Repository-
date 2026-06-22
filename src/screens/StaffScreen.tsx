@@ -54,6 +54,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState('出勤');
   const [selectedHours, setSelectedHours] = useState(1.0);
+  const [specialHours, setSpecialHours] = useState(1.0);
+  const [hourlyHours, setHourlyHours] = useState(1.0);
   const [isSaving, setIsSaving] = useState(false);
 
   // --- [CRITICAL: FALLBACK UI FOR WSOD PREVENTION] ---
@@ -230,8 +232,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   };
 
   // Constants
-  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '空欄'];
-  const HOUR_SELECTOR_TYPES = ['時間休', '振替＋時間休', '特休'];
+  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '特休＋時間休', '空欄'];
+  const HOUR_SELECTOR_TYPES = ['時間休', '振替＋時間休', '特休', '特休＋時間休'];
 
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
   
@@ -349,9 +351,13 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     if (existing) {
       setSelectedType((existing.type === '日勤' || existing.type === '出勤') ? '出勤' : existing.type);
       setSelectedHours(getReqHours(existing) || 1.0);
+      setSpecialHours(existing.details?.specialHours || 1.0);
+      setHourlyHours(existing.details?.hourlyHours || 1.0);
     } else {
       setSelectedType('出勤');
       setSelectedHours(1.0);
+      setSpecialHours(1.0);
+      setHourlyHours(1.0);
     }
   };
 
@@ -373,8 +379,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         staffName: selectedStaff.name,
         date: selectedDay,
         type: type,
-        hours: HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : undefined,
-        details: { note: '管理画面より更新' },
+        hours: type === '特休＋時間休'
+          ? (specialHours + hourlyHours)
+          : (HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : null),
+        details: type === '特休＋時間休'
+          ? { note: '管理画面より更新', specialHours, hourlyHours }
+          : { note: '管理画面より更新' },
         status: 'approved',
         createdAt: now,
         updatedAt: now, 
@@ -593,6 +603,10 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                   displayLabel = '振(全)'; labelColor = '#ef4444';
                 } else if (rType === '半日振替') {
                   displayLabel = '振(半)'; labelColor = '#ef4444';
+                } else if (rType === '特休＋時間休') {
+                  const sp = req.details?.specialHours ?? 0;
+                  const hr = req.details?.hourlyHours ?? 0;
+                  displayLabel = `特(${sp}時${hr})`; labelColor = '#ef4444';
                 } else if (['時間休', '時間給', '特休', '午前休', '午後休', '振替＋時間休', '看護休暇'].includes(rType)) {
                   displayLabel = `${rType.charAt(0)}(${h}h)`; labelColor = '#ef4444';
                 } else {
@@ -679,7 +693,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
           const h = getReqHours(req);
           // 休暇時間としてカウントする種別を限定
-          const holidayTypes = ['年休', '有給休暇', '夏季休暇', '特休', '時間休', '時間給', '午前休', '午後休', '看護休暇', '年給', '有給'];
+          const holidayTypes = ['年休', '有給休暇', '夏季休暇', '特休', '時間休', '時間給', '午前休', '午後休', '看護休暇', '年給', '有給', '特休＋時間休'];
           if (holidayTypes.includes((req.type || '').trim())) {
             leaveHours += h;
           }
@@ -794,15 +808,45 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                   {HOUR_SELECTOR_TYPES.includes(selectedType) && (
                     <View style={{ marginTop: 12 }}>
                       <ThemeText variant="label" style={{ marginBottom: 12 }}>時間設定 (0.25h単位)</ThemeText>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                        <TouchableOpacity onPress={() => setSelectedHours(Math.max(0.25, selectedHours - 0.25))} style={styles.adjustBtn}>
-                          <ThemeText bold>-</ThemeText>
-                        </TouchableOpacity>
-                        <ThemeText variant="h2" color={COLORS.primary}>{selectedHours.toFixed(2)}h</ThemeText>
-                        <TouchableOpacity onPress={() => setSelectedHours(Math.min(8.0, selectedHours + 0.25))} style={styles.adjustBtn}>
-                          <ThemeText bold>+</ThemeText>
-                        </TouchableOpacity>
-                      </View>
+                      {selectedType === '特休＋時間休' ? (
+                        <View style={{ gap: 16 }}>
+                          <View>
+                            <ThemeText variant="caption" style={{ marginBottom: 6 }}>特休の時間数</ThemeText>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                              <TouchableOpacity onPress={() => setSpecialHours(prev => Math.max(0.25, prev - 0.25))} style={styles.adjustBtn}>
+                                <ThemeText bold>-</ThemeText>
+                              </TouchableOpacity>
+                              <ThemeText variant="h2" color={COLORS.primary}>{specialHours.toFixed(2)}h</ThemeText>
+                              <TouchableOpacity onPress={() => setSpecialHours(prev => Math.min(8.0, prev + 0.25))} style={styles.adjustBtn}>
+                                <ThemeText bold>+</ThemeText>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                          <View>
+                            <ThemeText variant="caption" style={{ marginBottom: 6 }}>時間休の時間数</ThemeText>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                              <TouchableOpacity onPress={() => setHourlyHours(prev => Math.max(0.25, prev - 0.25))} style={styles.adjustBtn}>
+                                <ThemeText bold>-</ThemeText>
+                              </TouchableOpacity>
+                              <ThemeText variant="h2" color={COLORS.primary}>{hourlyHours.toFixed(2)}h</ThemeText>
+                              <TouchableOpacity onPress={() => setHourlyHours(prev => Math.min(8.0, prev + 0.25))} style={styles.adjustBtn}>
+                                <ThemeText bold>+</ThemeText>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                          <ThemeText variant="caption" bold style={{ marginTop: 4 }}>合計時間: {(specialHours + hourlyHours).toFixed(2)}h</ThemeText>
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                          <TouchableOpacity onPress={() => setSelectedHours(Math.max(0.25, selectedHours - 0.25))} style={styles.adjustBtn}>
+                            <ThemeText bold>-</ThemeText>
+                          </TouchableOpacity>
+                          <ThemeText variant="h2" color={COLORS.primary}>{selectedHours.toFixed(2)}h</ThemeText>
+                          <TouchableOpacity onPress={() => setSelectedHours(Math.min(8.0, selectedHours + 0.25))} style={styles.adjustBtn}>
+                            <ThemeText bold>+</ThemeText>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   )}
                   {(isPrivileged || isAdminAuthenticated) && (

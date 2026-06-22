@@ -169,8 +169,16 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
                   <View style={[styles.typeBadge, { backgroundColor: item.type === '時間外出勤' ? 'rgba(249, 115, 22, 0.1)' : 'rgba(56, 189, 248, 0.1)' }]}>
                     <ThemeText variant="caption" bold color={item.type === '時間外出勤' ? '#f97316' : '#38bdf8'}>{item.type}</ThemeText>
                   </View>
-                  {item.details?.duration && (
-                    <ThemeText variant="caption" bold style={{ color: COLORS.accent, marginLeft: 8 }}>{item.details.duration}時間</ThemeText>
+                  {item.type === '特休＋時間休' ? (
+                    <ThemeText variant="caption" bold style={{ color: COLORS.accent, marginLeft: 8 }}>
+                      特休:{item.details?.specialHours}h + 時間休:{item.details?.hourlyHours}h (計:{item.hours}h)
+                    </ThemeText>
+                  ) : (
+                    (item.details?.duration || item.hours) ? (
+                      <ThemeText variant="caption" bold style={{ color: COLORS.accent, marginLeft: 8 }}>
+                        {item.details?.duration || item.hours}時間
+                      </ThemeText>
+                    ) : null
                   )}
                 </View>
                 <ThemeText variant="body" style={styles.reasonText}>

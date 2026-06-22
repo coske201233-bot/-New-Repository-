@@ -10,13 +10,23 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [type, setType] = useState('年休');
   const [hours, setHours] = useState(1.0);
+  const [specialHours, setSpecialHours] = useState(1.0);
+  const [hourlyHours, setHourlyHours] = useState(1.0);
   const [comment, setComment] = useState('');
 
-  const types = ['年休', '時間休', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '特休'];
-  const needsHours = ['時間休', '振替＋時間休', '特休'].includes(type);
+  const types = ['年休', '時間休', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休'];
+  const needsHours = ['時間休', '振替＋時間休', '特休', '特休＋時間休'].includes(type);
 
   const adjustHours = (delta: number) => {
     setHours(prev => Math.max(0.25, Math.min(24, prev + delta)));
+  };
+
+  const adjustSpecialHours = (delta: number) => {
+    setSpecialHours(prev => Math.max(0.25, Math.min(24, prev + delta)));
+  };
+
+  const adjustHourlyHours = (delta: number) => {
+    setHourlyHours(prev => Math.max(0.25, Math.min(24, prev + delta)));
   };
 
   const handleSubmit = () => {
@@ -27,9 +37,10 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
       date: startDate,
       endDate: endDate,
       type: type,
-      hours: needsHours ? hours : null,
+      hours: type === '特休＋時間休' ? (specialHours + hourlyHours) : (needsHours ? hours : null),
       comment: comment,
       status: 'pending',
+      details: type === '特休＋時間休' ? { specialHours, hourlyHours } : null,
       createdAt: new Date().toISOString()
     };
 
@@ -61,17 +72,51 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
         {needsHours && (
           <View style={styles.inputGroup}>
             <ThemeText bold style={styles.label}>2. 申請時間 (0.25h単位)</ThemeText>
-            <View style={styles.hourControl}>
-              <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHours(-0.25)}>
-                <ThemeText color="white" bold size={20}>-</ThemeText>
-              </TouchableOpacity>
-              <View style={styles.hourDisplay}>
-                <ThemeText bold size={18}>{hours.toFixed(2)} h</ThemeText>
+            {type === '特休＋時間休' ? (
+              <View style={{ gap: 16 }}>
+                <View>
+                  <ThemeText variant="caption" style={{ marginBottom: 6 }}>特休の時間数</ThemeText>
+                  <View style={styles.hourControl}>
+                    <TouchableOpacity style={styles.stepBtn} onPress={() => adjustSpecialHours(-0.25)}>
+                      <ThemeText color="white" bold size={20}>-</ThemeText>
+                    </TouchableOpacity>
+                    <View style={styles.hourDisplay}>
+                      <ThemeText bold size={18}>{specialHours.toFixed(2)} h</ThemeText>
+                    </View>
+                    <TouchableOpacity style={styles.stepBtn} onPress={() => adjustSpecialHours(0.25)}>
+                      <ThemeText color="white" bold size={20}>+</ThemeText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <View>
+                  <ThemeText variant="caption" style={{ marginBottom: 6 }}>時間休の時間数</ThemeText>
+                  <View style={styles.hourControl}>
+                    <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHourlyHours(-0.25)}>
+                      <ThemeText color="white" bold size={20}>-</ThemeText>
+                    </TouchableOpacity>
+                    <View style={styles.hourDisplay}>
+                      <ThemeText bold size={18}>{hourlyHours.toFixed(2)} h</ThemeText>
+                    </View>
+                    <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHourlyHours(0.25)}>
+                      <ThemeText color="white" bold size={20}>+</ThemeText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <ThemeText variant="caption" bold style={{ marginTop: 4 }}>合計時間: {(specialHours + hourlyHours).toFixed(2)} h</ThemeText>
               </View>
-              <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHours(0.25)}>
-                <ThemeText color="white" bold size={20}>+</ThemeText>
-              </TouchableOpacity>
-            </View>
+            ) : (
+              <View style={styles.hourControl}>
+                <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHours(-0.25)}>
+                  <ThemeText color="white" bold size={20}>-</ThemeText>
+                </TouchableOpacity>
+                <View style={styles.hourDisplay}>
+                  <ThemeText bold size={18}>{hours.toFixed(2)} h</ThemeText>
+                </View>
+                <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHours(0.25)}>
+                  <ThemeText color="white" bold size={20}>+</ThemeText>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
 

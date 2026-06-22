@@ -143,7 +143,7 @@ export const cloudStorage = {
       } else {
         // デフォルト値のフォールバック
         if (mapped.type === '半日振替') mapped.hours = 3.75;
-        else if (['時間休', '特休', '看護休暇', '振替＋時間休'].includes(mapped.type)) mapped.hours = 1.0;
+        else if (['時間休', '特休', '看護休暇', '振替＋時間休', '特休＋時間休'].includes(mapped.type)) mapped.hours = 1.0;
         else mapped.hours = 0;
       }
       return mapped;
