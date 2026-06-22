@@ -947,11 +947,13 @@ export const CalendarScreen: React.FC<any> = ({
                           }
 
                           if (dur > 0) {
-                            const text = (item.type || '').includes('振替')
-                              ? ` 振替＋時間休7.75h`
-                              : (item.type || '').includes('特')
-                                ? ` 特休${dur}h`
-                                : ` 時間休${dur}h`;
+                            const text = (item.type || '') === '半日振替'
+                              ? ` 半日振替`
+                              : (item.type || '').includes('振替')
+                                ? ` 振替＋時間休7.75h`
+                                : (item.type || '').includes('特')
+                                  ? ` 特休${dur}h`
+                                  : ` 時間休${dur}h`;
                             return (
                               <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
                                 {text}
