@@ -232,8 +232,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   };
 
   // Constants
-  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '特休＋時間休', '出張', '空欄'];
-  const HOUR_SELECTOR_TYPES = ['時間休', '特休', '特休＋時間休', '出張'];
+  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '特休＋時間休', '出張', '休日時間外', '空欄'];
+  const HOUR_SELECTOR_TYPES = ['時間休', '特休', '特休＋時間休', '出張', '休日時間外'];
 
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
   
@@ -611,6 +611,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                   displayLabel = `出張(${h}h)`; labelColor = '#f97316';
                 } else if (rType === '振替＋時間休') {
                   displayLabel = '振＋時'; labelColor = '#ef4444';
+                } else if (rType === '休日時間外') {
+                  displayLabel = `休外(${h}h)`; labelColor = '#38bdf8';
                 } else if (['時間休', '時間給', '特休', '午前休', '午後休', '看護休暇'].includes(rType)) {
                   displayLabel = `${rType.charAt(0)}(${h}h)`; labelColor = '#ef4444';
                 } else {

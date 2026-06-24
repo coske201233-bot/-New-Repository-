@@ -528,7 +528,7 @@ export const CalendarScreen: React.FC<any> = ({
         isManual: true, // リクエストテーブル用
         hours: selectedType === '特休＋時間休'
           ? (adminSpecialHours + adminHourlyHours)
-          : (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤', '出張'].includes(selectedType))
+          : (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤', '出張', '休日時間外'].includes(selectedType))
             ? hourlyDuration
             : null,
         details: selectedType === '特休＋時間休'
@@ -680,6 +680,7 @@ export const CalendarScreen: React.FC<any> = ({
           } else {
             if (type === '時間休' || type === '時間給') label = `(${duration}h)`;
             else if (type === '出張') label = `出(${duration}h)`;
+            else if (type === '休日時間外') label = `休外(${duration}h)`;
             else if (type === '特休＋時間休') {
               const sp = item.details?.specialHours ?? 0;
               const hr = item.details?.hourlyHours ?? 0;
@@ -976,7 +977,9 @@ export const CalendarScreen: React.FC<any> = ({
                                     ? ` 特休${dur}h`
                                     : (item.type || '') === '出張'
                                       ? ` 出張${dur}h`
-                                      : ` 時間休${dur}h`;
+                                      : (item.type || '') === '休日時間外'
+                                        ? ` 休日時間外${dur}h`
+                                        : ` 時間休${dur}h`;
                             return (
                               <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
                                 {text}
@@ -1174,7 +1177,7 @@ export const CalendarScreen: React.FC<any> = ({
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-              {['出勤', '午前休', '午後休', '時間休', '時間外', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇', '特休＋時間休', '出張', '空欄'].map(t => (
+              {['出勤', '午前休', '午後休', '時間休', '時間外', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇', '特休＋時間休', '出張', '休日時間外', '空欄'].map(t => (
                 <TouchableOpacity 
                   key={t}
                   style={[
@@ -1188,7 +1191,7 @@ export const CalendarScreen: React.FC<any> = ({
               ))}
             </View>
 
-            {(selectedType === '時間休' || selectedType === '特休' || selectedType === '特休＋時間休' || selectedType === '出張') && (
+            {(selectedType === '時間休' || selectedType === '特休' || selectedType === '特休＋時間休' || selectedType === '出張' || selectedType === '休日時間外') && (
               <View style={{ marginBottom: 20 }}>
                 <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
                 {selectedType === '特休＋時間休' ? (
