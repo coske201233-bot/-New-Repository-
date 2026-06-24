@@ -172,7 +172,7 @@ export const CalendarScreen: React.FC<any> = ({
         String(rec.id || '').startsWith('manual-') || 
         String(rec.id || '').startsWith('req-');
 
-      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(t);
+      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修', '出張', '振替＋時間休', '全休', '年給', '有給', '1日振替', '半日振替', '午前休', '午後休'].includes(t);
 
       const getTime = (i: any) => {
         const t = i.updatedAt || i.updated_at || i.createdAt || i.created_at || 0;
@@ -217,7 +217,7 @@ export const CalendarScreen: React.FC<any> = ({
     const allLeaves: string[] = [];
     map.forEach((dayMap, date) => {
       dayMap.forEach((req, staffId) => {
-        const isOff = ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(req.type);
+        const isOff = ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修', '出張', '振替＋時間休'].includes(req.type);
         if (isOff) {
           const staff = (staffList || []).find((s: any) => s.id === req.staff_id);
           allLeaves.push(`${req.date} | Staff: ${staff ? staff.name : 'Unknown ID: ' + req.staff_id} | Type: ${req.type}`);
@@ -279,7 +279,7 @@ export const CalendarScreen: React.FC<any> = ({
         const isOffType = (t: string) => {
           if (!t) return false;
           // [V54.6] 研修も「出勤人数（分母）」に含めない休みとして扱う
-          if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(t)) return true;
+          if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修', '振替＋時間休'].includes(t)) return true;
           return false;
         };
 
@@ -296,7 +296,8 @@ export const CalendarScreen: React.FC<any> = ({
           }
 
           const rType = (r.type || '').trim();
-          const isFullDayLeaveType = ['公休', '年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給', '1日振替'].includes(rType);
+          if (rType === '振替＋時間休' || rType === '1日振替') return isAssistant ? 7.5 : 7.75;
+          const isFullDayLeaveType = ['公休', '年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給', '1日振替', '出張', '振替＋時間休'].includes(rType);
           
           const h = r.hours ?? r.partialLeaveHours ?? r.leaveHours ?? r.details?.partialLeaveHours ?? r.details?.duration ?? r.details?.hours;
           const parsedH = parseFloat(String(h));
@@ -330,8 +331,8 @@ export const CalendarScreen: React.FC<any> = ({
         const isFullDayLeave = totalLeaveHours >= maxLimit;
 
         if (approvedReqs.length > 0) {
-          const offReq = approvedReqs.find(r => isOffType(r.type));
-          const workReq = approvedReqs.find(r => isWorkType(r.type));
+          const offReq = approvedReqs.find(r => isOffType(r.type) || (r.type === '出張' && getLeaveHoursOfRequest(r) >= maxLimit));
+          const workReq = approvedReqs.find(r => isWorkType(r.type) || (r.type === '出張' && getLeaveHoursOfRequest(r) < maxLimit));
 
           if (isFullDayLeave || (offReq && getLeaveHoursOfRequest(offReq) >= maxLimit)) {
             const displayReq = offReq || workReq || approvedReqs[0];
@@ -343,7 +344,8 @@ export const CalendarScreen: React.FC<any> = ({
             off.push({ staff, type: '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
           }
         } else if (pendingReq) {
-          if (isFullDayLeave) {
+          const isPendingOff = isOffType(pendingReq.type) || (pendingReq.type === '出張' && getLeaveHoursOfRequest(pendingReq) >= maxLimit);
+          if (isFullDayLeave || isPendingOff) {
             off.push({ staff, type: pendingReq.type, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: totalLeaveHours, details: pendingReq.details });
           } else {
             working.push({ staff, type: pendingReq.type, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: totalLeaveHours, details: pendingReq.details });
@@ -394,8 +396,8 @@ export const CalendarScreen: React.FC<any> = ({
                    item.details?.duration ?? 
                    item.details?.hours ?? 0;
     
-    // 対象スタッフかつ振替であれば、最大制限値とみなす
-    if (isTarget && isTransferType) {
+    // 振替タイプ（半日振替を除く）であれば、無条件で1日休み（最大制限値）とみなす
+    if (isTransferType && item.type !== '半日振替') {
       duration = limit;
     }
 
@@ -526,7 +528,7 @@ export const CalendarScreen: React.FC<any> = ({
         isManual: true, // リクエストテーブル用
         hours: selectedType === '特休＋時間休'
           ? (adminSpecialHours + adminHourlyHours)
-          : (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤'].includes(selectedType))
+          : (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤', '出張'].includes(selectedType))
             ? hourlyDuration
             : null,
         details: selectedType === '特休＋時間休'
@@ -673,10 +675,11 @@ export const CalendarScreen: React.FC<any> = ({
           }
           
           let label = '';
-          if (isException) {
-            label = ` 振替＋時間休${isAs ? '7.5' : '7.75'}h`;
+          if (isException || type === '振替＋時間休') {
+            label = ' 振＋時';
           } else {
             if (type === '時間休' || type === '時間給') label = `(${duration}h)`;
+            else if (type === '出張') label = `出(${duration}h)`;
             else if (type === '特休＋時間休') {
               const sp = item.details?.specialHours ?? 0;
               const hr = item.details?.hourlyHours ?? 0;
@@ -714,7 +717,8 @@ export const CalendarScreen: React.FC<any> = ({
           const limit = isAs ? 7.5 : 7.75;
 
           let duration = item.hours ?? item.partialLeaveHours ?? item.leaveHours ?? item.details?.partialLeaveHours ?? item.details?.duration ?? item.details?.hours ?? 0;
-          if (isTarget && isTransferType) {
+          // 振替タイプ（半日振替を除く）であれば、無条件で1日休み（最大制限値）とみなす
+          if (isTransferType && item.type !== '半日振替') {
             duration = limit;
           }
 
@@ -739,6 +743,10 @@ export const CalendarScreen: React.FC<any> = ({
           holidayWorkers = info.working
             .filter(w => !w.isHomeVisit && !w.isAssistant && !isCellException(w))
             .map(w => getDisplayLabelObj(w));
+          // 【要件追加】休日でも、公休以外の「特別な休暇」（有休、特休、振替＋時間休、出張など）を取得しているスタッフを抽出
+          offWorkers = info.off
+            .filter(o => o.type !== '公休' && !isCellException(o))
+            .map(o => getDisplayLabelObj(o));
         } else {
           // 平日の場合：休みスタッフを表示（例外スタッフは除外する）
           const isAfterJune2026 = (d!.getFullYear() > 2026) || (d!.getFullYear() === 2026 && d!.getMonth() >= 5);
@@ -786,7 +794,7 @@ export const CalendarScreen: React.FC<any> = ({
                   {(() => {
                     const displayList = dayType === 'weekday' 
                       ? [...offWorkers, ...cellExceptions] 
-                      : [...holidayWorkers, ...cellExceptions];
+                      : [...holidayWorkers, ...offWorkers, ...cellExceptions];
                       
                     return (
                       <>
@@ -963,10 +971,12 @@ export const CalendarScreen: React.FC<any> = ({
                               : (item.type || '') === '特休＋時間休'
                                 ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
                                 : (item.type || '').includes('振替')
-                                  ? ` 振替＋時間休7.75h`
+                                  ? ` 振＋時`
                                   : (item.type || '').includes('特')
                                     ? ` 特休${dur}h`
-                                    : ` 時間休${dur}h`;
+                                    : (item.type || '') === '出張'
+                                      ? ` 出張${dur}h`
+                                      : ` 時間休${dur}h`;
                             return (
                               <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
                                 {text}
@@ -1043,11 +1053,11 @@ export const CalendarScreen: React.FC<any> = ({
                     >
                       {item.staff.name} {item.isHomeVisit ? '[訪問リハ]' : (item.isAssistant ? '[助手]' : `[${item.staff.jobType || item.staff.profession}]`)}
                     </ThemeText>
-                    {isException ? (
-                      <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
-                        {` 振替＋時間休${item.isAssistant ? '7.5' : '7.75'}h`}
-                      </ThemeText>
-                    ) : (
+                     {(isException || item.type === '振替＋時間休') ? (
+                       <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
+                         {' 振＋時'}
+                       </ThemeText>
+                     ) : (
                       <ThemeText 
                         variant="caption" 
                         bold={item.type !== '公休' && item.type !== '年休'}
@@ -1164,7 +1174,7 @@ export const CalendarScreen: React.FC<any> = ({
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-              {['出勤', '午前休', '午後休', '時間休', '時間外', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇', '特休＋時間休', '空欄'].map(t => (
+              {['出勤', '午前休', '午後休', '時間休', '時間外', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇', '特休＋時間休', '出張', '空欄'].map(t => (
                 <TouchableOpacity 
                   key={t}
                   style={[
@@ -1178,7 +1188,7 @@ export const CalendarScreen: React.FC<any> = ({
               ))}
             </View>
 
-            {(selectedType === '時間休' || selectedType === '特休' || selectedType === '特休＋時間休') && (
+            {(selectedType === '時間休' || selectedType === '特休' || selectedType === '特休＋時間休' || selectedType === '出張') && (
               <View style={{ marginBottom: 20 }}>
                 <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
                 {selectedType === '特休＋時間休' ? (

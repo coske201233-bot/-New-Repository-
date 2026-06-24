@@ -65,7 +65,7 @@ export const useShiftData = () => {
           if (!newIsManual && existingIsManual) return; // 既存（手動）を維持
 
           // B. 種別優先度 (休み系 > 出勤系)
-          const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修'].includes(t);
+          const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修', '出張', '振替＋時間休'].includes(t);
           if (isOff(s.type) && !isOff(existing.type)) {
             priorityMap.set(key, s);
             return;
