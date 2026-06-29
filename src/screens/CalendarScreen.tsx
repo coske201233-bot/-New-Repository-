@@ -1177,7 +1177,7 @@ export const CalendarScreen: React.FC<any> = ({
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-              {['出勤', '午前休', '午後休', '時間休', '時間外', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇', '特休＋時間休', '出張', '休日時間外', '空欄'].map(t => (
+              {['出勤', '時間休', '時間外', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇', '特休＋時間休', '出張', '休日時間外', '空欄'].map(t => (
                 <TouchableOpacity 
                   key={t}
                   style={[

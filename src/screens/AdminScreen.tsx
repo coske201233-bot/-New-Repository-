@@ -196,19 +196,20 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               label = '年';
             } else if (type === '特休') {
               cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
-              label = '特';
-            } else if (type === '午前休') {
-              cellStyle = 'background-color: #f0fdf4; color: #16a34a;';
-              label = '前';
-            } else if (type === '午後休') {
-              cellStyle = 'background-color: #f0fdf4; color: #16a34a;';
-              label = '後';
+              const hrs = req?.hours ? `${req.hours}` : '';
+              label = `特${hrs}`;
+            } else if (type === '特休＋時間休') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              const spHrs = req?.details?.specialHours ?? 0;
+              const hrHrs = req?.details?.hourlyHours ?? 0;
+              label = `特${spHrs}時${hrHrs}`;
             } else if (type === '夏季休暇') {
               cellStyle = 'background-color: #fefce8; color: #ca8a04;';
               label = '夏';
             } else if (type === '時間休' || type === '時間給') {
               cellStyle = 'background-color: #f0fdf4; color: #16a34a;';
-              label = '時';
+              const hrs = req?.hours ? `${req.hours}` : '';
+              label = `時${hrs}`;
             } else if (type === '欠勤') {
               cellStyle = 'background-color: #fff7ed; color: #ea580c;';
               label = '欠';
@@ -229,9 +230,9 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           <span><span style="display:inline-block;width:14px;height:14px;background:#ffffff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>出 = 出勤</span>
           <span><span style="display:inline-block;width:14px;height:14px;background:#fef2f2;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>公 = 公休</span>
           <span><span style="display:inline-block;width:14px;height:14px;background:#f0fdf4;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>年 = 年休</span>
-          <span><span style="display:inline-block;width:14px;height:14px;background:#eff6ff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>特 = 特休</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#eff6ff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>特 = 特休(時間数)</span>
           <span><span style="display:inline-block;width:14px;height:14px;background:#fefce8;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>夏 = 夏季休暇</span>
-          <span><span style="display:inline-block;width:14px;height:14px;background:#f0fdf4;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>前/後/時 = 午前休/午後休/時間休</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#f0fdf4;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>時 = 時間休(時間数)</span>
         </div>
       `;
 
