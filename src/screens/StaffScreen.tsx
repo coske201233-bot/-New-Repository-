@@ -82,20 +82,21 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   }, [fetchShifts, activeDate]);
 
   // --- [CRITICAL: FORCE RE-FETCH ON FOCUS & DEBUG] ---
+  const runDebugFetch = async () => {
+    try {
+      const { data, error } = await supabase.from('staff').select('*');
+      if (error) {
+        console.error("FETCH ERROR:", error);
+      } else if (data) {
+        setDebugStaffList(data);
+      }
+    } catch (e) {
+      console.error("DEBUG FETCH EXCEPTION:", e);
+    }
+  };
+
   // タブが切り替わってこのコンポーネントがマウントされるたびにクラウドから最新データを取得します
   useEffect(() => {
-    const runDebugFetch = async () => {
-      try {
-        const { data, error } = await supabase.from('staff').select('*');
-        if (error) {
-          console.error("FETCH ERROR:", error);
-        } else if (data) {
-          setDebugStaffList(data);
-        }
-      } catch (e) {
-        console.error("DEBUG FETCH EXCEPTION:", e);
-      }
-    };
     runDebugFetch();
   }, []);
 
@@ -153,6 +154,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   };
 
   const fetchStaff = async () => {
+    await runDebugFetch();
     if (props.onForceCloudSync) {
       await props.onForceCloudSync();
     }
@@ -182,7 +184,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         placement: regPlacement,
         status:regStatus,
         no_holiday: regHolidaySetting,
-        is_approved: isMasterAdmin || regStatus === '承認済み',
+        is_approved: editingStaff ? (editingStaff.is_approved ?? editingStaff.isApproved ?? true) : true,
       };
 
       const timeoutPromise = new Promise((_, reject) =>
@@ -218,10 +220,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         }
 
         setStatusMsg('🎉 変更を保存しました！');
-        if (props.onForceCloudSync) {
-          props.onForceCloudSync();
-        }
-        setTimeout(() => { setStatusMsg(''); }, 3000);
+        await fetchStaff();
+        setTimeout(() => { 
+          setStatusMsg(''); 
+          setIsRegistrationModalVisible(false);
+          setEditingStaff(null);
+        }, 1000);
       }
     } catch (error: any) {
       console.error("INSERT ERROR:", error);
