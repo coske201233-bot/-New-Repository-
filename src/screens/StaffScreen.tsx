@@ -143,12 +143,22 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     setEditingStaff(staffToEdit);
     setRegName(staffToEdit.name || '');
     setRegEmail(staffToEdit.email || '');
-    setRegAppRole(staffToEdit.permissions?.includes('管理者') ? '管理者' : '一般スタッフ');
-    setRegTitle(staffToEdit.role || '主事');
-    setRegJobType(staffToEdit.jobType || 'PT');
+    
+    // アプリ権限: DBの role カラム（"管理者,スタッフ" 等）を基に判定
+    const isUserAdmin = staffToEdit.role?.includes('管理者') || staffToEdit.permissions?.includes('管理者');
+    setRegAppRole(isUserAdmin ? '管理者' : '一般スタッフ');
+
+    // 役職: DBの position カラムの値を優先、無い場合は role からのフォールバック
+    setRegTitle(staffToEdit.position || (TITLES.includes(staffToEdit.role) ? staffToEdit.role : '主事'));
+
+    // 職種: DBの profession カラムの値を優先
+    setRegJobType(staffToEdit.profession || staffToEdit.jobType || 'PT');
+
     setRegPlacement(staffToEdit.placement || '4F');
     setRegStatus(staffToEdit.status || '常勤');
-    setRegHolidaySetting(!!staffToEdit.noHoliday);
+    
+    // 休日設定: DBの no_holiday カラムの値を優先
+    setRegHolidaySetting(!!(staffToEdit.no_holiday ?? staffToEdit.noHoliday));
     
     setIsRegistrationModalVisible(true);
   };
