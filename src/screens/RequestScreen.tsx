@@ -112,21 +112,28 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
   const handleSubmit = async () => {
     setFormError('');
 
-    const isSinglePairType = ['公休変更', '休日出勤変更', '1日振替', '半日振替', '振替＋時間休'].includes(newRequest.type);
+    // '公休変更' と '休日出勤変更' のみペア日付（変更日＋変更希望日）を要求する
+    const isSinglePairType = ['公休変更', '休日出勤変更'].includes(newRequest.type);
     const isDoublePairType = newRequest.type === '休日出勤＋公休変更';
 
     if (isDoublePairType) {
       if (!workOriginalDate || !workTargetDate || !offOriginalDate || !offTargetDate) {
-        setFormError('休日出勤の「変更日」「変更希望日」および公休の「変更日」「変更希望日」の全てを選択してください');
+        const msg = '休日出勤の「変更日」「変更希望日」および公休の「変更日」「変更希望日」の全てを選択してください';
+        setFormError(msg);
+        if (Platform.OS === 'web') window.alert(msg);
         return;
       }
     } else if (isSinglePairType) {
       if (!originalDate || !targetDate) {
-        setFormError('「変更日」と「変更希望日」の両方を選択してください');
+        const msg = '「変更日」と「変更希望日」の両方を選択してください';
+        setFormError(msg);
+        if (Platform.OS === 'web') window.alert(msg);
         return;
       }
     } else if (!newRequest.date) {
-      setFormError('日付を入力してください');
+      const msg = '日付を選択してください';
+      setFormError(msg);
+      if (Platform.OS === 'web') window.alert(msg);
       return;
     }
     
@@ -468,7 +475,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                     </TouchableOpacity>
                   </View>
                 </View>
-              ) : ['公休変更', '休日出勤変更', '1日振替', '半日振替', '振替＋時間休'].includes(newRequest.type) ? (
+              ) : ['公休変更', '休日出勤変更'].includes(newRequest.type) ? (
                 <View style={{ gap: 16, marginBottom: 16 }}>
                   <View style={styles.inputGroup}>
                     <ThemeText variant="label">① 変更日（元の予定日）</ThemeText>
