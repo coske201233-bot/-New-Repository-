@@ -128,8 +128,17 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
       duration = MORNING_H;
     } else if (newRequest.type === '午後休' || newRequest.type === '半日振替') {
       duration = AFTERNOON_H;
-    } else if (newRequest.type === '1日振替' || newRequest.type === '年休' || newRequest.type === '夏季休暇' || newRequest.type === '振替' || newRequest.type === '振替＋時間休') {
-      duration = 7.75;
+    } else if (
+      newRequest.type === '1日振替' || 
+      newRequest.type === '年休' || 
+      newRequest.type === '公休' || 
+      newRequest.type === '公休変更' || 
+      newRequest.type === '夏季休暇' || 
+      newRequest.type === '振替' || 
+      newRequest.type === '振替＋時間休' ||
+      newRequest.type === '休日出勤＋公休変更'
+    ) {
+      duration = isFiscalYear ? 7.5 : 7.75;
     } else if (newRequest.type === '特休＋時間休') {
       duration = specialHours + hourlyHours;
       detailsPayload = { specialHours, hourlyHours };
@@ -324,7 +333,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
               <View style={styles.inputGroup}>
                 <ThemeText variant="label">種類</ThemeText>
                 <View style={styles.typeSelector}>
-                  {['年休', '時間休', '振替', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張', '休日時間外'].map((t) => (
+                  {['年休', '時間休', '公休変更', '休日出勤＋公休変更', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張', '休日時間外'].map((t) => (
                     <TouchableOpacity 
                       key={t}
                       style={[styles.typeOption, newRequest.type === t && styles.typeOptionActive]}
