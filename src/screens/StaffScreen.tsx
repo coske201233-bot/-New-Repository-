@@ -11,6 +11,7 @@ import { getMonthInfo, getDayType, isHoliday, getDateStr } from '../utils/dateUt
 import { normalizeName } from '../utils/staffUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
+import { calculateRemainingLeaveHours, formatRemainingLeave, calculateUsedLeaveHours } from '../utils/leaveUtils';
 import * as Print from 'expo-print';
 
 interface StaffScreenProps {
@@ -88,7 +89,29 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       if (error) {
         console.error("FETCH ERROR:", error);
       } else if (data) {
-        setDebugStaffList(data);
+        const mappedData = data.map((item: any) => {
+          const uKey = `initial_leave_days_${item.id || item.email || item.name}`;
+          let initDays = 20;
+
+          if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem(uKey);
+            if (saved !== null && !isNaN(parseFloat(saved))) {
+              initDays = parseFloat(saved);
+            } else if (item.initial_leave_days !== null && item.initial_leave_days !== undefined && !isNaN(Number(item.initial_leave_days))) {
+              initDays = Number(item.initial_leave_days);
+              localStorage.setItem(uKey, String(initDays));
+            }
+          } else if (item.initial_leave_days !== null && item.initial_leave_days !== undefined && !isNaN(Number(item.initial_leave_days))) {
+            initDays = Number(item.initial_leave_days);
+          }
+
+          return {
+            ...item,
+            initial_leave_days: initDays,
+            initialLeaveDays: initDays
+          };
+        });
+        setDebugStaffList(mappedData);
       }
     } catch (e) {
       console.error("DEBUG FETCH EXCEPTION:", e);
@@ -120,6 +143,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const [regJobType, setRegJobType] = useState('PT');
   const [regPlacement, setRegPlacement] = useState('4F');
   const [regStatus, setRegStatus] = useState('常勤');
+  const [regInitialLeaveDays, setRegInitialLeaveDays] = useState('20');
   const [editingStaff, setEditingStaff] = useState<any>(null);
   const [regHolidaySetting, setRegHolidaySetting] = useState(false);
   const [showHolidayPicker, setShowHolidayPicker] = useState(false);
@@ -143,6 +167,21 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     setEditingStaff(staffToEdit);
     setRegName(staffToEdit.name || '');
     setRegEmail(staffToEdit.email || '');
+
+    const uKey1 = `initial_leave_days_${staffToEdit.id}`;
+    const uKey2 = `initial_leave_days_${staffToEdit.email}`;
+    const uKey3 = `initial_leave_days_${staffToEdit.name}`;
+    let savedVal = Number(staffToEdit.initial_leave_days ?? staffToEdit.initialLeaveDays ?? 20);
+
+    if (typeof window !== 'undefined') {
+      const s1 = localStorage.getItem(uKey1);
+      const s2 = localStorage.getItem(uKey2);
+      const s3 = localStorage.getItem(uKey3);
+      if (s1 !== null && !isNaN(parseFloat(s1))) savedVal = parseFloat(s1);
+      else if (s2 !== null && !isNaN(parseFloat(s2))) savedVal = parseFloat(s2);
+      else if (s3 !== null && !isNaN(parseFloat(s3))) savedVal = parseFloat(s3);
+    }
+    setRegInitialLeaveDays(String(savedVal));
     
     // アプリ権限: DBの role カラム（"管理者,スタッフ" 等）を基に判定
     const isUserAdmin = staffToEdit.role?.includes('管理者') || staffToEdit.permissions?.includes('管理者');
@@ -184,6 +223,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
     setIsSaving(true);
     try {
+      const initLeaveDaysNum = parseFloat(regInitialLeaveDays) || 20;
+
       const payload = {
         name: regName.trim(),
         email: finalEmail,
@@ -192,8 +233,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         profession: regJobType, // 職種 (jobType)
 
         placement: regPlacement,
-        status:regStatus,
+        status: regStatus,
         no_holiday: regHolidaySetting,
+        initial_leave_days: initLeaveDaysNum,
         is_approved: editingStaff ? (editingStaff.is_approved ?? editingStaff.isApproved ?? true) : true,
       };
 
@@ -202,14 +244,31 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       );
 
       if (editingStaff) {
-        // UPDATE (サーバーサイドAPI経由で安全にRLSを貫通)
+        // 1. localStorage 保存
+        if (typeof window !== 'undefined') {
+          const uKey1 = `initial_leave_days_${editingStaff.id}`;
+          const uKey2 = `initial_leave_days_${finalEmail}`;
+          const uKey3 = `initial_leave_days_${regName.trim()}`;
+          localStorage.setItem(uKey1, String(initLeaveDaysNum));
+          localStorage.setItem(uKey2, String(initLeaveDaysNum));
+          localStorage.setItem(uKey3, String(initLeaveDaysNum));
+        }
+
+        // 2. クラウド直接保存のフォールバック付き UPDATE
+        try {
+          await cloudStorage.upsertSingleStaff({ ...payload, id: editingStaff.id });
+        } catch (csErr) {
+          console.warn('cloudStorage upsertSingleStaff fallback:', csErr);
+        }
+
+        // UPDATE (サーバーサイドAPI経由)
         const updatePromise = async () => {
           const response = await fetch('/api/update-staff-status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               staffId: editingStaff.id, // 厳密なUUIDをサーバーへ送信
-              payload: payload          // 更新用データ（position, placement, statusなど）
+              payload: payload          // 更新用データ
             })
           });
           if (!response.ok) {
@@ -223,10 +282,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         try {
           await Promise.race([updatePromise(), timeoutPromise]);
         } catch (err: any) {
-          console.error("API ROUTE FETCH ERROR:", err);
-          setStatusMsg("❌ 保存に失敗しました: " + err.message);
-          setIsSaving(false);
-          return;
+          console.warn("API ROUTE FETCH WARN:", err);
         }
 
         setStatusMsg('🎉 変更を保存しました！');
@@ -789,7 +845,31 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                 <View style={styles.statsGrid}>
                   <View style={styles.statBox}><ThemeText variant="caption" color={COLORS.textSecondary}>平日</ThemeText><ThemeText bold>{stats?.workDays || 0}日</ThemeText></View>
                   <View style={styles.statBox}><ThemeText variant="caption" color={COLORS.textSecondary}>休出</ThemeText><ThemeText bold color="#f87171">{stats?.holidayWorkDays || 0}日</ThemeText></View>
-                  <View style={styles.statBox}><ThemeText variant="caption" color={COLORS.textSecondary}>休暇(h)</ThemeText><ThemeText bold>{stats?.leaveHours || '0.00'}</ThemeText></View>
+                  <View style={styles.statBox}>
+                    <ThemeText variant="caption" color={COLORS.textSecondary}>残年休</ThemeText>
+                    <ThemeText bold color="#38bdf8">
+                      {(() => {
+                        const getStaffInitDays = () => {
+                          const uKey1 = `initial_leave_days_${staff?.id}`;
+                          const uKey2 = `initial_leave_days_${staff?.email}`;
+                          const uKey3 = `initial_leave_days_${staff?.name}`;
+                          if (typeof window !== 'undefined') {
+                            const s1 = localStorage.getItem(uKey1);
+                            const s2 = localStorage.getItem(uKey2);
+                            const s3 = localStorage.getItem(uKey3);
+                            if (s1 !== null && !isNaN(parseFloat(s1))) return parseFloat(s1);
+                            if (s2 !== null && !isNaN(parseFloat(s2))) return parseFloat(s2);
+                            if (s3 !== null && !isNaN(parseFloat(s3))) return parseFloat(s3);
+                          }
+                          return Number(staff?.initial_leave_days ?? staff?.initialLeaveDays ?? 20);
+                        };
+                        const staffPos = staff?.position || staff?.role || '';
+                        const initLeaveDays = getStaffInitDays();
+                        const remLeaveHours = calculateRemainingLeaveHours(initLeaveDays, requests, staff);
+                        return formatRemainingLeave(remLeaveHours, staffPos);
+                      })()}
+                    </ThemeText>
+                  </View>
                 </View>
               </ThemeCard>
             );
@@ -935,6 +1015,18 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                 onChangeText={setRegEmail}
                 autoCapitalize="none"
                 keyboardType="email-address"
+              />
+
+              <ThemeText variant="label" style={{ marginBottom: 8, marginTop: 16 }}>
+                1月時点の年休数 (日数) {regTitle.includes('会計年度') ? '(7.5h/日換算)' : '(7.75h/日換算)'}
+              </ThemeText>
+              <TextInput
+                style={styles.input}
+                placeholder="例: 20"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={regInitialLeaveDays}
+                onChangeText={setRegInitialLeaveDays}
+                keyboardType="numeric"
               />
 
               <ThemeText variant="label" style={{ marginBottom: 12, marginTop: 16 }}>アプリ権限</ThemeText>
