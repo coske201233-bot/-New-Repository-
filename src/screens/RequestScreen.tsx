@@ -296,7 +296,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   )}
                   <View style={styles.infoRow}>
                     <CalendarIcon size={14} color={COLORS.textSecondary} />
-                    <ThemeText variant="body" style={styles.infoText}>{formatDate(item.date)}</ThemeText>
+                    <ThemeText variant="body" style={styles.infoText}>対象日: {formatDate(item.date)}</ThemeText>
                     {item.details?.duration && (
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 12 }}>
                         <Clock size={14} color={COLORS.accent} />
@@ -304,6 +304,11 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                       </View>
                     )}
                   </View>
+                  {(item.createdAt || item.created_at || item.details?.createdAt) ? (
+                    <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 2, fontSize: 11 }}>
+                      申請日: {formatDate(item.createdAt || item.created_at || item.details?.createdAt)}
+                    </ThemeText>
+                  ) : null}
                   <ThemeText variant="caption" color={COLORS.textSecondary} style={styles.reasonText}>
                     詳細: {item.reason || 'なし'}
                   </ThemeText>

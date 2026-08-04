@@ -143,7 +143,12 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
                   </View>
                   <View>
                     <ThemeText bold>{item.staffName}</ThemeText>
-                    <ThemeText variant="caption" color={COLORS.textSecondary}>{formatDate(item.date)}</ThemeText>
+                    <ThemeText variant="caption" color={COLORS.textSecondary}>対象日: {formatDate(item.date)}</ThemeText>
+                    {(item.createdAt || item.created_at || item.details?.createdAt) ? (
+                      <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>
+                        申請日: {formatDate(item.createdAt || item.created_at || item.details?.createdAt)}
+                      </ThemeText>
+                    ) : null}
                   </View>
                 </View>
                 <View style={[
