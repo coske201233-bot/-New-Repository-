@@ -34,6 +34,9 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
   });
   const [specialHours, setSpecialHours] = useState(1.0);
   const [hourlyHours, setHourlyHours] = useState(1.0);
+  const [originalDate, setOriginalDate] = useState('');
+  const [targetDate, setTargetDate] = useState('');
+  const [activeDateField, setActiveDateField] = useState<'single' | 'original' | 'target'>('single');
   const [formError, setFormError] = useState('');
 
   React.useEffect(() => {
@@ -104,7 +107,15 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
 
   const handleSubmit = async () => {
     setFormError('');
-    if (!newRequest.date) {
+
+    const isChangePairType = ['公休変更', '休日出勤＋公休変更', '1日振替', '半日振替', '振替＋時間休'].includes(newRequest.type);
+
+    if (isChangePairType) {
+      if (!originalDate || !targetDate) {
+        setFormError('変更元の日付と変更先の日付の両方を選択してください');
+        return;
+      }
+    } else if (!newRequest.date) {
       setFormError('日付を入力してください');
       return;
     }
@@ -146,15 +157,17 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
       duration = newRequest.hours;
     }
 
+    if (isChangePairType) {
+      detailsPayload = { ...(detailsPayload || {}), originalDate, targetDate };
+    }
+
     setIsSubmitting(true);
     
     try {
-      const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated;
-      
       const requestPayload = {
         type: newRequest.type,
-        date: newRequest.date,
-        reason: newRequest.reason,
+        date: isChangePairType ? targetDate : newRequest.date,
+        reason: newRequest.reason || (isChangePairType ? `${formatDate(originalDate)} → ${formatDate(targetDate)} 変更` : ''),
         hours: duration, // 常にトップレベル of hoursカラムを使用
         details: detailsPayload
       };
@@ -164,6 +177,8 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
         if (success) {
           setShowForm(false);
           setNewRequest({ type: '年休', date: '', reason: '', startTime: '08:30', endTime: '17:15', hours: 1.0 });
+          setOriginalDate('');
+          setTargetDate('');
         }
       } else {
         // フォールバック（通常は App.tsx から渡されるはず）
@@ -390,18 +405,57 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 </View>
               )}
   
-              <View style={styles.inputGroup}>
-                <ThemeText variant="label">日付</ThemeText>
-                <TouchableOpacity 
-                  style={styles.dateSelectorBtn} 
-                  onPress={() => setIsDateModalVisible(true)}
-                >
-                  <CalendarIcon size={18} color={COLORS.primary} />
-                  <ThemeText style={{ marginLeft: 12 }}>
-                    {newRequest.date ? formatDate(newRequest.date) : 'タップして日付を選択'}
-                  </ThemeText>
-                </TouchableOpacity>
-              </View>
+              {['公休変更', '休日出勤＋公休変更', '1日振替', '半日振替', '振替＋時間休'].includes(newRequest.type) ? (
+                <View style={{ gap: 16, marginBottom: 16 }}>
+                  <View style={styles.inputGroup}>
+                    <ThemeText variant="label">① 変更元の日（元々の予定日・公休日）</ThemeText>
+                    <TouchableOpacity 
+                      style={styles.dateSelectorBtn} 
+                      onPress={() => {
+                        setActiveDateField('original');
+                        setIsDateModalVisible(true);
+                      }}
+                    >
+                      <CalendarIcon size={18} color="#f87171" />
+                      <ThemeText style={{ marginLeft: 12, color: originalDate ? COLORS.text : COLORS.border }}>
+                        {originalDate ? formatDate(originalDate) : 'タップして変更元の日を選択'}
+                      </ThemeText>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <ThemeText variant="label">② 変更先の日（振り替える日・出勤/公休日）</ThemeText>
+                    <TouchableOpacity 
+                      style={styles.dateSelectorBtn} 
+                      onPress={() => {
+                        setActiveDateField('target');
+                        setIsDateModalVisible(true);
+                      }}
+                    >
+                      <CalendarIcon size={18} color="#38bdf8" />
+                      <ThemeText style={{ marginLeft: 12, color: targetDate ? COLORS.text : COLORS.border }}>
+                        {targetDate ? formatDate(targetDate) : 'タップして変更先の日を選択'}
+                      </ThemeText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.inputGroup}>
+                  <ThemeText variant="label">日付</ThemeText>
+                  <TouchableOpacity 
+                    style={styles.dateSelectorBtn} 
+                    onPress={() => {
+                      setActiveDateField('single');
+                      setIsDateModalVisible(true);
+                    }}
+                  >
+                    <CalendarIcon size={18} color={COLORS.primary} />
+                    <ThemeText style={{ marginLeft: 12 }}>
+                      {newRequest.date ? formatDate(newRequest.date) : 'タップして日付を選択'}
+                    </ThemeText>
+                  </TouchableOpacity>
+                </View>
+              )}
   
               <View style={styles.inputGroup}>
                 <ThemeText variant="label">詳細（特別な理由がある場合）</ThemeText>
@@ -426,7 +480,9 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <ThemeText variant="h2">日付を選択</ThemeText>
+              <ThemeText variant="h2">
+                {activeDateField === 'original' ? '変更元の日を選択' : activeDateField === 'target' ? '変更先の日を選択' : '日付を選択'}
+              </ThemeText>
               <TouchableOpacity onPress={() => setIsDateModalVisible(false)}>
                 <X color={COLORS.textSecondary} size={24} />
               </TouchableOpacity>
@@ -436,16 +492,23 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 const d = new Date();
                 d.setDate(d.getDate() + i);
                 const dateStr = getDateStr(d);
+                const isSelected = activeDateField === 'original' ? originalDate === dateStr : activeDateField === 'target' ? targetDate === dateStr : newRequest.date === dateStr;
                 return (
                   <TouchableOpacity 
                     key={dateStr} 
-                    style={[styles.dateOption, newRequest.date === dateStr && styles.dateOptionActive]}
+                    style={[styles.dateOption, isSelected && styles.dateOptionActive]}
                     onPress={() => {
-                      setNewRequest({ ...newRequest, date: dateStr });
+                      if (activeDateField === 'original') {
+                        setOriginalDate(dateStr);
+                      } else if (activeDateField === 'target') {
+                        setTargetDate(dateStr);
+                      } else {
+                        setNewRequest({ ...newRequest, date: dateStr });
+                      }
                       setIsDateModalVisible(false);
                     }}
                   >
-                    <ThemeText color={newRequest.date === dateStr ? COLORS.background : COLORS.text}>{formatDate(d)}</ThemeText>
+                    <ThemeText color={isSelected ? COLORS.background : COLORS.text}>{formatDate(d)}</ThemeText>
                   </TouchableOpacity>
                 );
               })}
