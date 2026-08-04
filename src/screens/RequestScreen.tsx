@@ -171,7 +171,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     } else if (newRequest.type === '特休＋時間休') {
       duration = specialHours + hourlyHours;
       detailsPayload = { specialHours, hourlyHours };
-    } else if (newRequest.type === '時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '看護休暇' || newRequest.type === '出張' || newRequest.type === '休日時間外') {
+    } else if (newRequest.type === '時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '看護休暇' || newRequest.type === '出張') {
       duration = newRequest.hours;
     }
 
@@ -376,7 +376,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
               <View style={styles.inputGroup}>
                 <ThemeText variant="label">種類</ThemeText>
                 <View style={styles.typeSelector}>
-                  {['年休', '時間休', '公休変更', '休日出勤＋公休変更', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張', '休日時間外'].map((t) => (
+                  {['年休', '時間休', '公休変更', '休日出勤変更', '休日出勤＋公休変更', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張'].map((t) => (
                     <TouchableOpacity 
                       key={t}
                       style={[styles.typeOption, newRequest.type === t && styles.typeOptionActive]}
@@ -388,7 +388,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 </View>
               </View>
   
-              {(newRequest.type === '時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '看護休暇' || newRequest.type === '特休＋時間休' || newRequest.type === '出張' || newRequest.type === '休日時間外') && (
+              {(newRequest.type === '時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '看護休暇' || newRequest.type === '特休＋時間休' || newRequest.type === '出張') && (
                 <View style={styles.timeSelectionArea}>
                   <ThemeText variant="label" style={{ marginBottom: 12 }}>時間設定 (0.25h単位)</ThemeText>
                   {newRequest.type === '特休＋時間休' ? (
