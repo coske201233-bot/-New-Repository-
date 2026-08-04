@@ -38,6 +38,35 @@ export const formatRemainingLeave = (totalHours: number, positionOrRate?: string
 const normalize = (name?: string) => (name || '').replace(/[\s\u3000]/g, '').trim();
 
 /**
+ * 該当する申請の日付が起算期間内（通常職員: 1月1日〜, 会計年度職員: 4月1日〜）に含まれるか判定します
+ */
+export const isLeaveDateInFiscalPeriod = (
+  dateStr?: string, 
+  isFiscalYear: boolean = false, 
+  referenceDate: Date = new Date()
+): boolean => {
+  if (!dateStr) return true;
+  
+  const cleanDateStr = dateStr.split('T')[0];
+  const d = new Date(cleanDateStr.replace(/-/g, '/'));
+  if (isNaN(d.getTime())) return true;
+
+  const currentYear = referenceDate.getFullYear();
+  const currentMonth = referenceDate.getMonth() + 1;
+
+  if (isFiscalYear) {
+    // 会計年度職員: 4月1日〜
+    const fiscalStartYear = currentMonth >= 4 ? currentYear : currentYear - 1;
+    const startDate = new Date(fiscalStartYear, 3, 1); // 4月1日
+    return d >= startDate;
+  } else {
+    // 通常職員: 1月1日〜
+    const startDate = new Date(currentYear, 0, 1); // 1月1日
+    return d >= startDate;
+  }
+};
+
+/**
  * 承認された申請リストから消化年休時間数を計算します (UUID優先)
  */
 export const calculateUsedLeaveHours = (
@@ -51,10 +80,16 @@ export const calculateUsedLeaveHours = (
   const targetName = typeof staffOrId === 'object' ? normalize(staffOrId?.name) : normalize(staffOrId);
   const pos = typeof staffOrId === 'object' ? (staffOrId?.position || staffOrId?.role || position) : position;
   const hoursPerDay = getLeaveHoursPerDay(pos);
+  const isFiscalYear = pos ? pos.includes('会計年度') : false;
 
   return requests.reduce((sum, r) => {
     if (!r || r.status === 'rejected') return sum;
     
+    // 起算期間判定（通常職員: 1/1〜, 会計年度職員: 4/1〜）
+    if (!isLeaveDateInFiscalPeriod(r.date, isFiscalYear)) {
+      return sum;
+    }
+
     // 1. UUID マッチング (最優先)
     const rId = r.staffId || r.staff_id || r.userId || r.user_id;
     let isMatch = false;

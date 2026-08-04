@@ -1018,7 +1018,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
               />
 
               <ThemeText variant="label" style={{ marginBottom: 8, marginTop: 16 }}>
-                1月時点の年休数 (日数) {regTitle.includes('会計年度') ? '(7.5h/日換算)' : '(7.75h/日換算)'}
+                {regTitle.includes('会計年度') ? '4月時点の付与年休数 (日数) (7.5h/日換算)' : '1月時点の付与年休数 (日数) (7.75h/日換算)'}
               </ThemeText>
               <TextInput
                 style={styles.input}
