@@ -36,7 +36,11 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
   const [hourlyHours, setHourlyHours] = useState(1.0);
   const [originalDate, setOriginalDate] = useState('');
   const [targetDate, setTargetDate] = useState('');
-  const [activeDateField, setActiveDateField] = useState<'single' | 'original' | 'target'>('single');
+  const [workOriginalDate, setWorkOriginalDate] = useState('');
+  const [workTargetDate, setWorkTargetDate] = useState('');
+  const [offOriginalDate, setOffOriginalDate] = useState('');
+  const [offTargetDate, setOffTargetDate] = useState('');
+  const [activeDateField, setActiveDateField] = useState<'single' | 'original' | 'target' | 'workOriginal' | 'workTarget' | 'offOriginal' | 'offTarget'>('single');
   const [formError, setFormError] = useState('');
 
   React.useEffect(() => {
