@@ -36,6 +36,8 @@ export const STAFF_MAP = {
   noHoliday: 'no_holiday', 
   createdAt: 'created_at', 
   isApproved: 'is_approved', 
+  initialLeaveDays: 'initial_leave_days',
+  initial_leave_days: 'initial_leave_days',
   pin: 'pin', 
   userId: 'user_id', 
   isLocked: 'is_locked', 
@@ -71,7 +73,7 @@ export const cloudStorage = {
     const validKeys = [
       'id', 'name', 'placement', 'role', 'status', 'jobType', 'permissions', 
       'noHoliday', 'phone', 'password', 'createdAt', 'isApproved', 'pin',
-      'isLocked', 'lockedMonths'
+      'isLocked', 'lockedMonths', 'initialLeaveDays', 'initial_leave_days'
     ];
     const filtered = staff.map(s => {
       const obj: any = {};
@@ -92,7 +94,7 @@ export const cloudStorage = {
     console.log('✅ Staff synced to cloud successfully');
   },
   async upsertSingleStaff(s: any) {
-    const validKeys = ['id', 'name', 'email', 'placement', 'role', 'jobType', 'status', 'noHoliday', 'isApproved', 'permissions', 'password', 'isLocked', 'lockedMonths'];
+    const validKeys = ['id', 'name', 'email', 'placement', 'role', 'jobType', 'status', 'noHoliday', 'isApproved', 'permissions', 'password', 'isLocked', 'lockedMonths', 'initialLeaveDays', 'initial_leave_days'];
     const obj: any = {};
     validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });
     
