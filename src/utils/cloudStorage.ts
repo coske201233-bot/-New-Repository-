@@ -277,19 +277,112 @@ export const cloudStorage = {
       // 1. requests への保存 (内部でエラーはキャッチされます)
       await this.upsertRequests(requests);
       
-      // 2. shifts へのマッピングと保存
-      const shiftPayloads = requests.map(r => ({
-        id: r.id,
-        staff_id: r.staff_id || r.staffId || r.userId || r.user_id,
-        staff_name: r.staff_name || r.staffName,
-        date: r.date,
-        type: r.type,
-        status: r.status,
-        is_manual: !!(r.isManual || r.is_manual || String(r.id).startsWith('m-') || String(r.id).startsWith('req-')),
-        hours: r.hours ?? r.details?.hours ?? r.details?.duration,
-        details: r.details,
-        updated_at: r.updatedAt || r.updated_at || new Date().toISOString()
-      }));
+      // 2. shifts へのマッピングと保存（ペア変更は元日・希望日の両方のシフトへ自動反映）
+      const shiftPayloads: any[] = [];
+
+      requests.forEach(r => {
+        const staffId = r.staff_id || r.staffId || r.userId || r.user_id;
+        const staffName = r.staff_name || r.staffName;
+        const now = r.updatedAt || r.updated_at || new Date().toISOString();
+
+        if (r.type === '公休変更' && r.details?.originalDate && r.details?.targetDate) {
+          shiftPayloads.push({
+            id: `m-${staffId}-${r.details.originalDate}`,
+            staff_id: staffId,
+            staff_name: staffName,
+            date: r.details.originalDate,
+            type: '出勤',
+            status: r.status,
+            is_manual: true,
+            updated_at: now
+          });
+          shiftPayloads.push({
+            id: `m-${staffId}-${r.details.targetDate}`,
+            staff_id: staffId,
+            staff_name: staffName,
+            date: r.details.targetDate,
+            type: '公休',
+            status: r.status,
+            is_manual: true,
+            updated_at: now
+          });
+        } else if (r.type === '休日出勤変更' && r.details?.originalDate && r.details?.targetDate) {
+          shiftPayloads.push({
+            id: `m-${staffId}-${r.details.originalDate}`,
+            staff_id: staffId,
+            staff_name: staffName,
+            date: r.details.originalDate,
+            type: '公休',
+            status: r.status,
+            is_manual: true,
+            updated_at: now
+          });
+          shiftPayloads.push({
+            id: `m-${staffId}-${r.details.targetDate}`,
+            staff_id: staffId,
+            staff_name: staffName,
+            date: r.details.targetDate,
+            type: '休日出勤',
+            status: r.status,
+            is_manual: true,
+            updated_at: now
+          });
+        } else if (r.type === '休日出勤＋公休変更' && r.details?.workOriginalDate && r.details?.workTargetDate && r.details?.offOriginalDate && r.details?.offTargetDate) {
+          shiftPayloads.push({
+            id: `m-${staffId}-${r.details.workOriginalDate}`,
+            staff_id: staffId,
+            staff_name: staffName,
+            date: r.details.workOriginalDate,
+            type: '公休',
+            status: r.status,
+            is_manual: true,
+            updated_at: now
+          });
+          shiftPayloads.push({
+            id: `m-${staffId}-${r.details.workTargetDate}`,
+            staff_id: staffId,
+            staff_name: staffName,
+            date: r.details.workTargetDate,
+            type: '休日出勤',
+            status: r.status,
+            is_manual: true,
+            updated_at: now
+          });
+          shiftPayloads.push({
+            id: `m-${staffId}-${r.details.offOriginalDate}`,
+            staff_id: staffId,
+            staff_name: staffName,
+            date: r.details.offOriginalDate,
+            type: '出勤',
+            status: r.status,
+            is_manual: true,
+            updated_at: now
+          });
+          shiftPayloads.push({
+            id: `m-${staffId}-${r.details.offTargetDate}`,
+            staff_id: staffId,
+            staff_name: staffName,
+            date: r.details.offTargetDate,
+            type: '公休',
+            status: r.status,
+            is_manual: true,
+            updated_at: now
+          });
+        } else {
+          shiftPayloads.push({
+            id: r.id,
+            staff_id: staffId,
+            staff_name: staffName,
+            date: r.date,
+            type: r.type,
+            status: r.status,
+            is_manual: !!(r.isManual || r.is_manual || String(r.id).startsWith('m-') || String(r.id).startsWith('req-')),
+            hours: r.hours ?? r.details?.hours ?? r.details?.duration,
+            details: r.details,
+            updated_at: now
+          });
+        }
+      });
       
       await this.upsertShifts(shiftPayloads);
     } catch (err) {
