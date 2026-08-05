@@ -141,3 +141,93 @@ export const calculateRemainingLeaveHours = (
   const usedHours = calculateUsedLeaveHours(requests, staffOrId, position);
   return initialTotalHours - usedHours;
 };
+
+export interface MandatoryLeaveStatus {
+  achievedDays: number;   // 取得済み日数（0.5日単位）
+  neededDays: number;     // 残り必要な日数（0.5日単位）
+  isCompleted: boolean;   // 5日達成済みか
+  displayText: string;    // 個人カード用表示テキスト
+}
+
+/**
+ * 職員の役職・区分から午後休（半日休）の時間数を決定
+ */
+const getAfternoonHours = (position?: string, role?: string): number => {
+  const target = `${position || ''} ${role || ''}`;
+  return target.includes('会計年度') ? 3.5 : 3.75;
+};
+
+/**
+ * 年休5日必修化のカウント＆判定メイン関数
+ */
+export const calculateMandatoryLeaveStatus = (
+  staff: { id?: string; name?: string; position?: string; role?: string },
+  requests: any[],
+  referenceYear: number = new Date().getFullYear()
+): MandatoryLeaveStatus => {
+  const targetId = staff.id;
+  const targetName = (staff.name || '').replace(/[\s\u3000]/g, '').trim();
+  const afternoonHours = getAfternoonHours(staff.position, staff.role);
+
+  // 12月末までの対象年度データのみ抽出
+  const targetRequests = (requests || []).filter(r => {
+    if (!r || r.status === 'rejected' || r.status === 'deleted') return false;
+
+    const dateStr = (r.date || '').split('T')[0];
+    if (!dateStr) return false;
+    const d = new Date(dateStr.replace(/-/g, '/'));
+    if (d.getFullYear() !== referenceYear) return false;
+
+    const rId = r.staffId || r.staff_id || r.userId || r.user_id;
+    if (targetId && rId && String(targetId) === String(rId)) return true;
+
+    const rName = (r.staffName || r.staff_name || r.name || '').replace(/[\s\u3000]/g, '').trim();
+    return rName !== '' && rName === targetName;
+  });
+
+  let fullDaysCount = 0; // 1日休 (1.0)
+  let halfDaysCount = 0; // 対象となる半日休 (0.5)
+
+  targetRequests.forEach(r => {
+    const type = (r.type || r.shiftType || '').trim();
+    const hours = Number(r.hours || r.duration || r.details?.duration || 0);
+
+    // 【1】1日休 (1.0日分) ※振休などを除外し純粋な年休のみに絞り込み
+    if (['年休', '有給休暇', '年給', '有休'].includes(type)) {
+      fullDaysCount += 1.0;
+    }
+    // 【2】4時間休（午前） / 午前休 (0.5日分)
+    else if (type === '午前休' || (type === '時間休' && hours === 4.0)) {
+      halfDaysCount += 1.0;
+    }
+    // 【3】3.75h(3.5h)休 / 午後休 (0.5日分)
+    else if (type === '午後休' || (type === '時間休' && hours === afternoonHours)) {
+      halfDaysCount += 1.0;
+    }
+    // ※その他の端数（1時間休、2時間休、4.5時間休など）は一切カウントしない
+  });
+
+  // 取得済日数の算定（半日休は2回で1日、1回で0.5日として累積）
+  const achievedDays = fullDaysCount + (halfDaysCount * 0.5);
+
+  // 残り必要日数の計算（目標5日）
+  const neededDays = Math.max(0, 5.0 - achievedDays);
+  const isCompleted = neededDays <= 0;
+
+  // カード表示用テキストの生成
+  let displayText = '';
+  if (isCompleted) {
+    displayText = '年休5日取得済み';
+  } else {
+    // 0.5日単位の表記（例: 要年休4.5日、要年休4日）
+    displayText = `要年休${neededDays}日`;
+  }
+
+  return {
+    achievedDays,
+    neededDays,
+    isCompleted,
+    displayText
+  };
+};
+

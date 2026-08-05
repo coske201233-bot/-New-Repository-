@@ -11,7 +11,7 @@ import { getMonthInfo, getDayType, isHoliday, getDateStr } from '../utils/dateUt
 import { normalizeName } from '../utils/staffUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
-import { calculateRemainingLeaveHours, formatRemainingLeave, calculateUsedLeaveHours } from '../utils/leaveUtils';
+import { calculateRemainingLeaveHours, formatRemainingLeave, calculateUsedLeaveHours, calculateMandatoryLeaveStatus } from '../utils/leaveUtils';
 import * as Print from 'expo-print';
 
 interface StaffScreenProps {
@@ -869,6 +869,17 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                         return formatRemainingLeave(remLeaveHours, staffPos);
                       })()}
                     </ThemeText>
+                  </View>
+                  <View style={styles.statBox}>
+                    <ThemeText variant="caption" color={COLORS.textSecondary}>5日必修</ThemeText>
+                    {(() => {
+                      const mStatus = calculateMandatoryLeaveStatus(staff, requests, activeDate.getFullYear());
+                      return (
+                        <ThemeText bold color={mStatus.isCompleted ? '#10b981' : '#f59e0b'} style={{ fontSize: 11 }}>
+                          {mStatus.displayText}
+                        </ThemeText>
+                      );
+                    })()}
                   </View>
                 </View>
               </ThemeCard>
