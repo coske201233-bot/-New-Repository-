@@ -738,6 +738,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     const daysInMonthCount = new Date(year, month + 1, 0).getDate();
     
     let workDays = 0, holidayWorkDays = 0, leaveHours = 0;
+    const staffPos = staff.position || staff.role || '';
+    const hoursPerDay = staffPos.includes('会計年度') ? 7.5 : 7.75;
     
     for (let day = 1; day <= daysInMonthCount; day++) {
       const date = new Date(year, month, day);
@@ -764,15 +766,23 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           const isHW = req.isHolidayWork || req.details?.isHolidayWork || (getDayType(date) !== 'weekday');
           if (!isHW) workDays++; else holidayWorkDays++;
         } else {
+          const h = getReqHours(req);
+          const rType = (req.type || '').trim();
+
+          // 【特休・時間休対応】1日所定労働時間(7.75h/7.5h)に達しない短時間・一部休暇（一部特休等）は出勤日としてカウント
+          if (h > 0 && h < hoursPerDay && !['公休', '1日振替'].includes(rType) && !rType.includes('全休')) {
+            const isHW = req.isHolidayWork || req.details?.isHolidayWork || (getDayType(date) !== 'weekday');
+            if (!isHW) workDays++; else holidayWorkDays++;
+          }
+
           // [V72.7] ユーザー指示に基づき「公休」「振替」を完全に除外
           if (req.type.includes('振替') || req.type.includes('振休') || req.type === '公休') {
             continue;
           }
 
-          const h = getReqHours(req);
           // 休暇時間としてカウントする種別を限定
           const holidayTypes = ['年休', '有給休暇', '夏季休暇', '特休', '時間休', '時間給', '午前休', '午後休', '看護休暇', '年給', '有給', '特休＋時間休'];
-          if (holidayTypes.includes((req.type || '').trim())) {
+          if (holidayTypes.includes(rType)) {
             leaveHours += h;
           }
         }
