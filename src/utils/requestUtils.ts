@@ -57,12 +57,14 @@ export const deduplicateRequests = (list: any[]) => {
     if (sId === '70eb22b7-90a1-46b8-b120-0b9e67121e61') {
       sId = '902d91d7-3ae9-4b5e-8db3-a08f33c4ec7b';
     }
+    // 藤森さんのID移行に伴う救済措置 (OLD -> NEW)
+    if (sId === '8b7acf55-bfae-4007-bada-86b06ce264a0' || sId === 'b269fc7b-a386-41c8-b31b-b856a2ff560f') {
+      sId = '0f2d8ce4-ccad-471c-9e29-bccec79b1b4e';
+    }
 
     const keyBase = sId ? `${sId}-${item.date}` : `${normalizeName(item.staffName || '')}-${item.date}`;
-    
-    // 時間給は「daily」の枠とは別に保持できるようにする
-    const isHourly = item.type === '時間給';
-    const key = `${keyBase}-${isHourly ? 'hourly-' + item.id : 'daily'}`;
+    // 同日・同一スタッフにつき、最新の修正/更新が過去の古い入力を優先上書きするよう同一キー化
+    const key = keyBase;
     const existing = map.get(key);
 
     if (!existing) {
@@ -95,7 +97,7 @@ export const deduplicateRequests = (list: any[]) => {
     } else if (!isManNew && wasManOld) {
       isPriority = false; // 自動は手動を上書きできない
     } 
-    // 4. 更新時間優先 (同じ「手動」同士、または同じ「自動」同士の場合)
+    // 4. 更新時間優先 (最新の入力を優先)
     else {
       const timeNew = getTime(item);
       const timeOld = getTime(existing);
@@ -131,42 +133,6 @@ export const deduplicateRequests = (list: any[]) => {
     }
   });
 
-  // 修正後の2次パス: 優先順位の低いデータを一括排除
-  const tempResults = Array.from(map.values());
-  const dailyManuals = new Set(); // m- (管理者調整)
-  const dailyRequests = new Set(); // req- (モバイル申請)
-
-  tempResults.forEach(r => { 
-    const sId = (r.staffId || r.staff_id || r.userId || r.user_id || '').trim();
-    const key = sId ? `${sId}-${r.date}` : `${normalizeName(r.staffName || '')}-${r.date}`;
-    if (r.type !== '時間給') {
-      if (String(r.id).startsWith('m-')) {
-        dailyManuals.add(key);
-      } else if (isManual(r)) {
-        dailyRequests.add(key);
-      }
-    } 
-  });
-
-  const cleanList = tempResults.filter(r => {
-    if (r.type === '時間給') return true;
-    const sId = (r.staffId || r.staff_id || r.userId || r.user_id || '').trim();
-    const key = sId ? `${sId}-${r.date}` : `${normalizeName(r.staffName || '')}-${r.date}`;
-    
-    // 1. 管理者調整 (m-) がある場合、それ以外のすべての同日データ (req-, auto-) を排除
-    if (!String(r.id).startsWith('m-') && dailyManuals.has(key)) {
-      if (!discardedIds.includes(r.id)) discardedIds.push(r.id);
-      return false;
-    }
-    
-    // 2. 手動申請 (req-) がある場合、自動生成 (auto-) を排除
-    if (!isManual(r) && (dailyManuals.has(key) || dailyRequests.has(key))) {
-      if (!discardedIds.includes(r.id)) discardedIds.push(r.id);
-      return false;
-    }
-    
-    return true;
-  });
-
+  const cleanList = Array.from(map.values());
   return { cleanList, discardedIds };
 };

@@ -97,9 +97,9 @@ export const calculateUsedLeaveHours = (
     if (targetId && rId && String(targetId) === String(rId)) {
       isMatch = true;
     } else if (targetName) {
-      // 2. 名前による補助フォールバック
+      // 2. 名前による補助フォールバック (完全一致のみ)
       const rStaff = normalize(r.staffName || r.staff_name || r.name || '');
-      if (rStaff && (rStaff === targetName || rStaff.includes(targetName) || targetName.includes(rStaff))) {
+      if (rStaff && rStaff === targetName) {
         isMatch = true;
       }
     }
