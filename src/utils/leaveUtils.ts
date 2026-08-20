@@ -1,11 +1,41 @@
 /**
- * 年休計算ユーティリティ (ステップ 1: 独立計算エンジン)
- * 通常職員: 1日 = 7.75時間
- * 会計年度職員: 1日 = 7.5時間
+ * 年休計算ユーティリティ
+ * 通常職員: 1日 = 7.75時間 (1/1起算)
+ * 会計年度職員: 1日 = 7.50時間 (4/1起算)
  */
 
 export const HOURS_PER_DAY = 7.75;
 export const FISCAL_YEAR_HOURS_PER_DAY = 7.5;
+
+export const normalizeName = (name: string): string => {
+  if (!name || typeof name !== 'string') return '';
+  let n = name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '');
+  n = n.replace(/條/g, '条').replace(/齊/g, '斉').replace(/齋/g, '斎');
+  return n.toUpperCase();
+};
+
+// イニシャルと実名のエイリアスマッピング表（過去の氏名表記揺れ・UUID未設定レコードの完全救済用）
+const STAFF_ALIASES: Record<string, string[]> = {
+  'SA': ['SA', '佐久間'],
+  'YS': ['YS', '吉田'],
+  'SC': ['SC', '坂下'],
+  'MI': ['MI', '三井', '三井諒'],
+  'AE': ['AE', '阿部'],
+  'FU': ['FU', '藤森', '藤森渓', '藤森 渓'],
+  'SS': ['SS', '佐藤公貴', '佐藤 公貴', '佐藤公'],
+  'SK': ['SK', '佐藤'],
+  'NA': ['NA', '中野'],
+  'KO': ['KO'],
+  'MA': ['MA'],
+  '小笠原': ['小笠原'],
+  '森田': ['森田'],
+  '大沼': ['大沼'],
+  '辻': ['辻'],
+  '久保田': ['久保田'],
+  '鈴木': ['鈴木'],
+  '山川': ['山川'],
+  '南條': ['南條', '南条'],
+};
 
 /**
  * 役職/職種に基づき1日あたりの勤務時間（年休換算率）を取得します
@@ -29,13 +59,12 @@ export const formatRemainingLeave = (totalHours: number, positionOrRate?: string
   const absHours = Math.abs(totalHours);
   
   const days = Math.floor(absHours / rate);
-  const hours = absHours % rate;
+  const rawRemainingHours = absHours - (days * rate);
+  const hours = Math.round(rawRemainingHours * 100) / 100;
   
   const formattedStr = `${days}日${hours.toFixed(2)}時間`;
   return isNegative ? `-${formattedStr}` : formattedStr;
 };
-
-const normalize = (name?: string) => (name || '').replace(/[\s\u3000]/g, '').trim();
 
 /**
  * 該当する申請の日付が起算期間内（通常職員: 1月1日〜, 会計年度職員: 4月1日〜）に含まれるか判定します
@@ -67,7 +96,55 @@ export const isLeaveDateInFiscalPeriod = (
 };
 
 /**
- * 承認された申請リストから消化年休時間数を計算します (UUID優先)
+ * スタッフと申請レコードの一致判定 (UUID最優先 ＋ メール/エイリアス/名前照合)
+ */
+export const isStaffMatchRequest = (staffOrId: any, request: any): boolean => {
+  if (!staffOrId || !request) return false;
+
+  const targetId = typeof staffOrId === 'string' ? staffOrId : (staffOrId?.id || staffOrId?.userId || staffOrId?.user_id);
+  const targetName = typeof staffOrId === 'object' ? normalizeName(staffOrId?.name || '') : normalizeName(staffOrId);
+  const targetEmail = typeof staffOrId === 'object' ? (staffOrId?.email || '').toLowerCase() : '';
+  const emailPrefix = targetEmail ? targetEmail.split('@')[0].toUpperCase() : '';
+
+  // 1. UUID マッチング (最優先)
+  const rId = request.staffId || request.staff_id || request.userId || request.user_id;
+  if (targetId && rId && String(targetId) === String(rId)) {
+    return true;
+  }
+
+  // レコードID内にUUIDが含まれている場合の判定
+  const reqRecordId = String(request.id || '');
+  if (targetId && reqRecordId.includes(String(targetId))) {
+    return true;
+  }
+
+  // 2. 申請側の名前取得
+  const rStaffNameRaw = request.staffName || request.staff_name || request.name || '';
+  const rStaffName = normalizeName(rStaffNameRaw);
+  if (!rStaffName) return false;
+
+  // 3. 名前完全一致
+  if (targetName && rStaffName === targetName) {
+    return true;
+  }
+
+  // 4. メールプレフィックス一致 (例: sa, ys, morita, kubota)
+  if (emailPrefix && rStaffName === emailPrefix) {
+    return true;
+  }
+
+  // 5. エイリアスマッピング照合 (SA <=> 佐久間, YS <=> 吉田, MI <=> 三井 など)
+  const rawStaffName = typeof staffOrId === 'object' ? (staffOrId?.name || '') : staffOrId;
+  const aliases = STAFF_ALIASES[rawStaffName] || [rawStaffName];
+  if (aliases.some(a => normalizeName(a) === rStaffName)) {
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * 承認された申請リストから消化年休時間数を計算します (カレンダー表示と完全一致する日別優先度解決エンジン)
  */
 export const calculateUsedLeaveHours = (
   requests: any[], 
@@ -76,54 +153,91 @@ export const calculateUsedLeaveHours = (
 ): number => {
   if (!Array.isArray(requests) || !staffOrId) return 0;
 
-  const targetId = typeof staffOrId === 'string' ? staffOrId : (staffOrId?.id || staffOrId?.userId || staffOrId?.user_id);
-  const targetName = typeof staffOrId === 'object' ? normalize(staffOrId?.name) : normalize(staffOrId);
   const pos = typeof staffOrId === 'object' ? (staffOrId?.position || staffOrId?.role || position) : position;
   const hoursPerDay = getLeaveHoursPerDay(pos);
   const isFiscalYear = pos ? pos.includes('会計年度') : false;
 
-  return requests.reduce((sum, r) => {
-    if (!r || r.status === 'rejected') return sum;
-    
-    // 起算期間判定（通常職員: 1/1〜, 会計年度職員: 4/1〜）
-    if (!isLeaveDateInFiscalPeriod(r.date, isFiscalYear)) {
-      return sum;
-    }
+  // カレンダー画面と同一の日付別最優先レコード解決 (Day Map)
+  const dayMap = new Map<string, any>();
 
-    // 1. UUID マッチング (最優先)
-    const rId = r.staffId || r.staff_id || r.userId || r.user_id;
-    let isMatch = false;
+  const isManualEntry = (rec: any) => 
+    !!(rec?.is_manual || rec?.isManual) || 
+    String(rec?.id || '').startsWith('m-') || 
+    String(rec?.id || '').startsWith('manual-') || 
+    String(rec?.id || '').startsWith('req-');
 
-    if (targetId && rId && String(targetId) === String(rId)) {
-      isMatch = true;
-    } else if (targetName) {
-      // 2. 名前による補助フォールバック (完全一致のみ)
-      const rStaff = normalize(r.staffName || r.staff_name || r.name || '');
-      if (rStaff && rStaff === targetName) {
-        isMatch = true;
+  const getTime = (i: any) => {
+    const t = i?.updatedAt || i?.updated_at || i?.createdAt || i?.created_at || 0;
+    return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
+  };
+
+  requests.forEach(r => {
+    if (!r || !r.date || r.status === 'rejected' || r.status === 'deleted') return;
+    if (!isLeaveDateInFiscalPeriod(r.date, isFiscalYear)) return;
+    if (!isStaffMatchRequest(staffOrId, r)) return;
+
+    const dateKey = String(r.date).substring(0, 10);
+    const existing = dayMap.get(dateKey);
+
+    let isBetter = false;
+    if (!existing) {
+      isBetter = true;
+    } else {
+      const isManNew = isManualEntry(r);
+      const wasManOld = isManualEntry(existing);
+
+      if (isManNew && !wasManOld) {
+        isBetter = true;
+      } else if (!isManNew && wasManOld) {
+        isBetter = false;
+      } else if (isManNew && wasManOld) {
+        isBetter = getTime(r) > getTime(existing);
+      } else {
+        const isOffNew = !['出勤', '日勤'].includes(r?.type);
+        const isOffOld = !['出勤', '日勤'].includes(existing?.type);
+        isBetter = isOffNew && !isOffOld;
       }
     }
 
-    if (!isMatch) return sum;
-    
-    // 申請タイプごとの消化時間の算出
-    const type = (r.type || r.shiftType || '').trim();
-    if (type === '年休' || type === '有給休暇' || type === '有休' || type === '年給') {
-      return sum + hoursPerDay;
-    } else if (type === '時間休' || type === '時間給') {
-      const h = Number(r.hours || r.duration || r.details?.duration || 1);
-      return sum + (isNaN(h) ? 0 : h);
-    } else if (type === '特休＋時間休') {
-      const h = Number(r.details?.hourlyHours || r.hourlyHours || 0);
-      return sum + (isNaN(h) ? 0 : h);
-    } else if (type === '午前休') {
-      return sum + (hoursPerDay === 7.5 ? 4.0 : 4.0);
-    } else if (type === '午後休') {
-      return sum + (hoursPerDay === 7.5 ? 3.5 : 3.75);
+    if (isBetter) {
+      dayMap.set(dateKey, r);
     }
-    
-    return sum;
-  }, 0);
+  });
+
+  let totalUsedHours = 0;
+
+  dayMap.forEach((r) => {
+    const rawType = (r.type || r.shiftType || '').trim();
+    let type = rawType;
+    if (type === '時間給' || type === '時間給2') type = '時間休';
+
+    const hours = Number(r.hours ?? r.duration ?? r.details?.duration ?? r.details?.hours ?? 0);
+
+    // 【1】全日年休
+    if (['年休', '有給休暇', '有休', '年給', '有給'].includes(type)) {
+      totalUsedHours += hoursPerDay;
+    } 
+    // 【2】時間休 (0.25h単位、指定時間数)
+    else if (type === '時間休') {
+      const h = hours > 0 ? hours : 1.0;
+      totalUsedHours += (isNaN(h) ? 0 : h);
+    } 
+    // 【3】特休＋時間休 (時間休部分のみを年休から消化)
+    else if (type === '特休＋時間休') {
+      const h = Number(r.details?.hourlyHours ?? r.hourlyHours ?? 0);
+      totalUsedHours += (isNaN(h) ? 0 : h);
+    } 
+    // 【4】午前休
+    else if (type === '午前休') {
+      totalUsedHours += 4.0;
+    } 
+    // 【5】午後休
+    else if (type === '午後休') {
+      totalUsedHours += (isFiscalYear ? 3.5 : 3.75);
+    }
+  });
+
+  return totalUsedHours;
 };
 
 /**
@@ -154,12 +268,10 @@ export interface MandatoryLeaveStatus {
  * 年休5日必修化のカウント＆判定メイン関数（合計時間判定・要年休〇時間表示）
  */
 export const calculateMandatoryLeaveStatus = (
-  staff: { id?: string; name?: string; position?: string; role?: string },
+  staff: { id?: string; name?: string; position?: string; role?: string; email?: string },
   requests: any[],
   referenceYear: number = new Date().getFullYear()
 ): MandatoryLeaveStatus => {
-  const targetId = staff.id;
-  const targetName = (staff.name || '').replace(/[\s\u3000]/g, '').trim();
   const pos = `${staff.position || ''} ${staff.role || ''}`;
   const isFiscalYear = pos.includes('会計年度');
   
@@ -169,39 +281,78 @@ export const calculateMandatoryLeaveStatus = (
   // 目標時間数: 通常 38.75h (7.75 × 5), 会計年度 37.50h (7.5 × 5)
   const targetHours = hoursPerDay * 5.0;
 
-  // 12月末までの対象年度データのみ抽出
-  const targetRequests = (requests || []).filter(r => {
-    if (!r || r.status === 'rejected' || r.status === 'deleted') return false;
+  // カレンダー画面と同一の日付別最優先レコード解決 (Day Map)
+  const dayMap = new Map<string, any>();
+
+  const isManualEntry = (rec: any) => 
+    !!(rec?.is_manual || rec?.isManual) || 
+    String(rec?.id || '').startsWith('m-') || 
+    String(rec?.id || '').startsWith('manual-') || 
+    String(rec?.id || '').startsWith('req-');
+
+  const getTime = (i: any) => {
+    const t = i?.updatedAt || i?.updated_at || i?.createdAt || i?.created_at || 0;
+    return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
+  };
+
+  (requests || []).forEach(r => {
+    if (!r || !r.date || r.status === 'rejected' || r.status === 'deleted') return;
 
     const dateStr = (r.date || '').split('T')[0];
     if (!dateStr) return false;
     const d = new Date(dateStr.replace(/-/g, '/'));
-    if (d.getFullYear() !== referenceYear) return false;
+    if (d.getFullYear() !== referenceYear) return;
 
-    const rId = r.staffId || r.staff_id || r.userId || r.user_id;
-    if (targetId && rId && String(targetId) === String(rId)) return true;
+    if (!isStaffMatchRequest(staff, r)) return;
 
-    const rName = (r.staffName || r.staff_name || r.name || '').replace(/[\s\u3000]/g, '').trim();
-    return rName !== '' && rName === targetName;
+    const dateKey = dateStr;
+    const existing = dayMap.get(dateKey);
+
+    let isBetter = false;
+    if (!existing) {
+      isBetter = true;
+    } else {
+      const isManNew = isManualEntry(r);
+      const wasManOld = isManualEntry(existing);
+
+      if (isManNew && !wasManOld) {
+        isBetter = true;
+      } else if (!isManNew && wasManOld) {
+        isBetter = false;
+      } else if (isManNew && wasManOld) {
+        isBetter = getTime(r) > getTime(existing);
+      } else {
+        const isOffNew = !['出勤', '日勤'].includes(r?.type);
+        const isOffOld = !['出勤', '日勤'].includes(existing?.type);
+        isBetter = isOffNew && !isOffOld;
+      }
+    }
+
+    if (isBetter) {
+      dayMap.set(dateKey, r);
+    }
   });
 
   let usedHours = 0;
 
-  targetRequests.forEach(r => {
-    const type = (r.type || r.shiftType || '').trim();
-    const hours = Number(r.hours || r.duration || r.details?.duration || r.details?.hours || 0);
+  dayMap.forEach((r) => {
+    const rawType = (r.type || r.shiftType || '').trim();
+    let type = rawType;
+    if (type === '時間給' || type === '時間給2') type = '時間休';
+
+    const hours = Number(r.hours ?? r.duration ?? r.details?.duration ?? r.details?.hours ?? 0);
 
     // 【1】年休 (1日分)
-    if (['年休', '有給休暇', '年給', '有休'].includes(type)) {
+    if (['年休', '有給休暇', '年給', '有休', '有給'].includes(type)) {
       usedHours += hoursPerDay;
     }
     // 【2】時間休 (指定時間数)
-    else if (['時間休', '時間給', '時間給2'].includes(type)) {
+    else if (type === '時間休') {
       usedHours += (hours > 0 ? hours : 1.0);
     }
     // 【3】特休＋時間休 (時間休部分のみ)
     else if (type === '特休＋時間休') {
-      const h = Number(r.details?.hourlyHours || r.hourlyHours || 0);
+      const h = Number(r.details?.hourlyHours ?? r.hourlyHours ?? 0);
       usedHours += (isNaN(h) ? 0 : h);
     }
     // 【4】午前休
@@ -236,5 +387,6 @@ export const calculateMandatoryLeaveStatus = (
     displayText
   };
 };
+
 
 

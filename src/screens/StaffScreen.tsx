@@ -875,7 +875,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                         };
                         const staffPos = staff?.position || staff?.role || '';
                         const initLeaveDays = getStaffInitDays();
-                        const remLeaveHours = calculateRemainingLeaveHours(initLeaveDays, requests, staff);
+                        const allCalendarData = [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
+                        const remLeaveHours = calculateRemainingLeaveHours(initLeaveDays, allCalendarData, staff);
                         return formatRemainingLeave(remLeaveHours, staffPos);
                       })()}
                     </ThemeText>
@@ -883,7 +884,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                   <View style={styles.statBox}>
                     <ThemeText variant="caption" color={COLORS.textSecondary}>5日必修</ThemeText>
                     {(() => {
-                      const mStatus = calculateMandatoryLeaveStatus(staff, requests, activeDate.getFullYear());
+                      const allCalendarData = [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
+                      const mStatus = calculateMandatoryLeaveStatus(staff, allCalendarData, activeDate.getFullYear());
                       return (
                         <ThemeText bold color={mStatus.isCompleted ? '#10b981' : '#f59e0b'} style={{ fontSize: 11 }}>
                           {mStatus.displayText}
