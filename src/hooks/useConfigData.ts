@@ -48,7 +48,7 @@ export const useConfigData = () => {
 
   useEffect(() => {
     refreshConfigs();
-  }, [refreshConfigs]);
+  }, []);
 
   const updateConfigValue = useCallback(async (key: string, val: any) => {
     try {

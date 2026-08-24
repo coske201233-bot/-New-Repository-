@@ -11,6 +11,7 @@ export const useAuthSession = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isCheckingProfile, setIsCheckingProfile] = useState(true);
   const [user, setUser] = useState<any>(null);
+  const loadingProfileEmailRef = useRef<string | null>(null);
 
   // CRITICAL ARCHITECT COMMAND: Global Admin Override
   const isMasterAdminAuth = user?.email ? user.email.includes('admin@reha.local') : false;
@@ -18,7 +19,6 @@ export const useAuthSession = () => {
   
   // Replace standalone isAdminAuthenticated with forced evaluate to prevent race conditions
   const currentAdminState = !!(isGlobalAdmin || isAdminAuthenticated);
-
 
   const loadProfile = async (session: any, nameHint?: string) => {
     const userEmail = session?.user?.email;
@@ -28,13 +28,14 @@ export const useAuthSession = () => {
       return null;
     }
 
-    // Skip if profile is already loaded for this user to break loops
-    if (profile?.email === userEmail && !nameHint) {
+    // Skip if profile is already loaded or currently loading for this user to break loops
+    if ((profile?.email === userEmail || loadingProfileEmailRef.current === userEmail) && !nameHint) {
       setIsCheckingProfile(false);
       setIsInitialized(true);
       return profile;
     }
 
+    loadingProfileEmailRef.current = userEmail;
     setIsCheckingProfile(true);
     setLoadError(null);
     
@@ -126,6 +127,7 @@ export const useAuthSession = () => {
       console.error('Critical Profile Error:', e);
       return null;
     } finally {
+      loadingProfileEmailRef.current = null;
       setIsCheckingProfile(false);
       setIsInitialized(true);
     }

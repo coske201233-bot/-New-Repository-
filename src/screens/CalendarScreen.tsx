@@ -78,17 +78,18 @@ export const CalendarScreen: React.FC<any> = ({
   const [adminHourlyHours, setAdminHourlyHours] = useState(1.0);
   const [isTypeModalVisible, setIsTypeModalVisible] = useState(false);
 
+  const currentMonthKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}`;
   React.useEffect(() => {
-    // タブ切り替えや月変更時に最新データを取得
+    // 月変更時に最新データを取得
     if (fetchShifts) fetchShifts();
-  }, [fetchShifts, currentDate]);
+  }, [fetchShifts, currentMonthKey]);
 
   React.useEffect(() => {
     // If current selected date is not in the active month, reset it to the 1st of that month
     if (selectedDate.getMonth() !== currentDate.getMonth() || selectedDate.getFullYear() !== currentDate.getFullYear()) {
       setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
     }
-  }, [currentDate]);
+  }, [currentMonthKey]);
 
   const normalize = (n: string) => (n || '').replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/公費/g, '').toUpperCase();
 

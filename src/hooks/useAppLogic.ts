@@ -124,6 +124,8 @@ export const useAppLogic = () => {
             
             if (mounted) {
                 staff.setStaffList(staffData);
+                // 💡 シフトデータも初期化時に一度取得
+                shifts.fetchShifts();
             }
         } catch (error: any) {
             console.warn('Initialization notice:', error.message);
@@ -141,17 +143,6 @@ export const useAppLogic = () => {
       clearTimeout(warningTimer);
     };
   }, [auth.isAuthReady, auth.user, isInitialized]);
-
-
-
-  // シニアアーキテクト指令: 認証成功後のデータ取得 (VERSION 38.0)
-  useEffect(() => {
-    if (auth.profile && isInitialized) {
-      console.log('Auth confirmed. Refreshing protected data...');
-      fetchersRef.current.fetchRequests();
-      fetchersRef.current.fetchShifts();
-    }
-  }, [auth.profile, isInitialized]);
 
   useEffect(() => {
     if (Platform.OS === 'web' && isInitialized) {
@@ -613,36 +604,33 @@ export const useAppLogic = () => {
     handleForceSave
   }), [handleForceCloudSync, handleForceSave]);
 
-  // シニアアーキテクト指令: 認証成功後のデータ取得 (VERSION 38.0)
-  // FIXED: Added handleForceCloudSync to deps and prevented unnecessary runs
-  useEffect(() => {
-    if (auth.profile && isInitialized && !isSyncing) {
-      console.log('--- [AUTH_SYNC] Stable trigger ---');
-      handleForceCloudSync();
-    }
-  }, [auth.profile?.id, isInitialized]);
-
-  // [V76.6] 超高速リアルタイム同期設定 (弾丸仕様)
+  // [V76.6] リアルタイム同期設定（ループ防止ガード付き）
   useEffect(() => {
     if (!isInitialized) return;
     
-    console.log('--- [REALTIME] Subscribing to cloud changes (V76.6)... ---');
+    let debounceTimer: any = null;
     const channel = cloudStorage.subscribeToChanges(async (payload) => {
       const { eventType, table } = payload;
       
-      // [V76.6] useRef経由で最新の関数を呼び出す（Stale Closure 対策）
+      // 保存処理中（自分が更新中）は再取得をスキップしてループを防止
+      if (isSyncing) {
+        return;
+      }
+
       if (table === 'requests' || table === 'shifts') {
-        console.log(`--- [REALTIME_TRIGGER] Refreshing ${table} data due to ${eventType} ---`);
-        fetchersRef.current.fetchRequests();
-        fetchersRef.current.fetchShifts();
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          fetchersRef.current.fetchRequests();
+          fetchersRef.current.fetchShifts();
+        }, 500);
       }
     });
     
     return () => {
-      console.log('--- [REALTIME] Cleaning up subscription ---');
+      clearTimeout(debounceTimer);
       cloudStorage.unsubscribe(channel);
     };
-  }, [isInitialized]); // Dependency を最小限にして再接続を抑制
+  }, [isInitialized, isSyncing]);
 
   const isAppReady = isInitialized && auth.isAuthReady;
 
