@@ -96,6 +96,14 @@ export const CalendarScreen: React.FC<any> = ({
 
   const normalize = (n: string) => (n || '').replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/公費/g, '').toUpperCase();
 
+  const normalizeDate = (d: string) => {
+    if (!d) return '';
+    const clean = String(d).split('T')[0];
+    const parts = clean.split('-');
+    if (parts.length !== 3) return clean;
+    return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+  };
+
   // [V55.0] PERFECT DATA SYNC: 全てのスタッフで共通の重複排除・優先順位ロジック
   const requestMap = React.useMemo(() => {
     // [STRICT FILTER] 真実のソースである requests テーブルから却下・削除済みのIDを抽出
@@ -138,48 +146,41 @@ export const CalendarScreen: React.FC<any> = ({
     };
 
     allData.forEach((r: any) => {
-      if (!r || !r.date || r.status === 'deleted') return;
+      if (!r || !r.date || r.status === 'deleted' || r.status === '削除') return;
       
-      const dateKey = String(r.date).substring(0, 10);
+      const dateKey = normalizeDate(String(r.date));
+      if (!dateKey) return;
       if (!map.has(dateKey)) map.set(dateKey, new Map<string, any>());
       const dayMap = map.get(dateKey)!;
       
-      // [V74.4] UUID（staff_id）による紐付けを最優先。ID移行の救済処置を含む。
-      let extractedId = extractUuid(r.id);
-      
+      // [V74.4] UUID / ID による紐付け
+      const extractedId = extractUuid(r.id);
       const rawId = String(r.staff_id || r.staffId || r.user_id || r.userId || extractedId || '').trim();
       const sName = normalizeLocal(r.staffName || r.staff_name || '');
       
-      // [V76.0] UNIFIED UUID RESOLUTION:
-      // データ型を完全統一。AuthUUIDとStaffIDのズレを吸収するため、必ず名簿(staffList)を経由して一意のIDを取得する
-      // [V76.3 STRICT UUID ONLY]
-      // 厳密なUUIDマッチのみを使用。名前ベースの照合は禁止。
-      // リクエストの Auth UUID (user_id 等) から、名簿上の真の staff.id を逆引きしてキーとする。
-      let resolvedId = '';
-      const authId = rawId;
+      // スネークケース / キャメルケース / ID / 名前による柔軟なマッチング
+      let staffEntry = (staffList || []).find(s => {
+        if (!s) return false;
+        if (rawId && (s.id === rawId || s.userId === rawId || s.user_id === rawId || s.staff_id === rawId || s.staffId === rawId)) {
+          return true;
+        }
+        if (sName && normalizeLocal(s.name) === sName) {
+          return true;
+        }
+        return false;
+      });
 
-      const staffEntry = (staffList || []).find(s => 
-        s.id === authId || s.userId === authId || s.user_id === authId
-      );
+      let resolvedId = staffEntry?.id || rawId || (sName ? `name_${sName}` : '');
+      if (!resolvedId) return;
 
-      if (staffEntry?.id) {
-        resolvedId = staffEntry.id; // 真のStaff IDに解決
-      } else if (authId && authId.length > 5) {
-        resolvedId = authId; // 見つからない場合はそのまま使用
-      }
+      const normalizedReq = { 
+        ...r, 
+        staff_id: staffEntry?.id || r.staff_id || r.staffId || resolvedId, 
+        staffId: staffEntry?.id || r.staffId || r.staff_id || resolvedId,
+        staffName: staffEntry?.name || r.staffName || r.staff_name || '',
+        staff_name: staffEntry?.name || r.staff_name || r.staffName || ''
+      };
 
-      if (!resolvedId) {
-        console.warn('[V76.3] Orphan record (No UUID match found):', r);
-        return;
-      }
-
-      // [V76.4 STRICT NORMALIZATION]
-      // オブジェクト自体のIDも真のスタッフIDに上書き（正規化）して保存する
-      const normalizedReq = { ...r, staff_id: resolvedId, staffId: resolvedId };
-
-      const key = resolvedId; // キーは必ず一貫したID（staff.id）になる
-      const existing = dayMap.get(key);
-          
       const isManualEntry = (rec: any) => {
         if (!rec) return false;
         if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
@@ -195,56 +196,58 @@ export const CalendarScreen: React.FC<any> = ({
         return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
       };
 
-      let isBetter = false;
-      if (!existing) {
-        isBetter = true;
-      } else {
-        const isManNew = isManualEntry(normalizedReq);
-        const wasManOld = isManualEntry(existing);
-        const isOffNew = isOff(normalizedReq.type);
-        const isOffOld = isOff(existing.type);
-
-        if (isManNew && !wasManOld) {
-          isBetter = true; 
-        } else if (!isManNew && wasManOld) {
-          isBetter = false; 
-        } else if (isManNew && wasManOld) {
-          const timeDiff = getTime(normalizedReq) - getTime(existing);
-          if (timeDiff !== 0) {
-            isBetter = timeDiff > 0;
-          } else {
-            isBetter = true;
-          }
+      const setKeyWithPriority = (key: string) => {
+        const existing = dayMap.get(key);
+        let isBetter = false;
+        if (!existing) {
+          isBetter = true;
         } else {
-          isBetter = isOffNew && !isOffOld;
-        }
-      }
+          const isManNew = isManualEntry(normalizedReq);
+          const wasManOld = isManualEntry(existing);
+          const isOffNew = isOff(normalizedReq.type);
+          const isOffOld = isOff(existing.type);
 
-      if (isBetter) {
-        dayMap.set(key, normalizedReq);
+          if (isManNew && !wasManOld) {
+            isBetter = true; 
+          } else if (!isManNew && wasManOld) {
+            isBetter = false; 
+          } else if (isManNew && wasManOld) {
+            const timeDiff = getTime(normalizedReq) - getTime(existing);
+            if (timeDiff !== 0) {
+              isBetter = timeDiff > 0;
+            } else {
+              isBetter = true;
+            }
+          } else {
+            isBetter = isOffNew && !isOffOld;
+          }
+        }
+
+        if (isBetter) {
+          dayMap.set(key, normalizedReq);
+        }
+      };
+
+      // ID および 名前キーの両方にマッピングして検索漏れを物理的にゼロにする
+      setKeyWithPriority(resolvedId);
+      if (staffEntry?.id && staffEntry.id !== resolvedId) {
+        setKeyWithPriority(staffEntry.id);
+      }
+      if (staffEntry?.name) {
+        setKeyWithPriority(`name_${normalizeLocal(staffEntry.name)}`);
+      }
+      if (sName) {
+        setKeyWithPriority(`name_${sName}`);
       }
     });
-
-    // [V76.5 Verification Log] 全員の休暇データが正しく正規化され格納されたかを出力
-    const allLeaves: string[] = [];
-    map.forEach((dayMap, date) => {
-      dayMap.forEach((req, staffId) => {
-        const isOff = ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修', '出張', '振替＋時間休'].includes(req.type);
-        if (isOff) {
-          const staff = (staffList || []).find((s: any) => s.id === req.staff_id);
-          allLeaves.push(`${req.date} | Staff: ${staff ? staff.name : 'Unknown ID: ' + req.staff_id} | Type: ${req.type}`);
-        }
-      });
-    });
-    console.log("[All Approved Leaves in Map]:", allLeaves);
 
     return map;
-  }, [requests, shifts]);
+  }, [requests, shifts, staffList]);
 
   const isPrivileged = ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
 
     const getDetailedDayInfo = (date: Date) => {
-      const dateStr = getDateStr(date); // YYYY-MM-DD
+      const dateStr = normalizeDate(getDateStr(date)); // YYYY-MM-DD (正規化)
       const dayType = getDayType(date);
 
       const working: any[] = [];
@@ -266,10 +269,17 @@ export const CalendarScreen: React.FC<any> = ({
 
         const dayMap = requestMap.get(dateStr);
         const sId = String(staff.id || '').trim();
+        const sName = normalize(staff.name || '');
 
-        // [V76.3 STRICT UUID ONLY]
-        // 名前による照合を完全に排除。必ず staff.id に紐づくデータのみを取り出す
-        const singleReq = sId ? dayMap?.get(sId) : null;
+        // [安全な照合]: IDマッチ -> 名前マッチ -> user_idマッチ の順で検索
+        let singleReq = sId ? dayMap?.get(sId) : null;
+        if (!singleReq && sName) {
+          singleReq = dayMap?.get(`name_${sName}`) || null;
+        }
+        if (!singleReq && (staff.user_id || staff.userId)) {
+          singleReq = dayMap?.get(String(staff.user_id || staff.userId)) || null;
+        }
+
         const userRequests = singleReq ? [singleReq] : [];
         
         // 稼働としてカウントする種別の定義
@@ -462,7 +472,7 @@ export const CalendarScreen: React.FC<any> = ({
           text: '実行する', 
           style: 'destructive', 
           onPress: async () => {
-            const dateStr = getDateStr(selectedDate);
+            const dateStr = normalizeDate(getDateStr(selectedDate));
             const dayType = getDayType(selectedDate);
             
             // 1. 対象スタッフ・対象日の「手動リクエスト」をすべて特定
@@ -503,7 +513,7 @@ export const CalendarScreen: React.FC<any> = ({
   };
 
   const handleAddStaff = async (staffNames: string[]) => {
-    const dateStr = getDateStr(selectedDate);
+    const dateStr = normalizeDate(getDateStr(selectedDate));
 
     if (selectedType === '空欄') {
       const idsToDelete = requests
