@@ -467,9 +467,10 @@ export const CalendarScreen: React.FC<any> = ({
 
             // 3. shiftsテーブルからも削除
             const staff = staffList.find(s => normalizeName(s.name) === normalizeName(staffName));
-            if (staff) {
+            if (staff && staff.id) {
+              const cleanStaffId = String(staff.id).trim();
               await supabase.from('shifts').delete()
-                .eq('staff_id::text', staff.id)
+                .eq('staff_id', cleanStaffId)
                 .eq('date', dateStr)
                 .eq('is_manual', true);
             }
@@ -508,10 +509,10 @@ export const CalendarScreen: React.FC<any> = ({
 
       // [V60.9] shiftsテーブルからも該当スタッフのその日の手動シフトを確実に削除する
       const staffs = staffNames.map(name => staffList.find(s => normalizeName(s.name) === normalizeName(name)));
-      const staffIds = staffs.filter(Boolean).map(s => s.id);
+      const staffIds = staffs.filter(Boolean).map(s => String(s.id).trim()).filter(id => id.length > 0);
       if (staffIds.length > 0) {
         await supabase.from('shifts').delete()
-          .in('staff_id::text', staffIds)
+          .in('staff_id', staffIds)
           .eq('date', dateStr)
           .eq('is_manual', true);
       }

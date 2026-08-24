@@ -7,6 +7,7 @@ import { ClipboardList, Plus, Calendar as CalendarIcon, Clock, CheckCircle2, Ale
 import { formatDate, getDateStr } from '../utils/dateUtils';
 import { normalizeName } from '../utils/staffUtils';
 import { supabase } from '../utils/supabase';
+import { deleteShiftRequest } from '../utils/requestApi';
 
 interface RequestScreenProps {
   requests: any[];
@@ -59,6 +60,13 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
 
   // スタッフ本人が自分の申請を削除する関数
   const handleDeleteOwnRequest = async (id: string) => {
+    if (!id) {
+      const msg = '削除対象の申請IDが存在しません。';
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('エラー', msg);
+      return;
+    }
+
     const confirmed = Platform.OS === 'web'
       ? window.confirm('この申請記録を削除しますか？')
       : await new Promise<boolean>(resolve => {
@@ -75,11 +83,16 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     if (!confirmed) return;
 
     try {
-      const { error } = await supabase.from('requests').delete().eq('id::text', id);
-      if (error) throw error;
+      const cleanId = String(id).trim();
+
+      if (onDeleteRequest) {
+        await onDeleteRequest(cleanId);
+      } else {
+        await deleteShiftRequest(cleanId);
+      }
 
       // ローカルステートも即座に更新
-      setRequests(prev => prev.filter(r => r.id !== id));
+      setRequests(prev => prev.filter(r => r.id !== id && r.id !== cleanId));
 
       if (Platform.OS === 'web') {
         window.alert('削除しました。');
@@ -87,7 +100,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
         Alert.alert('完了', '申請記録を削除しました。');
       }
     } catch (err: any) {
-      console.error('Delete Error:', err);
+      console.error('Request Delete Error:', err);
       if (Platform.OS === 'web') {
         window.alert('削除エラー: ' + err.message);
       } else {

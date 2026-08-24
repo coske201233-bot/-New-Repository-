@@ -393,33 +393,68 @@ export const cloudStorage = {
     // 安全のため、単一更新も共通の Safe-Upsert ロジックを通す
     await this.upsertRequests([r]);
   },
-   async deleteRequest(id: string) {
-    // requests テーブルから削除
-    const { error: err1 } = await supabase.from('requests').delete().eq('id', id);
+  async deleteRequest(id: string) {
+    if (!id) {
+      throw new Error('削除対象の申請IDが存在しません。');
+    }
+
+    // UUID形式の文字列であることを確認（前後の空白等を除去）
+    const cleanId = String(id).trim();
+
+    // 1. 削除前に該当の申請データ（staff_id と date）を取得
+    const { data: targetRequest, error: fetchErr } = await supabase
+      .from('requests')
+      .select('id, staff_id, date')
+      .eq('id', cleanId)
+      .maybeSingle();
+
+    if (fetchErr) {
+      console.error('申請データの事前取得エラー:', fetchErr);
+    }
+
+    // 2. requests テーブルから削除
+    const { data, error: err1 } = await supabase.from('requests').delete().eq('id', cleanId);
     if (err1) {
-      console.error('Request deletion error:', err1);
+      console.error('Request Delete Error:', err1);
       throw err1;
     }
-    // shifts テーブルからも削除（V73.0 整合性確保）
-    const { error: err2 } = await supabase.from('shifts').delete().eq('id', id);
-    if (err2) {
-      console.error('Shift deletion error:', err2);
+
+    // 3. 連動するシフト（shifts）が存在する場合、staff_id と date の組み合わせで特定して削除
+    if (targetRequest?.staff_id && targetRequest?.date) {
+      const { error: err2 } = await supabase
+        .from('shifts')
+        .delete()
+        .match({
+          staff_id: targetRequest.staff_id,
+          date: targetRequest.date,
+        });
+
+      if (err2) {
+        console.warn('Shift Sync Delete Warning (シフトの連動削除スキップまたは警告):', err2.message);
+      }
     }
-    console.log(`✅ Record ${id} deleted from both tables.`);
+    console.log(`✅ Record ${cleanId} deleted from requests (and linked shift if existed).`);
+    return data;
   },
   async deleteRequests(ids: string[]) {
     if (!ids || ids.length === 0) return;
+    const cleanIds = ids.filter(Boolean).map(id => String(id).trim()).filter(id => id.length > 0);
+    if (cleanIds.length === 0) return;
+
     const chunkSize = 50;
-    for (let i = 0; i < ids.length; i += chunkSize) {
-      const chunk = ids.slice(i, i + chunkSize);
+    for (let i = 0; i < cleanIds.length; i += chunkSize) {
+      const chunk = cleanIds.slice(i, i + chunkSize);
 
       const { error: err1 } = await supabase.from('requests').delete().in('id', chunk);
-      if (err1) throw err1;
+      if (err1) {
+        console.error('Bulk Request Delete Error:', err1);
+        throw err1;
+      }
       // shifts から削除
       const { error: err2 } = await supabase.from('shifts').delete().in('id', chunk);
       if (err2) console.error('Bulk shift deletion error:', err2);
     }
-    console.log(`✅ ${ids.length} records deleted from both tables.`);
+    console.log(`✅ ${cleanIds.length} records deleted from both tables.`);
   },
 
   /**

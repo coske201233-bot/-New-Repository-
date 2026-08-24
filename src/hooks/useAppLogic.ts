@@ -377,12 +377,13 @@ export const useAppLogic = () => {
   const handleBulkApprove = useCallback(async (ids: string[]) => {
     try {
       if (!ids || ids.length === 0) return;
+      const cleanIds = ids.filter(Boolean).map(id => String(id).trim()).filter(id => id.length > 0);
+      if (cleanIds.length === 0) return;
 
-      const orCondition = ids.map(id => `id::text.eq.${id}`).join(',');
       const { error } = await supabase
         .from('requests')
         .update({ status: 'approved' })
-        .or(orCondition);
+        .in('id', cleanIds);
 
       if (error) throw error;
 
@@ -390,7 +391,7 @@ export const useAppLogic = () => {
 
       const now = new Date().toISOString();
       const newRequests = req.requests.map(r => {
-        if (ids.includes(r.id)) {
+        if (cleanIds.includes(String(r.id).trim())) {
           return { ...r, status: 'approved', updatedAt: now };
         }
         return r;
@@ -398,7 +399,7 @@ export const useAppLogic = () => {
       req.setRequests(newRequests);
 
       // V73.0: shiftsテーブルも一括更新して不整合を防止
-      const approvedItems = newRequests.filter(r => ids.includes(r.id));
+      const approvedItems = newRequests.filter(r => cleanIds.includes(String(r.id).trim()));
       await cloudStorage.upsertRequestsAndShifts(approvedItems);
       shifts.fetchShifts();
     } catch (e: any) {
@@ -408,10 +409,14 @@ export const useAppLogic = () => {
   }, [req.requests, req.setRequests]);
 
   const cancelRequest = useCallback(async (requestId: string) => {
+    if (!requestId) {
+      throw new Error('削除対象の申請IDが存在しません。');
+    }
+    const cleanId = String(requestId).trim();
     try {
       // 物理削除
-      await cloudStorage.deleteRequest(requestId);
-      const newRequests = req.requests.filter(r => r.id !== requestId);
+      await cloudStorage.deleteRequest(cleanId);
+      const newRequests = req.requests.filter(r => r.id !== requestId && r.id !== cleanId);
       req.setRequests(newRequests);
     } catch (e) {
       console.error('Cancel request error:', e);
@@ -424,14 +429,16 @@ export const useAppLogic = () => {
   }, [cancelRequest]);
 
   const handleReject = useCallback(async (requestId: string) => {
+    if (!requestId) return;
+    const cleanId = String(requestId).trim();
     try {
-      const updatedItem = req.requests.find(r => r.id === requestId);
+      const updatedItem = req.requests.find(r => r.id === requestId || r.id === cleanId);
       if (!updatedItem) return;
 
       const { error } = await supabase
         .from('requests')
         .update({ status: 'rejected' })
-        .eq('id::text', requestId);
+        .eq('id', cleanId);
 
       if (error) throw error;
 
@@ -440,7 +447,7 @@ export const useAppLogic = () => {
       const now = new Date().toISOString();
       const newWithStatus = { ...updatedItem, status: 'rejected', updatedAt: now };
       const newRequests = req.requests.map(r => 
-        r.id === requestId ? newWithStatus : r
+        (r.id === requestId || r.id === cleanId) ? newWithStatus : r
       );
       req.setRequests(newRequests);
       
