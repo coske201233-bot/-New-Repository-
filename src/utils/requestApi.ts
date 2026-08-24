@@ -1,55 +1,52 @@
 import { supabase } from './supabase';
 
-/**
- * シフト希望（requests）の削除および関連シフト（shifts）の連動削除処理
- *
- * @param requestId 削除対象の申請ID
- */
+// 申請の削除（キャンセル）
 export const deleteShiftRequest = async (requestId: string) => {
-  if (!requestId) {
-    throw new Error('削除対象の申請IDが存在しません。');
-  }
+  if (!requestId) throw new Error('申請IDが見つかりません');
+  const cleanId = String(requestId).replace(/['"]/g, '').trim();
 
-  // UUID形式の文字列であることを確認（前後の空白等を除去）
-  const cleanId = String(requestId).trim();
-
-  // 1. 削除前に該当の申請データ（staff_id と date）を取得
-  const { data: targetRequest, error: fetchErr } = await supabase
+  // 申請情報の事前取得
+  const { data: req } = await supabase
     .from('requests')
     .select('id, staff_id, date')
-    .eq('id', cleanId)
+    .filter('id', 'eq', cleanId)
     .maybeSingle();
 
-  if (fetchErr) {
-    console.error('申請データの事前取得エラー:', fetchErr);
-  }
-
-  // 2. requests テーブルから該当申請を削除
-  const { data, error } = await supabase
+  // requests から削除
+  const { error: delErr } = await supabase
     .from('requests')
     .delete()
-    .eq('id', cleanId);
+    .filter('id', 'eq', cleanId);
 
-  if (error) {
-    console.error('Request Delete Error:', error);
-    throw error;
-  }
+  if (delErr) throw delErr;
 
-  // 3. 連動するシフト（shifts）が存在する場合、staff_id と date の組み合わせで特定して削除
-  if (targetRequest?.staff_id && targetRequest?.date) {
-    const { error: shiftError } = await supabase
+  // 連動する shifts も削除
+  if (req?.staff_id && req?.date) {
+    await supabase
       .from('shifts')
       .delete()
-      .match({
-        staff_id: targetRequest.staff_id,
-        date: targetRequest.date,
-      });
-
-    if (shiftError) {
-      console.warn('Shift Sync Delete Warning (シフトの連動削除スキップまたは警告):', shiftError.message);
-    }
+      .match({ staff_id: req.staff_id, date: req.date });
   }
 
+  return true;
+};
+
+// 申請のステータス更新（承認・却下）
+export const updateRequestStatus = async (
+  requestId: string,
+  status: '承認' | '却下' | '申請中' | 'approved' | 'rejected' | 'pending' | string
+) => {
+  if (!requestId) throw new Error('申請IDが見つかりません');
+  const cleanId = String(requestId).replace(/['"]/g, '').trim();
+
+  const { data, error } = await supabase
+    .from('requests')
+    .update({ status })
+    .filter('id', 'eq', cleanId)
+    .select();
+
+  if (error) throw error;
   return data;
 };
+
 

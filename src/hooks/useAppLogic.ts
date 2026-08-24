@@ -7,6 +7,7 @@ import { useConfigData } from './useConfigData';
 import { useShiftData } from './useShiftData';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase, isSupabaseAuthReady as isSupabaseConfigured } from '../utils/supabase';
+import { deleteShiftRequest, updateRequestStatus } from '../utils/requestApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '../utils/storage';
 
@@ -377,7 +378,7 @@ export const useAppLogic = () => {
   const handleBulkApprove = useCallback(async (ids: string[]) => {
     try {
       if (!ids || ids.length === 0) return;
-      const cleanIds = ids.filter(Boolean).map(id => String(id).trim()).filter(id => id.length > 0);
+      const cleanIds = ids.filter(Boolean).map(id => String(id).replace(/['"]/g, '').trim()).filter(id => id.length > 0);
       if (cleanIds.length === 0) return;
 
       const { error } = await supabase
@@ -391,7 +392,7 @@ export const useAppLogic = () => {
 
       const now = new Date().toISOString();
       const newRequests = req.requests.map(r => {
-        if (cleanIds.includes(String(r.id).trim())) {
+        if (cleanIds.includes(String(r.id).replace(/['"]/g, '').trim())) {
           return { ...r, status: 'approved', updatedAt: now };
         }
         return r;
@@ -399,7 +400,7 @@ export const useAppLogic = () => {
       req.setRequests(newRequests);
 
       // V73.0: shiftsテーブルも一括更新して不整合を防止
-      const approvedItems = newRequests.filter(r => cleanIds.includes(String(r.id).trim()));
+      const approvedItems = newRequests.filter(r => cleanIds.includes(String(r.id).replace(/['"]/g, '').trim()));
       await cloudStorage.upsertRequestsAndShifts(approvedItems);
       shifts.fetchShifts();
     } catch (e: any) {
@@ -412,11 +413,11 @@ export const useAppLogic = () => {
     if (!requestId) {
       throw new Error('削除対象の申請IDが存在しません。');
     }
-    const cleanId = String(requestId).trim();
+    const cleanId = String(requestId).replace(/['"]/g, '').trim();
     try {
-      // 物理削除
-      await cloudStorage.deleteRequest(cleanId);
-      const newRequests = req.requests.filter(r => r.id !== requestId && r.id !== cleanId);
+      // 物理削除および関連シフトの連動削除
+      await deleteShiftRequest(cleanId);
+      const newRequests = req.requests.filter(r => r.id !== requestId && String(r.id).replace(/['"]/g, '').trim() !== cleanId);
       req.setRequests(newRequests);
     } catch (e) {
       console.error('Cancel request error:', e);
@@ -430,24 +431,19 @@ export const useAppLogic = () => {
 
   const handleReject = useCallback(async (requestId: string) => {
     if (!requestId) return;
-    const cleanId = String(requestId).trim();
+    const cleanId = String(requestId).replace(/['"]/g, '').trim();
     try {
-      const updatedItem = req.requests.find(r => r.id === requestId || r.id === cleanId);
+      const updatedItem = req.requests.find(r => r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId);
       if (!updatedItem) return;
 
-      const { error } = await supabase
-        .from('requests')
-        .update({ status: 'rejected' })
-        .eq('id', cleanId);
-
-      if (error) throw error;
+      await updateRequestStatus(cleanId, 'rejected');
 
       Alert.alert('完了', '却下・取り消しが完了しました');
 
       const now = new Date().toISOString();
       const newWithStatus = { ...updatedItem, status: 'rejected', updatedAt: now };
       const newRequests = req.requests.map(r => 
-        (r.id === requestId || r.id === cleanId) ? newWithStatus : r
+        (r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId) ? newWithStatus : r
       );
       req.setRequests(newRequests);
       

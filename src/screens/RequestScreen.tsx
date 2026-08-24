@@ -83,7 +83,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     if (!confirmed) return;
 
     try {
-      const cleanId = String(id).trim();
+      const cleanId = String(id).replace(/['"]/g, '').trim();
 
       if (onDeleteRequest) {
         await onDeleteRequest(cleanId);
@@ -92,7 +92,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
       }
 
       // ローカルステートも即座に更新
-      setRequests(prev => prev.filter(r => r.id !== id && r.id !== cleanId));
+      setRequests(prev => prev.filter(r => r.id !== id && String(r.id).replace(/['"]/g, '').trim() !== cleanId));
 
       if (Platform.OS === 'web') {
         window.alert('削除しました。');

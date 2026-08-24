@@ -398,14 +398,14 @@ export const cloudStorage = {
       throw new Error('削除対象の申請IDが存在しません。');
     }
 
-    // UUID形式の文字列であることを確認（前後の空白等を除去）
-    const cleanId = String(id).trim();
+    // UUID形式の文字列であることを確認（前後の空白およびクォートを除去）
+    const cleanId = String(id).replace(/['"]/g, '').trim();
 
     // 1. 削除前に該当の申請データ（staff_id と date）を取得
     const { data: targetRequest, error: fetchErr } = await supabase
       .from('requests')
       .select('id, staff_id, date')
-      .eq('id', cleanId)
+      .filter('id', 'eq', cleanId)
       .maybeSingle();
 
     if (fetchErr) {
@@ -413,7 +413,11 @@ export const cloudStorage = {
     }
 
     // 2. requests テーブルから削除
-    const { data, error: err1 } = await supabase.from('requests').delete().eq('id', cleanId);
+    const { data, error: err1 } = await supabase
+      .from('requests')
+      .delete()
+      .filter('id', 'eq', cleanId);
+
     if (err1) {
       console.error('Request Delete Error:', err1);
       throw err1;
@@ -438,7 +442,7 @@ export const cloudStorage = {
   },
   async deleteRequests(ids: string[]) {
     if (!ids || ids.length === 0) return;
-    const cleanIds = ids.filter(Boolean).map(id => String(id).trim()).filter(id => id.length > 0);
+    const cleanIds = ids.filter(Boolean).map(id => String(id).replace(/['"]/g, '').trim()).filter(id => id.length > 0);
     if (cleanIds.length === 0) return;
 
     const chunkSize = 50;
