@@ -22,9 +22,14 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved'>('pending');
   
   const filteredRequests = useMemo(() => {
-    let list = requests.filter(r => r && r.type !== '出勤' && r.type !== '公休' && r.status !== 'deleted' && r.status !== 'rejected');
-    if (filter !== 'all') {
-      list = list.filter(r => r.status === filter);
+    let list = requests.filter(r => r && r.type !== '出勤' && r.type !== '公休' && r.status !== 'deleted' && r.status !== '削除' && r.status !== 'rejected' && r.status !== '却下');
+    if (filter === 'pending') {
+      list = list.filter(r => {
+        const isApproved = r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true;
+        return !isApproved && (r.status === 'pending' || r.status === '申請中' || !r.status);
+      });
+    } else if (filter === 'approved') {
+      list = list.filter(r => r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true);
     }
     // Sort by date (newest first), then by updated time
     return [...list].sort((a, b) => {
@@ -40,7 +45,10 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
   }, [requests, filter]);
 
   const handleApproveAll = async () => {
-    const pendings = filteredRequests.filter(r => r.status === 'pending');
+    const pendings = filteredRequests.filter(r => {
+      const isApproved = r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true;
+      return !isApproved && (r.status === 'pending' || r.status === '申請中' || !r.status);
+    });
     if (pendings.length === 0) return;
 
     if (Platform.OS === 'web') {
@@ -64,21 +72,21 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
         window.alert("承認が完了しました！");
       }
     } catch (err: any) {
-      if (Platform.OS === 'web') window.alert("エラーが発生しました: " + err.message);
+      if (Platform.OS === 'web') window.alert("承認エラー: " + err.message);
       else Alert.alert("エラー", err.message);
     }
   };
 
   const handleHardwiredReject = async (id: string) => {
     if (Platform.OS === 'web') {
-      const confirmOk = window.confirm("この申請を却下しますか？");
+      const confirmOk = window.confirm("この申請を却下しますか？\n（カレンダーからも削除されます）");
       if (!confirmOk) return;
     }
 
     try {
       await handleReject(id); // 親コンポーネントの正規関数を使用
     } catch (err: any) {
-      if (Platform.OS === 'web') window.alert("エラーが発生しました: " + err.message);
+      if (Platform.OS === 'web') window.alert("却下エラー: " + err.message);
       else Alert.alert("エラー", err.message);
     }
   };
@@ -89,14 +97,18 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
           <ChevronLeft color={COLORS.text} size={24} />
         </TouchableOpacity>
-        <View>
-          <ThemeText variant="h1">申請承認ダッシュボード</ThemeText>
-          <ThemeText variant="caption">全職員からの申請・届出の管理</ThemeText>
-        </View>
+        <ThemeText variant="h1" style={{ flex: 1, textAlign: 'center' }}>申請一覧・承認</ThemeText>
+        <View style={{ width: 40 }} />
       </View>
 
       <View style={styles.filterBar}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+          <TouchableOpacity 
+            style={[styles.filterChip, filter === 'all' && styles.filterChipActive]} 
+            onPress={() => setFilter('all')}
+          >
+            <ThemeText variant="caption" color={filter === 'all' ? COLORS.background : COLORS.text}>すべて</ThemeText>
+          </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.filterChip, filter === 'pending' && styles.filterChipActive]} 
             onPress={() => setFilter('pending')}
@@ -109,20 +121,19 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
           >
             <ThemeText variant="caption" color={filter === 'approved' ? COLORS.background : COLORS.text}>承認済み</ThemeText>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.filterChip, filter === 'all' && styles.filterChipActive]} 
-            onPress={() => setFilter('all')}
-          >
-            <ThemeText variant="caption" color={filter === 'all' ? COLORS.background : COLORS.text}>すべて</ThemeText>
-          </TouchableOpacity>
         </ScrollView>
       </View>
 
       {filter === 'pending' && filteredRequests.length > 0 && (
-        <TouchableOpacity style={styles.batchBtn} onPress={handleApproveAll}>
-          <CheckCircle2 size={16} color="white" />
-          <ThemeText style={styles.batchBtnText}>表示中の待機分を一括承認</ThemeText>
-        </TouchableOpacity>
+        <View style={styles.bulkActionRow}>
+          <ThemeText variant="caption" color={COLORS.textSecondary}>
+            承認待ち: {filteredRequests.length}件
+          </ThemeText>
+          <TouchableOpacity style={styles.batchBtn} onPress={handleApproveAll}>
+            <CheckCircle2 size={16} color="white" />
+            <ThemeText style={styles.batchBtnText}>すべて承認する</ThemeText>
+          </TouchableOpacity>
+        </View>
       )}
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -134,7 +145,11 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
             </ThemeText>
           </View>
         ) : (
-          filteredRequests.map(item => (
+          filteredRequests.map(item => {
+            const isApproved = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
+            const isPending = !isApproved && (item.status === 'pending' || item.status === '申請中' || !item.status);
+            
+            return (
             <ThemeCard key={item.id} style={styles.requestCard}>
               <View style={styles.cardHeader}>
                 <View style={styles.userInfo}>
@@ -144,27 +159,22 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
                   <View>
                     <ThemeText bold>{item.staffName}</ThemeText>
                     <ThemeText variant="caption" color={COLORS.textSecondary}>対象日: {formatDate(item.date)}</ThemeText>
-                    {(item.createdAt || item.created_at || item.details?.createdAt) ? (
-                      <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>
-                        申請日: {formatDate(item.createdAt || item.created_at || item.details?.createdAt)}
-                      </ThemeText>
-                    ) : null}
                   </View>
                 </View>
                 <View style={[
                   styles.statusBadge, 
-                  { backgroundColor: item.status === 'approved' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(234, 179, 8, 0.1)' }
+                  { backgroundColor: isApproved ? 'rgba(34, 197, 94, 0.1)' : 'rgba(234, 179, 8, 0.1)' }
                 ]}>
-                  {item.status === 'approved' ? (
+                  {isApproved ? (
                     <CheckCircle2 size={14} color="#22c55e" />
                   ) : (
                     <AlertCircle size={14} color="#eab308" />
                   )}
                   <ThemeText 
                     variant="caption" 
-                    style={{ color: item.status === 'approved' ? '#22c55e' : '#eab308', marginLeft: 4 }}
+                    style={{ color: isApproved ? '#22c55e' : '#eab308', marginLeft: 4 }}
                   >
-                    {item.status === 'approved' ? '承認済み' : '承認待ち'}
+                    {isApproved ? '承認済み' : '承認待ち'}
                   </ThemeText>
                 </View>
               </View>
@@ -197,7 +207,7 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
               </View>
 
               <View style={styles.cardActions}>
-                {item.status === 'pending' ? (
+                {isPending ? (
                   <>
                     <TouchableOpacity 
                       style={[styles.actionBtn, styles.approveBtn]} 
@@ -223,7 +233,7 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
                 )}
               </View>
             </ThemeCard>
-          ))
+          )})
         )}
       </ScrollView>
     </SafeAreaView>
@@ -252,7 +262,8 @@ const styles = StyleSheet.create({
   filterScroll: { paddingHorizontal: SPACING.md, gap: 8 },
   filterChip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   filterChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  batchBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10b981', marginHorizontal: SPACING.md, marginTop: 12, paddingVertical: 10, borderRadius: 8, gap: 8 },
+  bulkActionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, marginTop: 12 },
+  batchBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, gap: 6 },
   batchBtnText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
   scrollContent: { 
     padding: SPACING.md, 

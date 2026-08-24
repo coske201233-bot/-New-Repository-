@@ -287,18 +287,18 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   </View>
                   <View style={[
                     styles.statusBadge, 
-                    { backgroundColor: item.status === 'approved' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(234, 179, 8, 0.1)' }
+                    { backgroundColor: (item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true) ? 'rgba(34, 197, 94, 0.1)' : 'rgba(234, 179, 8, 0.1)' }
                   ]}>
-                    {item.status === 'approved' ? (
+                    {(item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true) ? (
                       <CheckCircle2 size={14} color="#22c55e" />
                     ) : (
                       <AlertCircle size={14} color="#eab308" />
                     )}
                     <ThemeText 
                       variant="caption" 
-                      style={{ color: item.status === 'approved' ? '#22c55e' : '#eab308', marginLeft: 4 }}
+                      style={{ color: (item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true) ? '#22c55e' : '#eab308', marginLeft: 4 }}
                     >
-                      {item.status === 'approved' ? '承認済み' : '承認待ち'}
+                      {(item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true) ? '承認済み' : '承認待ち'}
                     </ThemeText>
                   </View>
                 </View>
@@ -328,44 +328,52 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 </View>
 
                 <View style={styles.cardActions}>
-                  {isManager && (
-                    <>
-                      {item.status === 'pending' ? (
-                        <>
+                  {(() => {
+                    const isApproved = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
+                    const isPending = !isApproved && (item.status === 'pending' || item.status === '申請中' || !item.status);
+                    return (
+                      <>
+                        {isManager && (
+                          <>
+                            {isPending ? (
+                              <>
+                                <TouchableOpacity 
+                                  style={[styles.actionBtn, styles.approveBtn]} 
+                                  onPress={() => updateRequestStatus(item.id, 'approved')}
+                                >
+                                  <CheckCircle2 size={16} color="white" />
+                                  <ThemeText variant="caption" color="white" bold style={{ marginLeft: 4 }}>承認する</ThemeText>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                  style={[styles.actionBtn, styles.rejectBtn]} 
+                                  onPress={() => deleteRequest(item.id)}
+                                >
+                                  <ThemeText variant="caption" color={COLORS.textSecondary}>削除</ThemeText>
+                                </TouchableOpacity>
+                              </>
+                            ) : (
+                              <TouchableOpacity 
+                                style={[styles.actionBtn, styles.undoBtn]} 
+                                onPress={() => updateRequestStatus(item.id, 'pending')}
+                              >
+                                <ThemeText variant="caption" color={COLORS.textSecondary}>承認を取り消す</ThemeText>
+                              </TouchableOpacity>
+                            )}
+                          </>
+                        )}
+                        {/* スタッフ本人用の削除ボタン：承認済または却下の申請を履歴から消せる */}
+                        {!isManager && (
                           <TouchableOpacity 
-                            style={[styles.actionBtn, styles.approveBtn]} 
-                            onPress={() => updateRequestStatus(item.id, 'approved')}
+                            style={[styles.actionBtn, styles.rejectBtn]}
+                            onPress={() => handleDeleteOwnRequest(item.id)}
                           >
-                            <CheckCircle2 size={16} color="white" />
-                            <ThemeText variant="caption" color="white" bold style={{ marginLeft: 4 }}>承認する</ThemeText>
+                            <X size={14} color={COLORS.danger} />
+                            <ThemeText variant="caption" color={COLORS.danger} style={{ marginLeft: 4 }}>削除</ThemeText>
                           </TouchableOpacity>
-                          <TouchableOpacity 
-                            style={[styles.actionBtn, styles.rejectBtn]} 
-                            onPress={() => deleteRequest(item.id)}
-                          >
-                            <ThemeText variant="caption" color={COLORS.textSecondary}>削除</ThemeText>
-                          </TouchableOpacity>
-                        </>
-                      ) : (
-                        <TouchableOpacity 
-                          style={[styles.actionBtn, styles.undoBtn]} 
-                          onPress={() => updateRequestStatus(item.id, 'pending')}
-                        >
-                          <ThemeText variant="caption" color={COLORS.textSecondary}>承認を取り消す</ThemeText>
-                        </TouchableOpacity>
-                      )}
-                    </>
-                  )}
-                  {/* スタッフ本人用の削除ボタン：承認済または却下の申請を履歴から消せる */}
-                  {!isManager && (item.status === 'approved' || item.status === 'rejected' || item.status === 'pending') && (
-                    <TouchableOpacity 
-                      style={[styles.actionBtn, styles.rejectBtn]}
-                      onPress={() => handleDeleteOwnRequest(item.id)}
-                    >
-                      <X size={14} color={COLORS.danger} />
-                      <ThemeText variant="caption" color={COLORS.danger} style={{ marginLeft: 4 }}>削除</ThemeText>
-                    </TouchableOpacity>
-                  )}
+                        )}
+                      </>
+                    );
+                  })()}
                 </View>
               </ThemeCard>
             ))}

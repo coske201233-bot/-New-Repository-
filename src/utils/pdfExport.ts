@@ -26,8 +26,11 @@ export const exportShiftToPDF = async (staffName: string, requests: any[], curre
     
     // 申請データを取得（承認済み優先、なければ申請中も探す）
     const allUserReqs = requests.filter(r => normalizeName(r.staffName) === normalizedTargetName && r.date === dateStr);
-    const approvedReq = allUserReqs.find(r => r.status === 'approved');
-    const pendingReq = allUserReqs.find(r => r.status === 'pending');
+    const approvedReq = allUserReqs.find(r => r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true);
+    const pendingReq = allUserReqs.find(r => {
+      const isApproved = r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true;
+      return !isApproved && (r.status === 'pending' || r.status === '申請中');
+    });
     const req = approvedReq || pendingReq;
 
     let isWork = false;

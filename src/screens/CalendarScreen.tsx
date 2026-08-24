@@ -97,7 +97,7 @@ export const CalendarScreen: React.FC<any> = ({
     // [STRICT FILTER] 真実のソースである requests テーブルから却下・削除済みのIDを抽出
     const rejectedOrDeletedIds = new Set(
       (requests || [])
-        .filter(r => r && (r.status === 'rejected' || r.status === 'deleted'))
+        .filter(r => r && (r.status === 'rejected' || r.status === '却下' || r.status === 'deleted' || r.status === '削除'))
         .map(r => String(r.id))
     );
 
@@ -115,7 +115,7 @@ export const CalendarScreen: React.FC<any> = ({
       }
 
       // 1. レコード自体のステータスが却下・削除の場合は除外
-      if (r.status === 'rejected' || r.status === 'deleted') return false;
+      if (r.status === 'rejected' || r.status === '却下' || r.status === 'deleted' || r.status === '削除') return false;
       // 2. requestsテーブル側で却下・削除されているIDを持つレコードは、shifts側の残骸であっても除外
       if (rejectedOrDeletedIds.has(String(r.id))) return false;
       return true;
@@ -273,11 +273,12 @@ export const CalendarScreen: React.FC<any> = ({
           if (!t) return false;
           if (t === '出勤' || t === '日勤') return true; 
           // 🚨 【最終解決】「時」が含まれていても、承認済み(approved)または申請中(pending)でなければカウントしない
-            if (t.includes('時')) {
-                  // 🚨 データが存在し、かつステータスが正式に承認（approved）または申請中（pending）の場合のみ「出勤」扱いとする。
-                  // データがないもの（null）や未承認のものは、問答無用で false を返してこの判定を終わらせる。
-                  return singleReq && (singleReq.status === 'approved' || singleReq.status === 'pending' || singleReq.details?.status === 'approved' || singleReq.details?.status === 'pending');
-                }
+          if (t.includes('時')) {
+            if (!singleReq) return false;
+            const isApproved = singleReq.status === 'approved' || singleReq.status === '承認' || singleReq.is_manual === true || singleReq.isManual === true || singleReq.details?.status === 'approved' || singleReq.details?.status === '承認';
+            const isPending = !isApproved && (singleReq.status === 'pending' || singleReq.status === '申請中' || singleReq.details?.status === 'pending' || singleReq.details?.status === '申請中');
+            return isApproved || isPending;
+          }
           if (t.includes('振')) return true; 
           if (t.includes('午前休') || t.includes('午後休')) return true;
           return false;
@@ -323,8 +324,13 @@ export const CalendarScreen: React.FC<any> = ({
           return 0;
         };
 
-        const approvedReqs = userRequests.filter(r => r.status === 'approved');
-        const pendingReq = userRequests.find(r => r.status === 'pending');
+        const approvedReqs = userRequests.filter(r => {
+          return r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true || r.details?.status === 'approved' || r.details?.status === '承認';
+        });
+        const pendingReq = userRequests.find(r => {
+          const isApp = r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true || r.details?.status === 'approved' || r.details?.status === '承認';
+          return !isApp && (r.status === 'pending' || r.status === '申請中' || r.details?.status === 'pending' || r.details?.status === '申請中');
+        });
 
         let totalLeaveHours = 0;
         if (approvedReqs.length > 0) {
@@ -371,11 +377,19 @@ export const CalendarScreen: React.FC<any> = ({
       });
 
       // 🚨 【完全勝利・最終防衛線】
-              // 画面にデータを引き渡す直前で、承認(approved)または申請中(pending)ではないゴミデータを配列から物理的に消去する
-              const cleanWorking = working.filter((item: any) => item.status === 'approved' || item.status === 'pending' || item.details?.status === 'approved' || item.details?.status === 'pending');
-              const cleanOff = off.filter((item: any) => item.status === 'approved' || item.status === 'pending' || item.details?.status === 'approved' || item.details?.status === 'pending');
+      // 画面にデータを引き渡す直前で、承認(approved)または申請中(pending)ではないゴミデータを配列から物理的に消去する
+      const cleanWorking = working.filter((item: any) => {
+        const isApp = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true || item.details?.status === 'approved' || item.details?.status === '承認';
+        const isPend = !isApp && (item.status === 'pending' || item.status === '申請中' || item.details?.status === 'pending' || item.details?.status === '申請中');
+        return isApp || isPend;
+      });
+      const cleanOff = off.filter((item: any) => {
+        const isApp = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true || item.details?.status === 'approved' || item.details?.status === '承認';
+        const isPend = !isApp && (item.status === 'pending' || item.status === '申請中' || item.details?.status === 'pending' || item.details?.status === '申請中');
+        return isApp || isPend;
+      });
 
-              return { working: cleanWorking, off: cleanOff };
+      return { working: cleanWorking, off: cleanOff };
     };
 
   const targetStaff = (staffList || []).find((s: any) => (s?.name || '').replace(/\s/g, '').includes('佐久間'));
@@ -1004,22 +1018,30 @@ export const CalendarScreen: React.FC<any> = ({
                             {`${item.details.startTime}-${item.details.endTime}`}
                           </ThemeText>
                         )}
-                        {item.status === 'pending' && (
-                          <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold', marginLeft: 8 }}>
-                            [申請中]
-                          </ThemeText>
-                        )}
+                        {(() => {
+                          const isApprovedItem = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
+                          const isPendingItem = !isApprovedItem && (item.status === 'pending' || item.status === '申請中');
+                          return isPendingItem ? (
+                            <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold', marginLeft: 8 }}>
+                              [申請中]
+                            </ThemeText>
+                          ) : null;
+                        })()}
                       </View>
                       {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
                         <View style={{ flexDirection: 'row', gap: 8 }}>
-                          {item.status === 'pending' && (
-                            <TouchableOpacity 
-                              style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
-                              onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
-                            >
-                              <Check size={14} color={COLORS.primary} />
-                            </TouchableOpacity>
-                          )}
+                          {(() => {
+                            const isApprovedItem = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
+                            const isPendingItem = !isApprovedItem && (item.status === 'pending' || item.status === '申請中');
+                            return isPendingItem ? (
+                              <TouchableOpacity 
+                                style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
+                                onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
+                              >
+                                <Check size={14} color={COLORS.primary} />
+                              </TouchableOpacity>
+                            ) : null;
+                          })()}
                         </View>
                       )}
                     </View>
@@ -1083,20 +1105,30 @@ export const CalendarScreen: React.FC<any> = ({
                         {(!item.details?.startTime && (item.details?.duration ?? item.hours ?? item.details?.hours) > 0) && (
                           <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details?.duration ?? item.hours ?? item.details?.hours}h</ThemeText>
                         )}
-                        {item.status === 'pending' && <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>}
+                        {(() => {
+                          const isApprovedItem = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
+                          const isPendingItem = !isApprovedItem && (item.status === 'pending' || item.status === '申請中');
+                          return isPendingItem ? (
+                            <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold' }}> [申請中]</ThemeText>
+                          ) : null;
+                        })()}
                       </ThemeText>
                     )}
                   </View>
                   {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
                     <View style={{ flexDirection: 'row', gap: 8 }}>
-                      {item.status === 'pending' && (
-                        <TouchableOpacity 
-                          style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
-                          onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
-                        >
-                          <Check size={14} color={COLORS.primary} />
-                        </TouchableOpacity>
-                      )}
+                      {(() => {
+                        const isApprovedItem = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
+                        const isPendingItem = !isApprovedItem && (item.status === 'pending' || item.status === '申請中');
+                        return isPendingItem ? (
+                          <TouchableOpacity 
+                            style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
+                            onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
+                          >
+                            <Check size={14} color={COLORS.primary} />
+                          </TouchableOpacity>
+                        ) : null;
+                      })()}
                     </View>
                   )}
                 </View>

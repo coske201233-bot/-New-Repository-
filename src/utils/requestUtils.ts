@@ -109,9 +109,11 @@ export const deduplicateRequests = (list: any[]) => {
         isPriority = timeNew > timeOld;
       } else {
         // 時刻が全く同じ場合、ステータスが承認済みのものを優先
-        if (item.status === 'approved' && existing.status !== 'approved') {
+        const isAppNew = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
+        const isAppOld = existing.status === 'approved' || existing.status === '承認' || existing.is_manual === true || existing.isManual === true;
+        if (isAppNew && !isAppOld) {
           isPriority = true;
-        } else if (item.status !== 'approved' && existing.status === 'approved') {
+        } else if (!isAppNew && isAppOld) {
           isPriority = false;
         } else {
           // それでも決着がつかない場合は、手動優先、次に更新時間優先

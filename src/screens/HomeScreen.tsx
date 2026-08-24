@@ -258,7 +258,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               // 💡 データ取得中（isSyncing や isLoadingShifts が true）の時は、赤い帯を絶対に画面に出さない
               if (isSyncing || isLoadingShifts) return null;
               if (!requests || requests.length === 0) return null;
-              const pendingCount = requests.filter(r => r.status === 'pending').length;
+              const pendingCount = requests.filter(r => {
+                if (!r || r.status === 'deleted' || r.status === '削除' || r.status === 'rejected' || r.status === '却下') return false;
+                const isApproved = r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true;
+                return !isApproved && (r.status === 'pending' || r.status === '申請中' || !r.status);
+              }).length;
               if (pendingCount > 0) {
                 return (
                   <TouchableOpacity onPress={onOpenRequests} style={styles.notificationBanner} activeOpacity={0.8}>

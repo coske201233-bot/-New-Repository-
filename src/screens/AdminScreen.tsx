@@ -79,7 +79,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const limits = (monthlyLimits && monthlyLimits[currentMonthStr]) || { weekday: 12, sat: 1, sun: 0, pub: 1 };
 
   // --- Approvals Filtering with safeguards and logical fixes ---
-  const pendingRequests = Array.isArray(requests) ? requests.filter(r => r && (r.status === 'pending' || !r.status)) : [];
+  const pendingRequests = Array.isArray(requests) ? requests.filter(r => {
+    if (!r || r.status === 'deleted' || r.status === '削除' || r.status === 'rejected' || r.status === '却下') return false;
+    const isApproved = r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true;
+    return !isApproved && (r.status === 'pending' || r.status === '申請中' || !r.status);
+  }) : [];
 
   // --- Constant Options (Custom Hospital Structure) ---
   const PROFESSION_OPTS = ['PT', 'OT', 'ST', '助手'];
