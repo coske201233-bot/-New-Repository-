@@ -156,10 +156,11 @@ export async function updateStaffPasswordApi(staffId: string, newPassword: strin
  * 4. スタッフの無効化（論理削除）または完全削除（物理削除）
  */
 export async function deleteStaffApi(staffId: string, permanent: boolean = false, userId?: string) {
-  console.log('🚀 [adminStaffApi] deleteStaffApi 呼び出し:', { staffId, permanent, userId });
+  const effectiveUserId = userId || staffId;
+  console.log('🚀 [adminStaffApi] deleteStaffApi 呼び出し:', { staffId, permanent, userId: effectiveUserId });
   return await callAdminStaffApi('DELETE', {
     staffId,
-    userId,
+    userId: effectiveUserId,
     permanent,
   });
 }

@@ -415,75 +415,98 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     }
   };
 
-  // 4. スタッフの無効化（論理削除）
-  const handleDeactivateStaff = () => {
+  // 4. スタッフの無効化または完全削除（Web & Native 完全対応）
+  const handleDeleteStaff = async (permanent: boolean = false) => {
     if (!editingStaff) return;
-    if (editingStaff.id === profile?.id || editingStaff.email === profile?.email) {
-      Alert.alert('操作不可', '現在ログイン中の管理者自身を無効化することはできません。');
+
+    const targetId = editingStaff.id || editingStaff.user_id;
+    if (!targetId) {
+      if (Platform.OS === 'web') {
+        window.alert('エラー: 対象スタッフのIDが取得できませんでした。');
+      } else {
+        Alert.alert('エラー', '対象スタッフのIDが取得できませんでした。');
+      }
       return;
     }
 
-    Alert.alert(
-      'スタッフの無効化（ログイン停止）',
-      `${editingStaff.name} さんのアカウントを無効化しますか？\n（過去のシフト履歴や申請データは保持されます）`,
-      [
-        { text: 'キャンセル', style: 'cancel' },
-        {
-          text: '無効化する',
-          style: 'destructive',
-          onPress: async () => {
-            setIsSaving(true);
-            try {
-              await deleteStaffApi(editingStaff.id, false, editingStaff.user_id);
-              await fetchStaff();
-              setIsRegistrationModalVisible(false);
-              setEditingStaff(null);
-              Alert.alert('完了', `${editingStaff.name} さんを無効化しました。`);
-            } catch (e: any) {
-              Alert.alert('エラー', e.message || '無効化処理に失敗しました。');
-            } finally {
-              setIsSaving(false);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  // 5. スタッフの完全削除（物理削除）
-  const handlePermanentDeleteStaff = () => {
-    if (!editingStaff) return;
-    if (editingStaff.id === profile?.id || editingStaff.email === profile?.email) {
-      Alert.alert('操作不可', '現在ログイン中の管理者自身を削除することはできません。');
+    // 管理者自身の保護
+    if (
+      editingStaff.id === profile?.id ||
+      editingStaff.email === profile?.email ||
+      editingStaff.user_id === profile?.id
+    ) {
+      const selfMsg = '現在ログイン中の管理者自身を削除・無効化することはできません。';
+      if (Platform.OS === 'web') {
+        window.alert(selfMsg);
+      } else {
+        Alert.alert('操作不可', selfMsg);
+      }
       return;
     }
 
-    Alert.alert(
-      '⚠️ 警告：完全削除（物理削除）',
-      `本当に ${editingStaff.name} さんのスタッフ情報および認証アカウントを完全に削除しますか？\nこの操作は元に戻せません。`,
-      [
-        { text: 'キャンセル', style: 'cancel' },
-        {
-          text: '完全に削除する',
-          style: 'destructive',
-          onPress: async () => {
-            setIsSaving(true);
-            try {
-              await deleteStaffApi(editingStaff.id, true, editingStaff.user_id);
-              await fetchStaff();
-              setIsRegistrationModalVisible(false);
-              setEditingStaff(null);
-              Alert.alert('完了', 'スタッフおよび認証アカウントを完全に削除しました。');
-            } catch (e: any) {
-              Alert.alert('エラー', e.message || '削除処理に失敗しました。');
-            } finally {
-              setIsSaving(false);
-            }
+    const actionText = permanent ? '完全削除（物理削除）' : '無効化（ログイン停止）';
+    const confirmMessage = `${editingStaff.name} さんを${actionText}しますか？\n\n${
+      permanent
+        ? '【警告】この操作は取り消せません。Authアカウントおよびスタッフデータが完全に削除されます。'
+        : '※過去のシフト履歴は保持されたまま、ログイン認証が停止されます。'
+    }`;
+
+    const executeDelete = async () => {
+      setIsSaving(true);
+      try {
+        console.log('📡 削除/無効化リクエスト送信:', {
+          targetId,
+          permanent,
+          userId: editingStaff.user_id,
+        });
+        await deleteStaffApi(targetId, permanent, editingStaff.user_id);
+
+        const successMsg = `${editingStaff.name} さんの${actionText}が完了しました。`;
+        if (Platform.OS === 'web') {
+          window.alert(successMsg);
+        } else {
+          Alert.alert('完了', successMsg);
+        }
+
+        await fetchStaff();
+        setIsRegistrationModalVisible(false);
+        setEditingStaff(null);
+      } catch (err: any) {
+        console.error('削除エラー:', err);
+        const errMsg = err.message || `${actionText}に失敗しました。`;
+        if (Platform.OS === 'web') {
+          window.alert(`エラー: ${errMsg}`);
+        } else {
+          Alert.alert('エラー', errMsg);
+        }
+      } finally {
+        setIsSaving(false);
+      }
+    };
+
+    // Web 環境の場合は window.confirm を使用
+    if (Platform.OS === 'web') {
+      if (window.confirm(confirmMessage)) {
+        await executeDelete();
+      }
+    } else {
+      Alert.alert(
+        `${actionText}の確認`,
+        confirmMessage,
+        [
+          { text: 'キャンセル', style: 'cancel' },
+          {
+            text: permanent ? '完全に削除する' : '無効化する',
+            style: 'destructive',
+            onPress: executeDelete,
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
   };
+
+  const handleDeactivateStaff = () => handleDeleteStaff(false);
+  const handlePermanentDeleteStaff = () => handleDeleteStaff(true);
 
   // Constants
   const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '特休＋時間休', '出張', '休日時間外', '空欄'];
