@@ -106,7 +106,7 @@ export const useRequestData = () => {
         if (dateStr.startsWith('2026-07')) return false;
         
         const idStr = String(lr.id || '');
-        const isAuto = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-') || idStr.startsWith('aw_');
+        const isAuto = lr.is_manual === false || lr.isManual === false || lr.details?.isAuto === true || idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-') || idStr.startsWith('aw_');
         const month = (lr.date || '').substring(0, 7);
         
         if (isAuto && cloudMonths.has(month)) return false;

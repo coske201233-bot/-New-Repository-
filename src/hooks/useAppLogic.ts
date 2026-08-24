@@ -505,14 +505,17 @@ export const useAppLogic = () => {
       const nowStr = new Date().toISOString();
       const newWithIds = data.newRequests.map((r: any) => ({
         ...r,
-        id: r.id || `auto-${r.staffId || r.staffName || 'user'}-${r.date}-${Math.random().toString(36).substr(2, 6)}`,
+        id: r.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined),
+        is_manual: false,
+        isManual: false,
+        details: { ...(r.details || {}), isAuto: true, isManual: false },
         updatedAt: nowStr,
         status: r.status || 'approved'
       }));
 
       const filteredRequests = req.requests.filter(r => {
         const idStr = String(r.id || '');
-        const isAuto = idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-') || idStr.startsWith('aw_');
+        const isAuto = r.is_manual === false || r.isManual === false || r.details?.isAuto === true || idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-') || idStr.startsWith('aw_');
         const isTargetMonth = r.date && r.date.startsWith(currentMonthStr);
         // [CRITICAL] ターゲット月の自動生成データは全てパージする
         return !(isAuto && isTargetMonth);

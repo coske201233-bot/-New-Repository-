@@ -17,18 +17,21 @@ export const deduplicateRequests = (list: any[]) => {
 
   const isManual = (item: any) => {
     if (!item) return false;
+    // 1. 明示的な boolean フラグを最優先
+    if (item.is_manual === true || item.isManual === true || item.details?.isManual === true) return true;
+    if (item.is_manual === false || item.isManual === false || item.details?.isManual === false || item.details?.isAuto === true) return false;
+
     const idStr = String(item.id || '');
     const note = String(item.details?.note || '');
     const reason = String(item.reason || '');
 
-    // 【最優先】手動系ID接頭辞（req- は staff申請IDのため手動扱い）
+    // 2. レガシー接頭辞のフォールバック
     if (idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('off-') || idStr.startsWith('u-') || idStr.startsWith('req-')) return true;
 
     // 自動系IDでも、内容が変更されていれば手動扱いとする
     if (idStr.startsWith('auto-') || idStr.startsWith('af-') || idStr.startsWith('aw-') || idStr.startsWith('plan-') || idStr.startsWith('aw_')) {
       if (note !== '' && !note.includes('自動')) return true;
       if (reason !== '' && !reason.includes('自動')) return true;
-      if (item.isManual === true) return true; // 明示的なフラグがあれば尊重
       return false;
     }
 
@@ -111,15 +114,13 @@ export const deduplicateRequests = (list: any[]) => {
         } else if (item.status !== 'approved' && existing.status === 'approved') {
           isPriority = false;
         } else {
-          // それでも決着がつかない場合は、管理者による手動調整 (m-) を最優先、次にモバイル申請 (req-)
-          const isMNew = String(item.id).startsWith('m-');
-          const isMOld = String(existing.id).startsWith('m-');
-          if (isMNew && !isMOld) {
+          // それでも決着がつかない場合は、手動優先、次に更新時間優先
+          if (isManNew && !wasManOld) {
             isPriority = true;
-          } else if (!isMNew && isMOld) {
+          } else if (!isManNew && wasManOld) {
             isPriority = false;
           } else {
-            isPriority = String(item.id).startsWith('req-');
+            isPriority = true;
           }
         }
       }

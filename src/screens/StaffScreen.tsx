@@ -575,10 +575,13 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       keys.forEach(key => {
         const existing = dayMap.get(key);
         
-        const isManualEntry = (rec: any) => 
-          !!(rec?.is_manual || rec?.isManual) || 
-          String(rec?.id || '').startsWith('m-') || 
-          String(rec?.id || '').startsWith('req-');
+        const isManualEntry = (rec: any) => {
+          if (!rec) return false;
+          if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
+          if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
+          const idStr = String(rec.id || '');
+          return idStr.startsWith('m-') || idStr.startsWith('req-');
+        };
 
         let isBetter = false;
         if (!existing) {
@@ -651,8 +654,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       const type = selectedType;
       const now = new Date().toISOString();
       const newReq = {
-        id: `m-${selectedStaff.id}-${selectedDay}`,
+        id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
         staffId: selectedStaff.id,
+        staff_id: selectedStaff.id,
         staffName: selectedStaff.name,
         date: selectedDay,
         type: type,
@@ -660,13 +664,14 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           ? (specialHours + hourlyHours)
           : (HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : null),
         details: type === '特休＋時間休'
-          ? { note: '管理画面より更新', specialHours, hourlyHours }
-          : { note: '管理画面より更新' },
+          ? { note: '管理画面より更新', specialHours, hourlyHours, isManual: true }
+          : { note: '管理画面より更新', isManual: true },
         status: 'approved',
         createdAt: now,
         updatedAt: now, 
         isShift: true,
-        isManual: true 
+        isManual: true,
+        is_manual: true 
       };
       
       const sT = normalize(selectedStaff.name);

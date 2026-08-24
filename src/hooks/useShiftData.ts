@@ -34,7 +34,7 @@ export const useShiftData = () => {
         normalized.forEach(s => {
           // IDまたは名前でキーを生成（同期漏れ対策）
           const extractedId = extractUuid(s.id);
-          const sId = String(s.staff_id || s.user_id || extractedId || '').trim();
+          const sId = String(s.staff_id || s.staffId || s.user_id || s.userId || extractedId || '').trim();
           const sName = normalize(s.staff_name || s.staffName || '');
           if ((!sId && !sName) || !s.date) return;
           
@@ -49,11 +49,12 @@ export const useShiftData = () => {
 
           // 優先順位判定
           // A. 手動データは AI生成 より優先
-          // [V57.3] is_manualカラムだけでなく、ID接頭辞 'm-' も判定に含める
-          const isManualEntry = (rec: any) => 
-            !!(rec.is_manual || rec.isManual) || 
-            String(rec.id || '').startsWith('m-') || 
-            String(rec.id || '').startsWith('req-');
+          const isManualEntry = (rec: any) => {
+            if (!rec) return false;
+            if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
+            if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
+            return String(rec.id || '').startsWith('m-') || String(rec.id || '').startsWith('req-');
+          };
 
           const existingIsManual = isManualEntry(existing);
           const newIsManual = isManualEntry(s);

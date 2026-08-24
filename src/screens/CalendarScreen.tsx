@@ -176,11 +176,13 @@ export const CalendarScreen: React.FC<any> = ({
       const key = resolvedId; // キーは必ず一貫したID（staff.id）になる
       const existing = dayMap.get(key);
           
-      const isManualEntry = (rec: any) => 
-        !!(rec.is_manual || rec.isManual) || 
-        String(rec.id || '').startsWith('m-') || 
-        String(rec.id || '').startsWith('manual-') || 
-        String(rec.id || '').startsWith('req-');
+      const isManualEntry = (rec: any) => {
+        if (!rec) return false;
+        if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
+        if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
+        const idStr = String(rec.id || '');
+        return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
+      };
 
       const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修', '出張', '振替＋時間休', '全休', '年給', '有給', '1日振替', '半日振替', '午前休', '午後休'].includes(t);
 
@@ -203,15 +205,11 @@ export const CalendarScreen: React.FC<any> = ({
         } else if (!isManNew && wasManOld) {
           isBetter = false; 
         } else if (isManNew && wasManOld) {
-          const isMNew = String(normalizedReq.id).startsWith('m-');
-          const isMOld = String(existing.id).startsWith('m-');
-          
-          if (isMNew && !isMOld) {
-            isBetter = true;
-          } else if (!isMNew && isMOld) {
-            isBetter = false;
+          const timeDiff = getTime(normalizedReq) - getTime(existing);
+          if (timeDiff !== 0) {
+            isBetter = timeDiff > 0;
           } else {
-            isBetter = getTime(normalizedReq) > getTime(existing);
+            isBetter = true;
           }
         } else {
           isBetter = isOffNew && !isOffOld;
@@ -451,7 +449,7 @@ export const CalendarScreen: React.FC<any> = ({
             
             // 1. 対象スタッフ・対象日の「手動リクエスト」をすべて特定
             const manualRequestIds = requests
-              .filter(r => r.staffName?.trim() === staffName.trim() && r.date === dateStr && !String(r.id).startsWith('auto-'))
+              .filter(r => r.staffName?.trim() === staffName.trim() && r.date === dateStr && (r.is_manual === true || r.isManual === true || r.details?.isManual === true || !String(r.id).startsWith('auto-')))
               .map(r => r.id);
 
             // 2. クラウド/グローバルステートから一括削除
@@ -491,7 +489,7 @@ export const CalendarScreen: React.FC<any> = ({
 
     if (selectedType === '空欄') {
       const idsToDelete = requests
-        .filter(r => r.date === dateStr && staffNames.includes(r.staffName?.trim()) && !String(r.id).startsWith('auto-'))
+        .filter(r => r.date === dateStr && staffNames.includes(r.staffName?.trim()) && (r.is_manual === true || r.isManual === true || r.details?.isManual === true || !String(r.id).startsWith('auto-')))
         .map(r => r.id);
       
       if (idsToDelete.length > 0) {
@@ -527,24 +525,27 @@ export const CalendarScreen: React.FC<any> = ({
     const newReqs = staffNames.map(nameOrId => {
       const staff = staffList.find(s => s.id === nameOrId || normalizeName(s.name) === normalizeName(nameOrId));
       const finalName = staff ? staff.name : nameOrId;
-      const sId = staff ? staff.id : `manual-${Date.now()}`;
-      // [V60.9] 確定的ID（m-ID-DATE）を使用することで、UPSERT時に以前の手動シフト（公休など）を上書きする
+      const sId = staff ? staff.id : undefined;
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
       return {
-        id: `m-${sId}-${dateStr}`,
+        id: newId,
+        staffId: sId,
+        staff_id: sId,
         staffName: finalName,
         date: dateStr,
         type: selectedType,
         status: 'approved',
         reason: '管理者による調整',
         isManual: true, // リクエストテーブル用
+        is_manual: true,
         hours: selectedType === '特休＋時間休'
           ? (adminSpecialHours + adminHourlyHours)
           : (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤', '出張', '休日時間外'].includes(selectedType))
             ? hourlyDuration
             : null,
         details: selectedType === '特休＋時間休'
-          ? { note: '手動割当', specialHours: adminSpecialHours, hourlyHours: adminHourlyHours }
-          : { note: '手動割当' },
+          ? { note: '手動割当', specialHours: adminSpecialHours, hourlyHours: adminHourlyHours, isManual: true }
+          : { note: '手動割当', isManual: true },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(), // [V61.0] 優先度判定のためにupdatedAtを付与
       };
@@ -554,8 +555,7 @@ export const CalendarScreen: React.FC<any> = ({
     // [V75.2] STRICT ERROR HANDLING & UUID VALIDATION
     try {
       for (const r of newReqs) {
-        const extractedId = extractUuid(r.id);
-        const staff = staffList.find(s => s.id === extractedId || normalizeName(s.name) === normalizeName(r.staffName));
+        const staff = staffList.find(s => s.id === (r.staff_id || r.staffId) || normalizeName(s.name) === normalizeName(r.staffName));
         
         if (!staff || !staff.id) {
           console.error('[V75.2] Failed to resolve UUID for staff:', r.staffName);

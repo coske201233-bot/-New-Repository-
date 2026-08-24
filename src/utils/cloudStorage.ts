@@ -199,28 +199,24 @@ export const cloudStorage = {
         const validKeys = ['id', 'staffName', 'staffId', 'userId', 'staff_id', 'user_id', 'date', 'type', 'status', 'details', 'reason', 'createdAt'];
         
         const details = { ...(r.details || {}) };
-        if (r.updatedAt) details.updatedAt = r.updatedAt;
-        if (r.source) details.source = r.source;
-        if (r.isManual !== undefined) details.isManual = r.isManual;
+        const isMan = r.isManual !== undefined ? !!r.isManual : (r.is_manual !== undefined ? !!r.is_manual : !String(r.id || '').startsWith('auto-'));
+        if (r.isManual !== undefined || r.is_manual !== undefined) details.isManual = isMan;
         if (r.priority !== undefined) details.priority = r.priority;
         if (r.hours !== undefined) obj.hours = r.hours; // [STRICT REFACTOR] カラムへ直接セット
         if (r.locked !== undefined) details.locked = r.locked;
-        let correctId = r.id;
-                if (correctId && !String(correctId).startsWith('m-') && !String(correctId).startsWith('req-')) {
-                  correctId = 'm-' + correctId;
-                }
+        const validId = r.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined);
         const payload = { 
           ...r,
-          id: correctId, // 💡 補正したIDを適用します
+          id: validId,
+          is_manual: isMan,
           staffName: normalizeName(r.staffName || ''),
           details 
         };
         validKeys.forEach(k => { if (payload[k] !== undefined) obj[k] = payload[k]; });
         if (r.hours !== undefined) obj.hours = r.hours; // 明示的にhoursを保持
+        if (isMan !== undefined) obj.is_manual = isMan;
         
         const mapped = mapToSql(obj, REQ_MAP);
-        
-
         return mapped;
       });
 
@@ -369,14 +365,15 @@ export const cloudStorage = {
             updated_at: now
           });
         } else {
+          const isMan = r.isManual !== undefined ? !!r.isManual : (r.is_manual !== undefined ? !!r.is_manual : !String(r.id || '').startsWith('auto-'));
           shiftPayloads.push({
-            id: r.id,
+            id: r.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined),
             staff_id: staffId,
             staff_name: staffName,
             date: r.date,
             type: r.type,
             status: r.status,
-            is_manual: !!(r.isManual || r.is_manual || String(r.id).startsWith('m-') || String(r.id).startsWith('req-')),
+            is_manual: isMan,
             hours: r.hours ?? r.details?.hours ?? r.details?.duration,
             details: r.details,
             updated_at: now

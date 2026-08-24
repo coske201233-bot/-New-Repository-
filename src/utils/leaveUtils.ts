@@ -160,11 +160,13 @@ export const calculateUsedLeaveHours = (
   // カレンダー画面と同一の日付別最優先レコード解決 (Day Map)
   const dayMap = new Map<string, any>();
 
-  const isManualEntry = (rec: any) => 
-    !!(rec?.is_manual || rec?.isManual) || 
-    String(rec?.id || '').startsWith('m-') || 
-    String(rec?.id || '').startsWith('manual-') || 
-    String(rec?.id || '').startsWith('req-');
+  const isManualEntry = (rec: any) => {
+    if (!rec) return false;
+    if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
+    if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
+    const idStr = String(rec.id || '');
+    return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
+  };
 
   const getTime = (i: any) => {
     const t = i?.updatedAt || i?.updated_at || i?.createdAt || i?.created_at || 0;
@@ -284,11 +286,13 @@ export const calculateMandatoryLeaveStatus = (
   // カレンダー画面と同一の日付別最優先レコード解決 (Day Map)
   const dayMap = new Map<string, any>();
 
-  const isManualEntry = (rec: any) => 
-    !!(rec?.is_manual || rec?.isManual) || 
-    String(rec?.id || '').startsWith('m-') || 
-    String(rec?.id || '').startsWith('manual-') || 
-    String(rec?.id || '').startsWith('req-');
+  const isManualEntry = (rec: any) => {
+    if (!rec) return false;
+    if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
+    if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
+    const idStr = String(rec.id || '');
+    return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
+  };
 
   const getTime = (i: any) => {
     const t = i?.updatedAt || i?.updated_at || i?.createdAt || i?.created_at || 0;

@@ -74,17 +74,17 @@ export const generateMonthlyShifts = async (
   console.log('══════════════════════════════════════════════');
 
   try {
-    // Step 0: 自動生成シフトを削除
+    // Step 0: 自動生成シフトを削除（is_manual = false を対象）
     const { error: deleteError } = await supabase
       .from('shifts')
       .delete()
-      .like('id', 'auto-%')
+      .eq('is_manual', false)
       .gte('date', startDate)
       .lte('date', endDateStr);
 
     if (deleteError) {
-      console.error('[ShiftEngine] 自動シフトの削除に失敗:', deleteError.message);
-      await supabase.from('shifts').delete().gte('date', startDate).lte('date', endDateStr);
+      console.error('[ShiftEngine] 自動シフトの削除に失敗 (is_manual filter):', deleteError.message);
+      await supabase.from('shifts').delete().like('id', 'auto-%').gte('date', startDate).lte('date', endDateStr);
     }
 
     // Step 0.2: 前月末シフトをロード（連勤防止用）
@@ -106,17 +106,16 @@ export const generateMonthlyShifts = async (
 
     const manualDayMap = new Map<string, any>();
     (currentShifts || []).forEach(s => {
-      const isAuto = String(s.id || '').startsWith('auto-');
-      const isManualFlag = s.is_manual === true || s.details?.isManual === true;
-      if (!isAuto || isManualFlag) {
+      const isManualFlag = s.is_manual === true || s.isManual === true || s.details?.isManual === true || (!String(s.id || '').startsWith('auto-') && s.is_manual !== false);
+      if (isManualFlag) {
         const dKey = s.date.substring(0, 10);
-        const sId = String(s.staff_id || s.user_id || extractUuid(s.id) || '').trim();
+        const sId = String(s.staff_id || s.staffId || s.user_id || s.userId || extractUuid(s.id) || '').trim();
         if (sId) manualDayMap.set(`${dKey}_${sId}`, s);
       }
     });
     (currentRequests || []).forEach(r => {
       const dKey = r.date.substring(0, 10);
-      const sId = String(r.user_id || r.staff_id || extractUuid(r.id) || '').trim();
+      const sId = String(r.staff_id || r.staffId || r.user_id || r.userId || extractUuid(r.id) || '').trim();
       const sName = normalizeName(r.staff_name || r.staffName || '');
       if (sId) manualDayMap.set(`${dKey}_${sId}`, r);
       if (sName) manualDayMap.set(`${dKey}_name_${sName}`, r);
@@ -150,7 +149,7 @@ export const generateMonthlyShifts = async (
 
     const leaveSet = new Set<string>();
     (approvedLeaves || []).forEach((r: any) => {
-      const uid = r.staff_id || r.user_id || extractUuid(r.id);
+      const uid = r.staff_id || r.staffId || r.user_id || r.userId || extractUuid(r.id);
       if (uid && r.date) leaveSet.add(`uid__${uid}__${r.date}`);
     });
 
@@ -194,7 +193,7 @@ export const generateMonthlyShifts = async (
         forcedOffDates: new Set<string>(),
       };
       (manualShifts || []).forEach((ms: any) => {
-        const msId = String(ms.staff_id || ms.user_id || extractUuid(ms.id) || '').trim();
+        const msId = String(ms.staff_id || ms.staffId || ms.user_id || ms.userId || extractUuid(ms.id) || '').trim();
         if (msId && msId === staff.id) {
           const dKey = ms.date.substring(0, 10);
           if (ms.type === '出勤') {
@@ -207,7 +206,7 @@ export const generateMonthlyShifts = async (
       });
       trackers.set(staff.id, tracker);
       (prevShifts || []).forEach((ps: any) => {
-        const psId = String(ps.staff_id || ps.user_id || extractUuid(ps.id) || '').trim();
+        const psId = String(ps.staff_id || ps.staffId || ps.user_id || ps.userId || extractUuid(ps.id) || '').trim();
         if (psId && psId === staff.id) {
           tracker.workedDates.add(ps.date.substring(0, 10));
         }
@@ -216,7 +215,7 @@ export const generateMonthlyShifts = async (
 
     const hasManualShift = (staffId: string, dateStr: string): boolean => {
       return (manualShifts || []).some((ms: any) => {
-        const msId = String(ms.staff_id || ms.user_id || extractUuid(ms.id) || '').trim();
+        const msId = String(ms.staff_id || ms.staffId || ms.user_id || ms.userId || extractUuid(ms.id) || '').trim();
         return (msId && msId === staffId && ms.date.substring(0, 10) === dateStr);
       });
     };
@@ -224,21 +223,25 @@ export const generateMonthlyShifts = async (
     const generatedShifts: any[] = [];
 
     const assignOffShift = (tracker: StaffTracker, dateStr: string, type: string, phase: string) => {
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `auto-off-${tracker.id}-${dateStr}-${Math.random().toString(36).substr(2, 6)}`;
       generatedShifts.push({
-        id: `auto-off-${tracker.id}-${dateStr}-${Math.random().toString(36).substr(2, 6)}`,
+        id: newId,
         staff_name: tracker.name, staff_id: tracker.id, date: dateStr, type,
         status: 'approved',
-        details: { isManual: false, phase, note: `V72.2 ${phase}` }
+        is_manual: false,
+        details: { isManual: false, phase, note: `V72.2 ${phase}`, isAuto: true }
       });
       tracker.forcedOffDates.add(dateStr);
     };
 
     const assignShift = (tracker: StaffTracker, dateStr: string, dayType: string, phase: string) => {
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `auto-${tracker.id}-${dateStr}-${Math.random().toString(36).substr(2, 6)}`;
       generatedShifts.push({
-        id: `auto-${tracker.id}-${dateStr}-${Math.random().toString(36).substr(2, 6)}`,
+        id: newId,
         staff_name: tracker.name, staff_id: tracker.id, date: dateStr, type: '出勤',
         status: 'approved',
-        details: { isManual: false, phase, dayType, isHolidayWork: dayType !== 'weekday', note: `V72.2 ${phase}` }
+        is_manual: false,
+        details: { isManual: false, phase, dayType, isHolidayWork: dayType !== 'weekday', note: `V72.2 ${phase}`, isAuto: true }
       });
       tracker.totalWorkCount++;
       tracker.workedDates.add(dateStr);
@@ -511,6 +514,7 @@ export const generateMonthlyShifts = async (
           date: String(s.date ?? ''),
           type: String(s.type ?? '出勤'),
           status: String(s.status ?? 'approved'),
+          is_manual: false,
           details: s.details ? JSON.parse(JSON.stringify(s.details)) : null,
         }));
         await supabase.from('shifts').upsert(cleanChunk, { onConflict: 'id' });
