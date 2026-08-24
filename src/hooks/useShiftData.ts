@@ -1,12 +1,15 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../utils/supabase';
 import { cloudStorage } from '../utils/cloudStorage';
 
 export const useShiftData = () => {
   const [shifts, setShifts] = useState<any[]>([]);
   const [isLoadingShifts, setIsLoadingShifts] = useState(false);
+  const isFetchingRef = useRef(false);
 
   const fetchShifts = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setIsLoadingShifts(true);
     try {
       console.log('[ShiftEngine] Global fetch: データベースからシフトデータを取得中...');
@@ -82,6 +85,7 @@ export const useShiftData = () => {
     } catch (e) {
       console.error('[ShiftEngine] Global fetch error:', e);
     } finally {
+      isFetchingRef.current = false;
       setIsLoadingShifts(false);
     }
   }, []);

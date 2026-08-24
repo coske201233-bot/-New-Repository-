@@ -79,10 +79,13 @@ export const CalendarScreen: React.FC<any> = ({
   const [isTypeModalVisible, setIsTypeModalVisible] = useState(false);
 
   const currentMonthKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}`;
+  const fetchShiftsRef = React.useRef(fetchShifts);
+  fetchShiftsRef.current = fetchShifts;
+
   React.useEffect(() => {
     // 月変更時に最新データを取得
-    if (fetchShifts) fetchShifts();
-  }, [fetchShifts, currentMonthKey]);
+    if (fetchShiftsRef.current) fetchShiftsRef.current();
+  }, [currentMonthKey]);
 
   React.useEffect(() => {
     // If current selected date is not in the active month, reset it to the 1st of that month

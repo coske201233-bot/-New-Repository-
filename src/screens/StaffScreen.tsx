@@ -81,9 +81,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const userRole = isAdminAuthenticated ? 'admin' : 'staff';
 
   const activeMonthKey = activeDate ? `${activeDate.getFullYear()}-${activeDate.getMonth()}` : '';
+  const fetchShiftsRef = React.useRef(fetchShifts);
+  fetchShiftsRef.current = fetchShifts;
+
   useEffect(() => {
-    if (fetchShifts) fetchShifts();
-  }, [fetchShifts, activeMonthKey]);
+    if (fetchShiftsRef.current) fetchShiftsRef.current();
+  }, [activeMonthKey]);
 
   // --- [CRITICAL: FORCE RE-FETCH ON FOCUS & DEBUG] ---
   const runDebugFetch = async () => {
