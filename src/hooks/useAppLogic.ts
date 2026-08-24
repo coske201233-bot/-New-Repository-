@@ -37,112 +37,95 @@ export const useAppLogic = () => {
     };
   }, [req.fetchRequests, shifts.fetchShifts]);
 
-  // 初期化フロー: 認証セッション解決後に実行
+  // 認証セッション解決時・ログイン成功（auth.user?.id変化）時のデータ取得フロー
   useEffect(() => {
-    // 1. すでに初期化されている場合はスキップ
-    if (isInitialized) return;
-    
-    // 2. 認証準備ができるまで待機
+    // 認証準備ができるまで待機
     if (!auth.isAuthReady) return;
 
     let mounted = true;
     
-    // [SAFETY REFACTOR] 強制アンロックではなく、ネットワークタイムアウトの可能性を警告するためのタイマー
+    // ネットワークタイムアウトの可能性を警告するためのタイマー
     const warningTimer = setTimeout(() => {
       if (mounted && !isInitialized) {
         console.warn('--- [WARNING] Initialization is taking longer than expected (10s) ---');
       }
     }, 10000);
 
-    const initializeData = async () => {
-        try {
-            console.log('--- [FORCE_INIT] Initializing data (SSOT Integration) ---');
-            
-            // VERSION 43: One-time ghost data purge
-            if (Platform.OS === 'web') {
-              const purgeKey = 'v43_purged_final';
-              if (!localStorage.getItem(purgeKey)) {
-                localStorage.clear();
-                localStorage.setItem(purgeKey, 'true');
-              }
-            }
-            
-            // 認証済みセッションがある場合のみ、クラウドから取得を試みる
-            let staffDataRaw = null;
-            let reqDataRaw = null;
-            if (auth.user) {
-              console.log('[FORCE_INIT] Fetching staff and requests from cloud (user authenticated)');
-              staffDataRaw = await cloudStorage.fetchStaff().catch(() => null);
-              reqDataRaw = await cloudStorage.fetchRequests().catch(() => null);
-            } else {
-              console.log('[FORCE_INIT] Skipping cloud fetch: no authenticated user session');
-            }
-            
-            let staffData = Array.isArray(staffDataRaw) ? staffDataRaw : [];
-            let reqData = Array.isArray(reqDataRaw) ? reqDataRaw : [];
-            
-            // localStorageはクラウドが空の場合のフォールバックとしてのみ使用
-            if (staffData.length === 0) {
-              if (Platform.OS === 'web') {
-                const s = localStorage.getItem('proto_staff_data');
-                if (s) {
-                  try { 
-                    const parsed = JSON.parse(s);
-                    if (Array.isArray(parsed) && parsed.length > 0) staffData = parsed;
-                  } catch (e) { console.warn('proto_staff_data parse error'); }
-                }
-              }
-            }
-            
-            // [CRITICAL V73.9] クラウドが正常に0件を返した場合は、ローカルマージをスキップしてまっさらにする
-            let finalReqs = reqDataRaw || [];
-            
-            if (Platform.OS === 'web' && (!reqDataRaw || reqDataRaw.length === 0)) {
-              // 完全に新規ユーザーか、通信エラーの場合のみLocalStorageを参照
-              const localR = localStorage.getItem('proto_request_data');
-              if (localR && (!reqDataRaw)) { // fetchRequests が失敗(null/undefined)した時のみ
-                try {
-                  const parsed = JSON.parse(localR);
-                  if (Array.isArray(parsed)) finalReqs = parsed;
-                } catch(e) {}
-              }
-            }
-
-            req.setRequests(finalReqs);
-            console.log('✅ Initial Data Loaded [V76.6]:', finalReqs.length);
-
-            // シニアアーキテクト指令: エポメラル・テスト用モックデータ注入 (SupabaseもLocalも空の場合)
-            if (staffData.length === 0) {
-              staffData = Array.from({ length: 16 }, (_, i) => ({
-                id: `mock-s-${i}`,
-                name: `Staff ${String.fromCharCode(65 + i)}`,
-                role: i === 0 ? '管理者' : '一般職員',
-                profession: '看護師',
-                isApproved: true
-              }));
-            }
-            
-            if (mounted) {
-                staff.setStaffList(staffData);
-                // 💡 シフトデータも初期化時に一度取得
-                shifts.fetchShifts();
-            }
-        } catch (error: any) {
-            console.warn('Initialization notice:', error.message);
-        } finally {
-            if (mounted) {
-              setIsInitialized(true);
-              clearTimeout(warningTimer);
-            }
+    const loadAllData = async () => {
+      try {
+        console.log('--- [AUTH_SYNC] Loading data for user session:', auth.user?.email || 'No User');
+        
+        // VERSION 43: One-time ghost data purge
+        if (Platform.OS === 'web') {
+          const purgeKey = 'v43_purged_final';
+          if (!localStorage.getItem(purgeKey)) {
+            localStorage.clear();
+            localStorage.setItem(purgeKey, 'true');
+          }
         }
+        
+        // 認証済みユーザーが存在する場合、クラウドから全データを取得
+        if (auth.user) {
+          console.log('[AUTH_SYNC] Fetching staff, requests, shifts from cloud...');
+          const [staffDataRaw, reqDataRaw] = await Promise.all([
+            cloudStorage.fetchStaff().catch((e) => { console.warn('fetchStaff failed:', e); return null; }),
+            cloudStorage.fetchRequests().catch((e) => { console.warn('fetchRequests failed:', e); return null; })
+          ]);
+          
+          let staffData = Array.isArray(staffDataRaw) ? staffDataRaw : [];
+          let reqData = Array.isArray(reqDataRaw) ? reqDataRaw : [];
+          
+          // localStorageはクラウドが空または取得失敗時のフォールバックとしてのみ使用
+          if (staffData.length === 0 && Platform.OS === 'web') {
+            const s = localStorage.getItem('proto_staff_data');
+            if (s) {
+              try { 
+                const parsed = JSON.parse(s);
+                if (Array.isArray(parsed) && parsed.length > 0) staffData = parsed;
+              } catch (e) { console.warn('proto_staff_data parse error'); }
+            }
+          }
+
+          let finalReqs = reqData;
+          if (Platform.OS === 'web' && (!reqDataRaw || reqDataRaw.length === 0)) {
+            const localR = localStorage.getItem('proto_request_data');
+            if (localR && !reqDataRaw) {
+              try {
+                const parsed = JSON.parse(localR);
+                if (Array.isArray(parsed)) finalReqs = parsed;
+              } catch(e) {}
+            }
+          }
+
+          if (mounted) {
+            staff.setStaffList(staffData);
+            req.setRequests(finalReqs);
+            
+            // シフトデータおよび設定値も取得
+            shifts.fetchShifts();
+            config.refreshConfigs();
+
+            console.log(`✅ [AUTH_SYNC] Data Loaded: Staff=${staffData.length}, Requests=${finalReqs.length}`);
+          }
+        } else {
+          console.log('[AUTH_SYNC] Guest session or logged out.');
+        }
+      } catch (error: any) {
+        console.warn('Initialization/Auth data load error:', error.message);
+      } finally {
+        if (mounted) {
+          setIsInitialized(true);
+          clearTimeout(warningTimer);
+        }
+      }
     };
 
-    initializeData();
+    loadAllData();
     return () => { 
       mounted = false; 
       clearTimeout(warningTimer);
     };
-  }, [auth.isAuthReady, auth.user, isInitialized]);
+  }, [auth.isAuthReady, auth.user?.id]);
 
   useEffect(() => {
     if (Platform.OS === 'web' && isInitialized) {
