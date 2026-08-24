@@ -63,7 +63,7 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
                 style={[styles.typeBtn, type === t && styles.typeBtnActive]}
                 onPress={() => setType(t)}
               >
-                <ThemeText color={type === t ? 'white' : COLORS.textPrimary} size={11} bold={type === t}>{t}</ThemeText>
+                <ThemeText color={type === t ? 'white' : COLORS.text} bold={type === t} style={{ fontSize: 11 }}>{t}</ThemeText>
               </TouchableOpacity>
             ))}
           </View>
@@ -78,13 +78,13 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
                   <ThemeText variant="caption" style={{ marginBottom: 6 }}>特休の時間数</ThemeText>
                   <View style={styles.hourControl}>
                     <TouchableOpacity style={styles.stepBtn} onPress={() => adjustSpecialHours(-0.25)}>
-                      <ThemeText color="white" bold size={20}>-</ThemeText>
+                      <ThemeText color="white" bold style={{ fontSize: 20 }}>-</ThemeText>
                     </TouchableOpacity>
                     <View style={styles.hourDisplay}>
-                      <ThemeText bold size={18}>{specialHours.toFixed(2)} h</ThemeText>
+                      <ThemeText bold style={{ fontSize: 18 }}>{specialHours.toFixed(2)} h</ThemeText>
                     </View>
                     <TouchableOpacity style={styles.stepBtn} onPress={() => adjustSpecialHours(0.25)}>
-                      <ThemeText color="white" bold size={20}>+</ThemeText>
+                      <ThemeText color="white" bold style={{ fontSize: 20 }}>+</ThemeText>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -92,13 +92,13 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
                   <ThemeText variant="caption" style={{ marginBottom: 6 }}>時間休の時間数</ThemeText>
                   <View style={styles.hourControl}>
                     <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHourlyHours(-0.25)}>
-                      <ThemeText color="white" bold size={20}>-</ThemeText>
+                      <ThemeText color="white" bold style={{ fontSize: 20 }}>-</ThemeText>
                     </TouchableOpacity>
                     <View style={styles.hourDisplay}>
-                      <ThemeText bold size={18}>{hourlyHours.toFixed(2)} h</ThemeText>
+                      <ThemeText bold style={{ fontSize: 18 }}>{hourlyHours.toFixed(2)} h</ThemeText>
                     </View>
                     <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHourlyHours(0.25)}>
-                      <ThemeText color="white" bold size={20}>+</ThemeText>
+                      <ThemeText color="white" bold style={{ fontSize: 20 }}>+</ThemeText>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -107,13 +107,13 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
             ) : (
               <View style={styles.hourControl}>
                 <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHours(-0.25)}>
-                  <ThemeText color="white" bold size={20}>-</ThemeText>
+                  <ThemeText color="white" bold style={{ fontSize: 20 }}>-</ThemeText>
                 </TouchableOpacity>
                 <View style={styles.hourDisplay}>
-                  <ThemeText bold size={18}>{hours.toFixed(2)} h</ThemeText>
+                  <ThemeText bold style={{ fontSize: 18 }}>{hours.toFixed(2)} h</ThemeText>
                 </View>
                 <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHours(0.25)}>
-                  <ThemeText color="white" bold size={20}>+</ThemeText>
+                  <ThemeText color="white" bold style={{ fontSize: 20 }}>+</ThemeText>
                 </TouchableOpacity>
               </View>
             )}
@@ -177,7 +177,7 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bgSoft },
+  container: { flex: 1, backgroundColor: COLORS.background },
   header: { padding: SPACING.lg, paddingTop: 20 },
   formCard: { margin: SPACING.md, padding: SPACING.lg },
   label: { marginBottom: 12, fontSize: 16 },
@@ -185,19 +185,19 @@ const styles = StyleSheet.create({
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   typeBtn: { 
     paddingHorizontal: 16, paddingVertical: 10, 
-    borderRadius: BORDER_RADIUS.full, backgroundColor: COLORS.bgSubtle,
+    borderRadius: BORDER_RADIUS.full, backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1, borderColor: COLORS.border
   },
   typeBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   dateRow: { flexDirection: 'row', gap: 8 },
   dateInput: { 
-    height: 48, borderRadius: BORDER_RADIUS.md, backgroundColor: COLORS.bgSubtle,
+    height: 48, borderRadius: BORDER_RADIUS.md, backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 12, marginTop: 4,
-    color: COLORS.textPrimary
+    color: COLORS.text
   },
-  textArea: {
-    minHeight: 100, borderRadius: BORDER_RADIUS.md, backgroundColor: COLORS.bgSubtle,
-    borderWidth: 1, borderColor: COLORS.border, padding: 12, color: COLORS.textPrimary
+  textArea: { 
+    minHeight: 100, borderRadius: BORDER_RADIUS.md, backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1, borderColor: COLORS.border, padding: 12, color: COLORS.text
   },
   submitBtn: {
     height: 56, backgroundColor: COLORS.primary, borderRadius: BORDER_RADIUS.lg,
@@ -205,12 +205,12 @@ const styles = StyleSheet.create({
     ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8 }, android: { elevation: 4 } })
   },
   hourControl: { 
-    flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bgSubtle, 
+    flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', 
     borderRadius: BORDER_RADIUS.md, borderWidth: 1, borderColor: COLORS.border, overflow: 'hidden' 
   },
   stepBtn: { 
     width: 60, height: 50, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' 
   },
   hourDisplay: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  infoCard: { marginHorizontal: SPACING.md, padding: SPACING.md, backgroundColor: '#f0f9ff', borderColor: '#bae6fd' }
+  infoCard: { marginHorizontal: SPACING.md, padding: SPACING.md, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: '#bae6fd' }
 });

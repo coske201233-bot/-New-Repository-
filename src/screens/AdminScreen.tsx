@@ -36,13 +36,14 @@ interface AdminScreenProps {
   updateStaffList: (update: any[] | ((prev: any[]) => any[])) => Promise<any>;
   patchStaff: (id: string, updates: any) => Promise<any>;
   fetchShifts?: () => Promise<void>;
+  onNavigateToStaff?: () => void;
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
   currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
-  updateStaffList, patchStaff, fetchShifts
+  updateStaffList, patchStaff, fetchShifts, onNavigateToStaff
 }) => {
 
 
@@ -355,6 +356,18 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
               <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>📋 レポーティング & ツール</ThemeText>
               
+              <ThemeCard style={styles.itemRow}>
+                <View style={[styles.iconCircle, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}><UserPlus size={20} color="#38bdf8" /></View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <ThemeText bold>スタッフ管理・アカウント設定</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>新規スタッフ登録、パスワード変更、権限・所属設定、無効化</ThemeText>
+                </View>
+                <TouchableOpacity style={styles.inlineBtn} onPress={onNavigateToStaff}>
+                  <ThemeText bold color="#38bdf8" style={{marginRight:4}}>管理画面を開く</ThemeText>
+                  <ChevronRight size={16} color="#38bdf8" />
+                </TouchableOpacity>
+              </ThemeCard>
+
               <ThemeCard style={styles.itemRow}>
                 <View style={styles.iconCircle}><FileText size={20} color="#10b981" /></View>
                 <View style={{ flex: 1, marginLeft: 12 }}>

@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { STORAGE_KEYS, saveData, loadData } from '../utils/storage';
 import { cloudStorage, mapToSql, mapFromSql, STAFF_MAP } from '../utils/cloudStorage';
 import { sortStaffByName } from '../utils/staffUtils';
+import { supabase } from '../utils/supabase';
 
 export const useStaffData = () => {
   const [staffList, setStaffList] = useState<any[]>([]);

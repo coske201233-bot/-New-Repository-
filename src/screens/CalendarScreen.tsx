@@ -51,6 +51,16 @@ interface CalendarScreenProps {
 // [BUILD: VERSION 55.0 - UNIFIED SYNC LOGIC]
 // ─────────────────────────────────────────────
 
+const extractUuid = (idStr: string): string | null => {
+  if (!idStr) return null;
+  const parts = idStr.split('-');
+  // auto-UUID-DATE-... または m-UUID-DATE-... 形式 (1 + 5 + ...)
+  if (parts.length >= 6) return parts.slice(1, 6).join('-');
+  // レガシーな5連IDへの対応
+  if (parts.length === 5 && !idStr.includes('req-')) return idStr;
+  return null;
+};
+
 export const CalendarScreen: React.FC<any> = ({ 
   requests, setRequests,
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,

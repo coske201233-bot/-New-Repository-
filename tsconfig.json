@@ -5,13 +5,22 @@
     "skipLibCheck": true,
     "noEmit": true,
     "jsx": "react-native",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "allowJs": true,
     "esModuleInterop": true,
-    "lib": ["DOM", "DOM.Iterable", "ESNext"],
-    "baseUrl": ".",
-    "paths": {
-      "*": ["src/*"]
-    }
-  }
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ESNext"
+    ]
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "scratch"
+  ]
 }

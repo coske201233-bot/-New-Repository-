@@ -344,19 +344,19 @@ export const generateMonthlyShifts = async (
             const staffOnLastDate = holidayHistory.filter(s => s.date === lastDate);
             
             // [V76.5] 1. 前月最終日の全担当者を現在のリストで動的にインデックス化
-            const indicesOnLastDay = staffOnLastDate.map(row => {
+            const indicesOnLastDay = staffOnLastDate.map((row: any) => {
               const staffId = row.staff_id || row.staffId;
               const staffName = normalizeName(row.staff_name || row.staffName || "");
               
               // 1. UUID で検索
               let idx = -1;
               if (staffId) {
-                idx = sortedStaffList.findIndex(s => s.id === staffId);
+                idx = sortedStaffList.findIndex((s: any) => s.id === staffId);
               }
               
               // 2. UUID で見つからない場合は名前で検索
               if (idx === -1 && staffName) {
-                idx = sortedStaffList.findIndex(s => normalizeName(s.name) === staffName);
+                idx = sortedStaffList.findIndex((s: any) => normalizeName(s.name) === staffName);
               }
               
               return idx;
@@ -382,7 +382,7 @@ export const generateMonthlyShifts = async (
             if (tailIndex !== -1) {
               const lastAssignedIndex = tailIndex;
               currentStaffIndex = (lastAssignedIndex + 1) % sortedStaffList.length;
-              console.log(`[CarryOver Debug] V76.5 SUCCESS (Wrap-aware): Date: ${lastDate}, Names: ${staffOnLastDate.map(s => s.staff_name || s.staffName).join('/')}, Indices: ${indicesOnLastDay.join(', ')}, Tail: ${lastAssignedIndex} -> Next: ${currentStaffIndex}(${sortedStaffList[currentStaffIndex]?.name})`);
+              console.log(`[CarryOver Debug] V76.5 SUCCESS (Wrap-aware): Date: ${lastDate}, Names: ${staffOnLastDate.map((s: any) => s.staff_name || s.staffName).join('/')}, Indices: ${indicesOnLastDay.join(', ')}, Tail: ${lastAssignedIndex} -> Next: ${currentStaffIndex}(${sortedStaffList[currentStaffIndex]?.name})`);
             } else {
               console.warn(`[CarryOver Debug] V76.5 FAILED: 最終日のスタッフを特定できませんでした。`);
               currentStaffIndex = 0; // フォールバック

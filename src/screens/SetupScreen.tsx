@@ -66,7 +66,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onComplete, onBack }) 
       name: name.trim(),
       placement,
       jobType,
-      role,
+      position: role,
       status: '常勤',
       role: selectedRoles.join(','),
       isApproved: isYoshidaAdmin,

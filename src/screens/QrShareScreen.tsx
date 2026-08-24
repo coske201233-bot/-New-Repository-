@@ -78,9 +78,10 @@ export const QrShareScreen: React.FC<QrShareScreenProps> = ({
       } else {
         try {
           // キャッシュディレクトリに一時保存
-          const filename = `${FileSystem.cacheDirectory}staff_qrcode.png`;
-          await FileSystem.writeAsStringAsync(filename, dataURL, {
-            encoding: FileSystem.EncodingType.Base64,
+          const fs = FileSystem as any;
+          const filename = `${fs.cacheDirectory || fs.documentDirectory}staff_qrcode.png`;
+          await fs.writeAsStringAsync(filename, dataURL, {
+            encoding: fs.EncodingType?.Base64 || 'base64',
           });
           
           // 共有ダイアログを表示

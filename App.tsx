@@ -69,8 +69,7 @@ export default function App() {
     monthlyLimits, updateLimits,
     adminPassword, updatePassword,
     isAdminAuthenticated, setIsAdminAuthenticated,
-    staffViewMode, setStaffViewMode,
-    sessionDuration, setSessionDuration,
+    sessionDuration,
     isInitialized, isSyncing,
     activeDate, setActiveDate,
     handleLogout,
@@ -79,7 +78,6 @@ export default function App() {
     cancelRequest,
     approveRequest,
     onDeleteRequest,
-    onDeleteStaff,
     onAutoAssign,
     onUndoAutoAssign,
     canUndoAutoAssign,
@@ -109,7 +107,6 @@ export default function App() {
       staffList, setStaffList, updateStaffList, patchStaff,
       requests, setRequests,
       onDeleteRequest,
-      onDeleteRequest,
       onDeleteRequests: async (ids: string[]) => {
         for (const id of ids) {
           await onDeleteRequest(id);
@@ -124,10 +121,7 @@ export default function App() {
       onOpenRequests: () => setCurrentTab('adminRequests'),
       onShareApp: () => setCurrentTab('qrShare'),
       onLogout: handleLogout,
-      staffViewMode,
-      setStaffViewMode,
       sessionDuration,
-      setSessionDuration,
       onForceCloudSync: handleForceCloudSync,
       currentDate: activeDate, setCurrentDate: setActiveDate,
       onAutoAssign,
@@ -156,7 +150,7 @@ export default function App() {
       case 'calendar': return <CalendarScreen {...commonProps} />;
       case 'requests': return <RequestScreen {...commonProps} />;
       case 'staff': return <StaffScreen {...commonProps} isPrivileged={isAdminAuthenticated} />;
-      case 'admin': return <AdminScreen {...commonProps} />;
+      case 'admin': return <AdminScreen onNavigateToStaff={() => setCurrentTab('staff')} {...commonProps} />;
       case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={approveRequest} handleBulkApprove={handleBulkApprove} deleteRequest={onDeleteRequest} handleReject={handleReject} />;
       case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab('admin')} />;
       default: return <HomeScreen onNavigateToStaff={handleNavigateToStaff} {...commonProps} />;

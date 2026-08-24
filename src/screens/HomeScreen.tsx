@@ -14,6 +14,7 @@ interface HomeScreenProps {
   onNavigateToStaff?: (ward: string) => void;
   staffList: any[];
   requests: any[];
+  weekdayLimit?: number;
   saturdayLimit: number;
   sundayLimit: number;
   publicHolidayLimit: number;

@@ -36,7 +36,7 @@ export const useRequestData = () => {
     try {
       // 1. Calculate the new full list from previous state
       const currentReqSnap = Array.isArray(requests) ? requests : [];
-      const nextRaw = typeof update === 'function' ? update(currentReqSnap) : update;
+      let nextRaw = typeof update === 'function' ? update(currentReqSnap) : update;
       if (!Array.isArray(nextRaw)) nextRaw = [];
       
       const now = new Date().toISOString();

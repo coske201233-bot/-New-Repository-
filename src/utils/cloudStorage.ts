@@ -469,11 +469,11 @@ export const cloudStorage = {
     console.log('--- [REALTIME] Initializing Subscription (shifts, requests) ---');
     const channel = supabase
       .channel('db-changes-v76')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, (payload: any) => {
         console.log('--- [REALTIME_DEBUG] Request Event:', payload.eventType, 'ID:', payload.new?.id || payload.old?.id);
         callback(payload);
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, (payload: any) => {
         console.log('--- [REALTIME_DEBUG] Shift Event:', payload.eventType, 'ID:', payload.new?.id || payload.old?.id);
         callback(payload);
       })
