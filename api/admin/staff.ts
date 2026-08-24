@@ -495,19 +495,8 @@ export default async function handler(req: any, res: any) {
 
           if (permanent === true) {
             // ─── 完全削除（物理削除） ───
-            
-            // Auth ユーザーが存在する場合は先に削除
-            if (authUserId) {
-              const { error: authDelErr } = await supabaseAdmin.auth.admin.deleteUser(authUserId);
-              if (authDelErr) {
-                console.error('Auth User Delete Error:', authDelErr);
-                return res.status(500).json({
-                  error: `Authentication ユーザーの削除に失敗しました: ${authDelErr.message}`,
-                });
-              }
-            }
 
-            // 次に staff テーブルから削除
+            // 1. 先に staff テーブルのレコードを削除（外部キー依存の解除）
             const { error: delStaffErr } = await supabaseAdmin
               .from('staff')
               .delete()
@@ -518,6 +507,17 @@ export default async function handler(req: any, res: any) {
               return res.status(500).json({
                 error: `スタッフ名簿の削除に失敗しました: ${delStaffErr.message}`,
               });
+            }
+
+            // 2. 次に Authentication ユーザーを削除
+            if (authUserId) {
+              const { error: authDelErr } = await supabaseAdmin.auth.admin.deleteUser(authUserId);
+              if (authDelErr) {
+                console.error('Auth User Delete Error:', authDelErr);
+                return res.status(500).json({
+                  error: `スタッフデータは削除されましたが、認証アカウント削除に失敗しました: ${authDelErr.message}`,
+                });
+              }
             }
 
             return res.status(200).json({
