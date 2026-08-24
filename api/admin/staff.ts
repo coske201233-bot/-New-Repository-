@@ -456,91 +456,110 @@ export default async function handler(req: any, res: any) {
         // ==========================================
         case 'DELETE': {
           const { staffId, userId, permanent = false } = effectivePayload;
-          const targetStaffId = staffId || userId;
+          const targetId = staffId || userId;
 
-          if (!targetStaffId) {
+          if (!targetId) {
             return res.status(400).json({ error: 'staffId または userId が必要です。' });
           }
 
-          // 自身（実行者）のアカウントは削除・無効化させないガード
-          if (targetStaffId === callerUser.id || userId === callerUser.id) {
+          // 1. 自身のアカウント保護
+          if (targetId === callerUser.id || userId === callerUser.id) {
             return res.status(400).json({
               error: '現在ログイン中の管理者アカウント自身を削除・無効化することはできません。',
             });
           }
 
-          // staff レコード取得
+          // 2. staff レコードを事前に取得
           const { data: st } = await supabaseAdmin
             .from('staff')
             .select('*')
-            .eq('id', targetStaffId)
+            .or(`id.eq.${targetId},user_id.eq.${targetId}`)
             .maybeSingle();
 
-          let authIdToDelete =
-            userId || st?.user_id || (targetStaffId.length === 36 ? targetStaffId : null);
+          // 3. 削除対象の Auth ユーザーID (UUID) を厳密に特定
+          let authUserId: string | null = null;
 
-          if (!authIdToDelete && st?.email) {
-            const { data: authUserList } = await supabaseAdmin.auth.admin.listUsers();
+          if (st?.user_id) {
+            authUserId = st.user_id;
+          } else if (targetId.length === 36) {
+            authUserId = targetId;
+          } else if (st?.email) {
+            const { data: authUserList } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
             const found = authUserList?.users?.find(
               (u: any) => u.email?.toLowerCase() === st.email.toLowerCase()
             );
-            if (found) authIdToDelete = found.id;
+            if (found) authUserId = found.id;
           }
 
+          console.log('🗑️ 削除対象特定:', { targetId, authUserId, permanent });
+
           if (permanent === true) {
-            // 4-A. 物理削除 (Permanent Delete)
-            if (authIdToDelete) {
-              await supabaseAdmin.auth.admin.deleteUser(authIdToDelete).catch((e) => {
-                console.warn('Auth user delete warn:', e.message);
-              });
+            // ─── 完全削除（物理削除） ───
+            
+            // Auth ユーザーが存在する場合は先に削除
+            if (authUserId) {
+              const { error: authDelErr } = await supabaseAdmin.auth.admin.deleteUser(authUserId);
+              if (authDelErr) {
+                console.error('Auth User Delete Error:', authDelErr);
+                return res.status(500).json({
+                  error: `Authentication ユーザーの削除に失敗しました: ${authDelErr.message}`,
+                });
+              }
             }
 
+            // 次に staff テーブルから削除
             const { error: delStaffErr } = await supabaseAdmin
               .from('staff')
               .delete()
-              .eq('id', targetStaffId);
+              .or(`id.eq.${targetId},user_id.eq.${targetId}`);
 
             if (delStaffErr) {
-              return res.status(500).json({ error: delStaffErr.message });
+              console.error('Staff DB Delete Error:', delStaffErr);
+              return res.status(500).json({
+                error: `スタッフ名簿の削除に失敗しました: ${delStaffErr.message}`,
+              });
             }
 
             return res.status(200).json({
               success: true,
               message: 'スタッフおよび認証アカウントを完全に削除しました。',
             });
+
           } else {
-            // 4-B. 論理削除 / 無効化 (Deactivation)
-            // ログイン不可にするため ban 処理または metadata へのフラグ付与
-            if (authIdToDelete) {
-              await supabaseAdmin.auth.admin
-                .updateUserById(authIdToDelete, {
-                  ban_duration: '876000h', // 100年間のアクセス禁止
-                  user_metadata: {
-                    ...(st?.name && { name: st.name }),
-                    is_active: false,
-                    disabled: true,
-                  },
-                })
-                .catch((e) => {
-                  console.warn('Auth ban warn:', e.message);
-                });
+            // ─── 無効化（論理削除） ───
+            if (authUserId) {
+              const { error: banErr } = await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+                ban_duration: '876000h',
+                user_metadata: {
+                  ...(st?.name && { name: st.name }),
+                  is_active: false,
+                  disabled: true,
+                },
+              });
+              if (banErr) {
+                console.warn('Auth Ban Warning:', banErr.message);
+              }
             }
 
-            const { error: deactivateErr } = await supabaseAdmin
+            const { data: updatedStaff, error: deactErr } = await supabaseAdmin
               .from('staff')
               .update({
                 status: '無効',
                 is_approved: false,
               })
-              .eq('id', targetStaffId);
+              .or(`id.eq.${targetId},user_id.eq.${targetId}`)
+              .select()
+              .single();
 
-            if (deactivateErr) {
-              return res.status(500).json({ error: deactivateErr.message });
+            if (deactErr) {
+              console.error('Staff Deactivate Error:', deactErr);
+              return res.status(500).json({ error: deactErr.message });
             }
 
             return res.status(200).json({
               success: true,
-              message: 'スタッフを無効化（ログイン停止）しました。シフト履歴は保持されます。',
+              message: 'スタッフを無効化（ログイン停止）しました。',
+              staff: updatedStaff,
             });
           }
         }
