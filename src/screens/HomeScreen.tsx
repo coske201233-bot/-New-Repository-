@@ -7,6 +7,7 @@ import { Users, Coffee, Briefcase, Building2, MapPin, X, RefreshCw, AlertCircle,
 import { getDayType, getDateStr } from '../utils/dateUtils';
 import { sortStaffByName } from '../utils/staffUtils';
 import { getCurrentLimit } from '../utils/limitUtils';
+import { forceAppUpdate } from '../utils/appReloader';
 
 const hospitalPlacements = ['２F', '４F', '訪問リハ', 'フォロー', '兼務', '管理', '外来', '助手'];
 
@@ -38,6 +39,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   isInitialized, shifts, isSyncing, isLoadingShifts
 }) => {
   const [selectedWardDetails, setSelectedWardDetails] = useState<string | null>(null);
+  const [isUpdatingApp, setIsUpdatingApp] = useState(false);
 
   // 💡 ログイン直後のチラつきを物理的にブラインド（目隠し）するためのアニメーション
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -241,13 +243,42 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 {profile?.name || 'スタッフ'} - {isAdminAuthenticated ? '管理者権限' : '一般権限'}
               </ThemeText>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <TouchableOpacity 
-                onPress={onLogout}
-                style={{ padding: 10, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 14 }}
+                onPress={async () => {
+                  if (isUpdatingApp) return;
+                  setIsUpdatingApp(true);
+                  await forceAppUpdate();
+                }}
+                disabled={isUpdatingApp}
+                style={{ 
+                  paddingVertical: 8, 
+                  paddingHorizontal: 12, 
+                  backgroundColor: 'rgba(56, 189, 248, 0.12)', 
+                  borderRadius: 12, 
+                  flexDirection: 'row', 
+                  alignItems: 'center', 
+                  gap: 6,
+                  borderWidth: 1,
+                  borderColor: 'rgba(56, 189, 248, 0.25)'
+                }}
                 activeOpacity={0.7}
               >
-                <LogOut size={22} color="#ef4444" />
+                {isUpdatingApp ? (
+                  <ActivityIndicator size="small" color="#38bdf8" />
+                ) : (
+                  <RefreshCw size={16} color="#38bdf8" />
+                )}
+                <ThemeText bold style={{ color: '#38bdf8', fontSize: 13 }}>
+                  {isUpdatingApp ? '更新中...' : 'アプリ更新'}
+                </ThemeText>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={onLogout}
+                style={{ padding: 10, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 12 }}
+                activeOpacity={0.7}
+              >
+                <LogOut size={20} color="#ef4444" />
               </TouchableOpacity>
             </View>
           </View>

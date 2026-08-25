@@ -20,6 +20,8 @@ import { getDateStr } from './src/utils/dateUtils';
 import { useAppLogic } from './src/hooks/useAppLogic';
 import { supabase, isSupabaseAuthReady } from './src/utils/supabase';
 
+import { forceAppUpdate } from './src/utils/appReloader';
+
 /**
  * VERSION 44.2 [RESILIENCE]
  * クリティカル: ホワイトスクリーン (WSOD) 対策
@@ -33,9 +35,9 @@ function ErrorFallback({ error }: { error: string }) {
       <RNText style={{ color: '#fca5a5', fontSize: 14, marginBottom: 32, textAlign: 'center' }}>{error}</RNText>
       <TouchableOpacity 
         style={{ backgroundColor: '#fff', padding: 16, borderRadius: 8 }}
-        onPress={() => Platform.OS === 'web' ? window.location.reload() : null}
+        onPress={() => forceAppUpdate()}
       >
-        <RNText style={{ color: '#000', fontWeight: 'bold' }}>再読み込み</RNText>
+        <RNText style={{ color: '#000', fontWeight: 'bold' }}>キャッシュクリア＆再読み込み</RNText>
       </TouchableOpacity>
     </SafeAreaView>
   );

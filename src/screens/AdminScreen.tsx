@@ -5,13 +5,14 @@ import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING } from '../theme/theme';
 import { 
   ChevronRight, Database, FileOutput, 
-  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle
+  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle, RefreshCw
 } from 'lucide-react-native';
 import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
 import * as Print from 'expo-print';
 import { generateMonthlyShifts } from '../utils/shiftEngine';
+import { forceAppUpdate } from '../utils/appReloader';
 
 
 interface AdminScreenProps {
@@ -61,6 +62,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const [editPermissions, setEditPermissions] = useState(['スタッフ']);
   
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isUpdatingApp, setIsUpdatingApp] = useState(false);
  
   // [CRITICAL VERSION 49.0] 自動管理者認証バイパス
   React.useEffect(() => {
@@ -462,6 +464,34 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </View>
                 <TouchableOpacity style={[styles.inlineBtn, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]} onPress={onShareApp}>
                   <ThemeText bold color="#f59e0b">表示</ThemeText>
+                </TouchableOpacity>
+              </ThemeCard>
+
+              <ThemeCard style={styles.itemRow}>
+                <View style={[styles.iconCircle, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
+                  <RefreshCw size={20} color="#38bdf8" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <ThemeText bold>アプリ強制更新（キャッシュクリア）</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>PWA・ブラウザのキャッシュとServiceWorkerを破棄し、最新版を強制再読み込みします</ThemeText>
+                </View>
+                <TouchableOpacity 
+                  style={[styles.inlineBtn, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }, isUpdatingApp && { opacity: 0.5 }]} 
+                  onPress={async () => {
+                    if (isUpdatingApp) return;
+                    setIsUpdatingApp(true);
+                    await forceAppUpdate();
+                  }}
+                  disabled={isUpdatingApp}
+                >
+                  {isUpdatingApp ? (
+                    <ActivityIndicator size="small" color="#38bdf8" />
+                  ) : (
+                    <>
+                      <RefreshCw size={18} color="#38bdf8" />
+                      <ThemeText bold color="#38bdf8" style={{ marginLeft: 6 }}>実行</ThemeText>
+                    </>
+                  )}
                 </TouchableOpacity>
               </ThemeCard>
 

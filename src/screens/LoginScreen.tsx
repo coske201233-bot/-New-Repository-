@@ -3,7 +3,8 @@ import { StyleSheet, View, SafeAreaView, TouchableOpacity, TextInput, Alert, Scr
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { Mail, Lock, LogIn, ShieldAlert } from 'lucide-react-native';
+import { Mail, Lock, LogIn, ShieldAlert, RefreshCw } from 'lucide-react-native';
+import { forceAppUpdate } from '../utils/appReloader';
 
 interface LoginScreenProps {
   onLogin: (email: string, pass: string) => Promise<boolean>;
@@ -14,6 +15,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToSetup }
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isUpdatingApp, setIsUpdatingApp] = useState(false);
 
   const handleLoginSubmit = async () => {
     if (!email || !password) {
@@ -124,9 +126,40 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onGoToSetup }
           </ThemeCard>
 
           <View style={styles.footer}>
-            <ThemeText variant="caption" color={COLORS.textSecondary}>
+            <ThemeText variant="caption" color={COLORS.textSecondary} style={{ textAlign: 'center', marginBottom: 16 }}>
               アカウントをお持ちでない場合は、管理者に登録を依頼してください。
             </ThemeText>
+            
+            <TouchableOpacity 
+              onPress={async () => {
+                if (isUpdatingApp) return;
+                setIsUpdatingApp(true);
+                await forceAppUpdate();
+              }}
+              disabled={isUpdatingApp}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingVertical: 10,
+                paddingHorizontal: 16,
+                backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: 'rgba(56, 189, 248, 0.2)',
+                gap: 8
+              }}
+              activeOpacity={0.7}
+            >
+              {isUpdatingApp ? (
+                <ActivityIndicator size="small" color="#38bdf8" />
+              ) : (
+                <RefreshCw size={15} color="#38bdf8" />
+              )}
+              <ThemeText variant="caption" bold style={{ color: '#38bdf8' }}>
+                {isUpdatingApp ? 'アプリ更新中...' : '最新バージョンに強制更新（キャッシュクリア）'}
+              </ThemeText>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
