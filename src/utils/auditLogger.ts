@@ -27,14 +27,31 @@ export interface AuditLogRecord {
 }
 
 /**
+ * 渡されたID文字列から正規のUUID (8-4-4-4-12形式) を抽出・サニタイズする
+ * - "fallback-c840b456-4a14-4756-9ee4-4e3ec2972301" -> "c840b456-4a14-4756-9ee4-4e3ec2972301"
+ * - "req-c840b456-4a14-4756-9ee4-4e3ec2972301" -> "c840b456-4a14-4756-9ee4-4e3ec2972301"
+ * - 不正値や非UUID文字列 -> null (Postgresの invalid input syntax for type uuid を完全防止)
+ */
+export const sanitizeUuid = (val?: string | null): string | null => {
+  if (!val || typeof val !== 'string') return null;
+  const trimmed = val.trim();
+  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+  const match = trimmed.match(uuidRegex);
+  return match ? match[0].toLowerCase() : null;
+};
+
+/**
  * 操作ログ（監査ログ）を Supabase の audit_logs テーブルへ書き込む共通関数
  */
 export const recordAuditLog = async (params: AuditLogParams): Promise<boolean> => {
   try {
+    const operatorId = sanitizeUuid(params.operatorId);
+    const targetStaffId = sanitizeUuid(params.targetStaffId);
+
     const payload = {
-      operator_id: params.operatorId || null,
+      operator_id: operatorId,
       operator_name: params.operatorName || 'システム',
-      target_staff_id: params.targetStaffId || null,
+      target_staff_id: targetStaffId,
       target_staff_name: params.targetStaffName || '',
       action_type: params.actionType,
       target_date: params.targetDate || null,

@@ -53,7 +53,7 @@ export const useAuthSession = () => {
       // 🚨 [VERSION 48.61 EMERGENCY YOSHIDA BYPASS]
       if (userEmail === 'yoshida@reha.local') {
         const yoshidaProfile = { 
-          id: 'yoshida-manual',
+          id: session.user.id,
           name: '吉田誠', 
           email: 'yoshida@reha.local', 
           role: 'admin', 
@@ -70,7 +70,7 @@ export const useAuthSession = () => {
       // 🚨 [VERSION 49.1 EMERGENCY MAKOTO BYPASS]
       if (userEmail.toLowerCase().includes('makoto')) {
         const makotoProfile = { 
-          id: 'makoto-manual',
+          id: session.user.id,
           name: 'MAKOTO', 
           email: userEmail, 
           role: 'admin', 
@@ -102,9 +102,9 @@ export const useAuthSession = () => {
         return profileData;
       }
 
-      // Fallback Profile to unblock the UI
+      // Fallback Profile to unblock the UI (純粋なUUIDを使用)
       const fallbackProfile = { 
-        id: 'fallback-' + session.user.id, 
+        id: session.user.id, 
         name: session.user.user_metadata?.full_name || userEmail.split('@')[0] || '利用者', 
         role: '一般スタッフ', 
         profession: '職員',
