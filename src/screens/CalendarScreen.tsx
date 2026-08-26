@@ -703,12 +703,17 @@ export const CalendarScreen: React.FC<any> = ({
 
   // --- 1. D&D 移動処理 ---
   const handleMoveShift = async (item: any, fromDateStr: string, toDateStr: string) => {
-    if (!item || !fromDateStr || !toDateStr || fromDateStr === toDateStr) return;
+    console.log('🔄 [handleMoveShift] Initiating move:', { item, fromDateStr, toDateStr });
+    if (!item || !fromDateStr || !toDateStr || fromDateStr === toDateStr) {
+      console.log('⚠️ [handleMoveShift] Skipped: invalid params or same date.');
+      return;
+    }
     setIsProcessingShift(true);
 
     try {
       const staff = staffList.find(s => s.id === item.staff?.id || s.id === item.staffId || normalizeName(s.name) === normalizeName(item.staff?.name || item.staffName || item.name));
       if (!staff || !staff.id) {
+        console.error('❌ [handleMoveShift] Staff not found for:', item);
         Alert.alert('エラー', '対象スタッフの情報を特定できませんでした。');
         return;
       }
@@ -717,6 +722,8 @@ export const CalendarScreen: React.FC<any> = ({
       const shiftType = item.type || '出勤';
       const hours = item.hours || null;
       const details = item.details || { note: 'カレンダーD&D移動' };
+
+      console.log(`[handleMoveShift] Deleting existing records on ${fromDateStr} for staff ${staffName} (${cleanStaffId})...`);
 
       // 1. 移動元の古い日付のシフト/リクエストを削除
       await supabase.from('shifts').delete()
@@ -747,6 +754,8 @@ export const CalendarScreen: React.FC<any> = ({
         updatedAt: new Date().toISOString(),
       };
 
+      console.log(`[handleMoveShift] Upserting to shifts on ${toDateStr}:`, newReq);
+
       const { error: sErr } = await supabase.from('shifts').upsert({
         id: newId,
         staff_id: cleanStaffId,
@@ -767,7 +776,7 @@ export const CalendarScreen: React.FC<any> = ({
         date: toDateStr,
         type: shiftType,
         status: 'approved',
-        reason: 'カレンダー調整',
+        reason: 'カレンダーD&D移動',
         hours: hours,
         details: newReq.details,
         is_manual: true,
@@ -795,12 +804,14 @@ export const CalendarScreen: React.FC<any> = ({
         afterData: newReq,
       });
 
+      console.log(`✅ [handleMoveShift] Successfully moved shift to ${toDateStr}.`);
+
       // 5. 最新データ再取得
       if (fetchShifts) await fetchShifts();
       Alert.alert('移動完了', `${staffName}さんのシフトを ${toDateStr} に移動しました。`);
 
     } catch (err: any) {
-      console.error('Move shift error:', err);
+      console.error('❌ [handleMoveShift] Error during move:', err);
       Alert.alert('エラー', 'シフトの移動に失敗しました: ' + (err.message || '不明なエラー'));
     } finally {
       setIsProcessingShift(false);
@@ -923,7 +934,7 @@ export const CalendarScreen: React.FC<any> = ({
     }
   };
 
-  // --- 3. クイック削除処理 ---
+  // --- 4. クイック削除処理 ---
   const handleQuickDelete = async () => {
     if (!selectedShiftToEdit) return;
     setIsProcessingShift(true);
@@ -988,22 +999,27 @@ export const CalendarScreen: React.FC<any> = ({
     return {
       draggable: true,
       onDragStart: (e: any) => {
+        e.stopPropagation();
+        const payload = {
+          staffId: item.staff?.id || item.staffId,
+          staffName: item.staff?.name || item.staffName || item.name,
+          date: dateStr,
+          sourceDate: dateStr,
+          type: item.type,
+          hours: item.hours,
+          details: item.details,
+          requestId: item.requestId,
+          isAssistant: item.isAssistant,
+        };
         if (e && e.dataTransfer) {
           e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', JSON.stringify({
-            staffId: item.staff?.id,
-            staffName: item.staff?.name || item.name,
-            date: dateStr,
-            type: item.type,
-            hours: item.hours,
-            details: item.details,
-            requestId: item.requestId,
-            isAssistant: item.isAssistant,
-          }));
+          e.dataTransfer.setData('text/plain', JSON.stringify(payload));
         }
-        setDraggedItem({ ...item, sourceDate: dateStr });
+        console.log('🚀 [D&D DragStart]', payload);
+        setDraggedItem(payload);
       },
-      onDragEnd: () => {
+      onDragEnd: (e: any) => {
+        e?.stopPropagation?.();
         setDraggedItem(null);
         setDragOverDate(null);
       },
@@ -1019,31 +1035,61 @@ export const CalendarScreen: React.FC<any> = ({
     return {
       onDragOver: (e: any) => {
         e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        e.stopPropagation();
+        if (e.dataTransfer) {
+          e.dataTransfer.dropEffect = 'move';
+        }
+        if (dragOverDate !== dateStr) {
+          setDragOverDate(dateStr);
+        }
+      },
+      onDragEnter: (e: any) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (dragOverDate !== dateStr) {
           setDragOverDate(dateStr);
         }
       },
       onDragLeave: (e: any) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (dragOverDate === dateStr) {
           setDragOverDate(null);
         }
       },
       onDrop: async (e: any) => {
         e.preventDefault();
+        e.stopPropagation();
         setDragOverDate(null);
-        let payload = draggedItem;
+
+        let payload: any = null;
         if (e.dataTransfer) {
           try {
             const raw = e.dataTransfer.getData('text/plain');
-            if (raw) payload = JSON.parse(raw);
+            if (raw) {
+              payload = JSON.parse(raw);
+            }
           } catch (err) {
-            // ignore
+            console.warn('[D&D] Failed to parse dataTransfer json:', err);
           }
         }
-        if (!payload) return;
+        if (!payload) {
+          payload = draggedItem;
+        }
+
+        console.log('🎯 [D&D Drop]', { payload, targetDate: dateStr });
+
+        if (!payload) {
+          console.warn('[D&D Drop] No payload found.');
+          return;
+        }
+
         const sourceDate = payload.date || payload.sourceDate;
-        if (sourceDate === dateStr) return; // 同一日はスキップ
+        if (sourceDate === dateStr) {
+          console.log('[D&D Drop] Same date, skipping.');
+          return;
+        }
+
         await handleMoveShift(payload, sourceDate, dateStr);
         setDraggedItem(null);
       },
@@ -1214,31 +1260,45 @@ export const CalendarScreen: React.FC<any> = ({
       const isDragOver = dragOverDate === cellDateStr && !!cellDateStr;
 
       cells.push(
-        <TouchableOpacity 
+        <View 
           key={`day-${i}`} 
           style={[
             styles.dayCell, 
             isSelected && styles.selectedDay, 
             isToday && !isSelected && styles.todayCell,
             (!isSelected && !!day && isUnderLimit) ? { backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: BORDER_RADIUS.sm } : null,
-            isDragOver && { backgroundColor: 'rgba(56, 189, 248, 0.25)', borderColor: '#38bdf8', borderWidth: 2, borderRadius: BORDER_RADIUS.sm }
+            isDragOver && { backgroundColor: 'rgba(56, 189, 248, 0.3)', borderColor: '#38bdf8', borderWidth: 2, borderRadius: BORDER_RADIUS.sm }
           ]}
-          onPress={() => {
-            if (day) {
-              const targetD = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
-              setSelectedDate(targetD);
-              // 選択中セルの空き領域をタップした場合はスタッフ追加モーダルを表示
-              if (isSelected) {
-                setIsAddStaffModalVisible(true);
+          {...(cellDateStr ? getDroppableProps(cellDateStr) : {})}
+          {...(Platform.OS === 'web' ? {
+            onClick: (e: any) => {
+              if (day) {
+                const targetD = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+                setSelectedDate(targetD);
+                if (isSelected) {
+                  setIsAddStaffModalVisible(true);
+                }
               }
             }
-          }}
-          disabled={!day}
-          {...(cellDateStr ? getDroppableProps(cellDateStr) : {})}
+          } : {})}
         >
           {day && (
             <>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 3 }}>
+              {/* Native (Mobile) 用のクリック領域 */}
+              {Platform.OS !== 'web' && (
+                <TouchableOpacity 
+                  style={StyleSheet.absoluteFill} 
+                  onPress={() => {
+                    const targetD = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+                    setSelectedDate(targetD);
+                    if (isSelected) {
+                      setIsAddStaffModalVisible(true);
+                    }
+                  }}
+                />
+              )}
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 3, pointerEvents: 'none' as any }}>
                 <ThemeText 
                   variant="caption" 
                   style={{ color: isSelected ? COLORS.background : dateColor, fontWeight: isSelected || isToday ? 'bold' : 'normal', fontSize: 10 }}
@@ -1315,7 +1375,7 @@ export const CalendarScreen: React.FC<any> = ({
               )}
             </>
           )}
-        </TouchableOpacity>
+        </View>
       );
     });
 
