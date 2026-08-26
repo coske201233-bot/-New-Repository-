@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Alert, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Alert, ActivityIndicator, Platform, TextInput } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Check, LogOut } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Check, LogOut, Edit3, Trash2, Move, Calendar as CalendarIcon, ArrowRight } from 'lucide-react-native';
 import { getDayType, formatDate, getDateStr, normalizeName } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
@@ -78,6 +78,20 @@ export const CalendarScreen: React.FC<any> = ({
   const [adminSpecialHours, setAdminSpecialHours] = useState(1.0);
   const [adminHourlyHours, setAdminHourlyHours] = useState(1.0);
   const [isTypeModalVisible, setIsTypeModalVisible] = useState(false);
+
+  // --- ドラッグ＆ドロップ用 State ---
+  const [draggedItem, setDraggedItem] = useState<any | null>(null);
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null);
+
+  // --- クイック編集・アクションモーダル用 State ---
+  const [selectedShiftToEdit, setSelectedShiftToEdit] = useState<any | null>(null);
+  const [editActionTab, setEditActionTab] = useState<'type' | 'move' | 'delete'>('type');
+  const [newEditType, setNewEditType] = useState<string>('出勤');
+  const [newEditHours, setNewEditHours] = useState<number>(1.0);
+  const [newEditSpecialHours, setNewEditSpecialHours] = useState<number>(1.0);
+  const [newEditHourlyHours, setNewEditHourlyHours] = useState<number>(1.0);
+  const [targetMoveDate, setTargetMoveDate] = useState<string>('');
+  const [isProcessingShift, setIsProcessingShift] = useState<boolean>(false);
 
   const currentMonthKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}`;
   const fetchShiftsRef = React.useRef(fetchShifts);
@@ -687,6 +701,355 @@ export const CalendarScreen: React.FC<any> = ({
     }
   };
 
+  // --- 1. D&D 移動処理 ---
+  const handleMoveShift = async (item: any, fromDateStr: string, toDateStr: string) => {
+    if (!item || !fromDateStr || !toDateStr || fromDateStr === toDateStr) return;
+    setIsProcessingShift(true);
+
+    try {
+      const staff = staffList.find(s => s.id === item.staff?.id || s.id === item.staffId || normalizeName(s.name) === normalizeName(item.staff?.name || item.staffName || item.name));
+      if (!staff || !staff.id) {
+        Alert.alert('エラー', '対象スタッフの情報を特定できませんでした。');
+        return;
+      }
+      const cleanStaffId = String(staff.id).trim();
+      const staffName = staff.name;
+      const shiftType = item.type || '出勤';
+      const hours = item.hours || null;
+      const details = item.details || { note: 'カレンダーD&D移動' };
+
+      // 1. 移動元の古い日付のシフト/リクエストを削除
+      await supabase.from('shifts').delete()
+        .eq('staff_id', cleanStaffId)
+        .eq('date', fromDateStr);
+
+      if (item.requestId && !String(item.requestId).startsWith('auto-')) {
+        await supabase.from('requests').delete().eq('id', item.requestId);
+      } else {
+        await supabase.from('requests').delete()
+          .eq('staff_id', cleanStaffId)
+          .eq('date', fromDateStr);
+      }
+
+      // 2. 移動先の日付へ新規シフト/リクエストを upsert
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+      const newReq = {
+        id: newId,
+        staff_id: cleanStaffId,
+        staff_name: staffName,
+        date: toDateStr,
+        type: shiftType,
+        status: 'approved',
+        is_manual: true,
+        hours: hours,
+        details: { ...details, isManual: true, movedFrom: fromDateStr },
+        created_at: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const { error: sErr } = await supabase.from('shifts').upsert({
+        id: newId,
+        staff_id: cleanStaffId,
+        staff_name: staffName,
+        date: toDateStr,
+        type: shiftType,
+        status: 'approved',
+        is_manual: true,
+        hours: hours,
+        details: newReq.details,
+      });
+      if (sErr) throw sErr;
+
+      const { error: rErr } = await supabase.from('requests').upsert({
+        id: newId,
+        staff_id: cleanStaffId,
+        staff_name: staffName,
+        date: toDateStr,
+        type: shiftType,
+        status: 'approved',
+        reason: 'カレンダー調整',
+        hours: hours,
+        details: newReq.details,
+        is_manual: true,
+      });
+      if (rErr) console.warn('Requests sync warning:', rErr.message);
+
+      // 3. ローカルステートの更新
+      setRequests((prev: any[]) => {
+        const filtered = prev.filter(r => !(
+          (r.id === item.requestId || String(r.staff_id || r.staffId) === cleanStaffId) && r.date === fromDateStr
+        ));
+        return [...filtered, newReq];
+      });
+
+      // 4. 監査ログの記録
+      await recordAuditLog({
+        operatorId: profile?.id,
+        operatorName: profile?.name || '管理者',
+        targetStaffId: cleanStaffId,
+        targetStaffName: staffName,
+        actionType: 'SHIFT_UPDATE',
+        targetDate: toDateStr,
+        details: `${staffName}さんのシフト（${fromDateStr}「${shiftType}」）を ${toDateStr} へ移動しました`,
+        beforeData: { date: fromDateStr, type: shiftType, hours },
+        afterData: newReq,
+      });
+
+      // 5. 最新データ再取得
+      if (fetchShifts) await fetchShifts();
+      Alert.alert('移動完了', `${staffName}さんのシフトを ${toDateStr} に移動しました。`);
+
+    } catch (err: any) {
+      console.error('Move shift error:', err);
+      Alert.alert('エラー', 'シフトの移動に失敗しました: ' + (err.message || '不明なエラー'));
+    } finally {
+      setIsProcessingShift(false);
+    }
+  };
+
+  // --- 2. クイック編集モーダルを開く ---
+  const openQuickEditModal = (item: any, dateStr: string) => {
+    const staff = staffList.find(s => s.id === item.staff?.id || s.id === item.staffId || normalizeName(s.name) === normalizeName(item.staff?.name || item.name));
+    setSelectedShiftToEdit({
+      ...item,
+      staff: staff || item.staff,
+      date: dateStr,
+    });
+    setNewEditType(item.type || '出勤');
+    setNewEditHours(item.hours ?? item.details?.duration ?? 1.0);
+    setNewEditSpecialHours(item.details?.specialHours ?? 1.0);
+    setNewEditHourlyHours(item.details?.hourlyHours ?? 1.0);
+    setTargetMoveDate(dateStr);
+    setEditActionTab('type');
+  };
+
+  // --- 3. クイック種別変更確定 ---
+  const handleQuickEditType = async () => {
+    if (!selectedShiftToEdit) return;
+    setIsProcessingShift(true);
+
+    try {
+      const staff = selectedShiftToEdit.staff;
+      const cleanStaffId = String(staff?.id || selectedShiftToEdit.staffId).trim();
+      const staffName = staff?.name || selectedShiftToEdit.staffName;
+      const dateStr = selectedShiftToEdit.date;
+      const newType = newEditType;
+
+      let calcHours = null;
+      let details: any = { note: '管理画面よりクイック変更', isManual: true };
+
+      if (newType === '特休＋時間休') {
+        calcHours = newEditSpecialHours + newEditHourlyHours;
+        details = { note: '管理画面よりクイック変更', specialHours: newEditSpecialHours, hourlyHours: newEditHourlyHours, isManual: true };
+      } else if (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤', '出張', '休日時間外'].includes(newType)) {
+        calcHours = newEditHours;
+        details = { note: '管理画面よりクイック変更', duration: newEditHours, isManual: true };
+      }
+
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+      const updatedReq = {
+        id: selectedShiftToEdit.requestId && !String(selectedShiftToEdit.requestId).startsWith('auto-') ? selectedShiftToEdit.requestId : newId,
+        staff_id: cleanStaffId,
+        staff_name: staffName,
+        date: dateStr,
+        type: newType,
+        status: 'approved',
+        is_manual: true,
+        hours: calcHours,
+        details: details,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // 1. shiftsテーブル更新
+      const { error: sErr } = await supabase.from('shifts').upsert({
+        id: updatedReq.id,
+        staff_id: cleanStaffId,
+        staff_name: staffName,
+        date: dateStr,
+        type: newType,
+        status: 'approved',
+        is_manual: true,
+        hours: calcHours,
+        details: details,
+      });
+      if (sErr) throw sErr;
+
+      // 2. requestsテーブル更新
+      const { error: rErr } = await supabase.from('requests').upsert({
+        id: updatedReq.id,
+        staff_id: cleanStaffId,
+        staff_name: staffName,
+        date: dateStr,
+        type: newType,
+        status: 'approved',
+        reason: '管理者による変更',
+        hours: calcHours,
+        details: details,
+        is_manual: true,
+      });
+      if (rErr) console.warn('Requests sync error:', rErr);
+
+      // 3. ローカル更新
+      setRequests((prev: any[]) => {
+        const without = prev.filter(r => !(
+          (r.id === selectedShiftToEdit.requestId || String(r.staff_id || r.staffId) === cleanStaffId) && r.date === dateStr
+        ));
+        return [...without, updatedReq];
+      });
+
+      // 4. 監査ログ記録
+      await recordAuditLog({
+        operatorId: profile?.id,
+        operatorName: profile?.name || '管理者',
+        targetStaffId: cleanStaffId,
+        targetStaffName: staffName,
+        actionType: 'SHIFT_UPDATE',
+        targetDate: dateStr,
+        details: `${staffName}さんのシフト（${dateStr}）を「${selectedShiftToEdit.type || '未設定'}」から「${newType}」に変更しました`,
+        beforeData: selectedShiftToEdit,
+        afterData: updatedReq,
+      });
+
+      // 5. 最新データ再取得
+      if (fetchShifts) await fetchShifts();
+      setSelectedShiftToEdit(null);
+      Alert.alert('完了', `${staffName}さんのシフトを「${newType}」に変更しました。`);
+
+    } catch (err: any) {
+      console.error('Quick edit error:', err);
+      Alert.alert('エラー', '変更に失敗しました: ' + (err.message || '不明なエラー'));
+    } finally {
+      setIsProcessingShift(false);
+    }
+  };
+
+  // --- 3. クイック削除処理 ---
+  const handleQuickDelete = async () => {
+    if (!selectedShiftToEdit) return;
+    setIsProcessingShift(true);
+
+    try {
+      const staff = selectedShiftToEdit.staff;
+      const cleanStaffId = String(staff?.id || selectedShiftToEdit.staffId).trim();
+      const staffName = staff?.name || selectedShiftToEdit.staffName || 'スタッフ';
+      const dateStr = selectedShiftToEdit.date;
+      const shiftType = selectedShiftToEdit.type || 'シフト';
+
+      // 1. shifts テーブルから削除
+      await supabase.from('shifts').delete()
+        .eq('staff_id', cleanStaffId)
+        .eq('date', dateStr);
+
+      // 2. requests テーブルから削除
+      if (selectedShiftToEdit.requestId && !String(selectedShiftToEdit.requestId).startsWith('auto-')) {
+        await supabase.from('requests').delete().eq('id', selectedShiftToEdit.requestId);
+      } else {
+        await supabase.from('requests').delete()
+          .eq('staff_id', cleanStaffId)
+          .eq('date', dateStr);
+      }
+
+      // 3. ローカルステート更新
+      setRequests((prev: any[]) =>
+        prev.filter(r => !(
+          (r.id === selectedShiftToEdit.requestId || String(r.staff_id || r.staffId) === cleanStaffId) && r.date === dateStr
+        ))
+      );
+
+      // 4. 監査ログ記録
+      await recordAuditLog({
+        operatorId: profile?.id,
+        operatorName: profile?.name || '管理者',
+        targetStaffId: cleanStaffId,
+        targetStaffName: staffName,
+        actionType: 'SHIFT_DELETE',
+        targetDate: dateStr,
+        details: `${staffName}さんのシフト（${dateStr}「${shiftType}」）を削除しました`,
+        beforeData: selectedShiftToEdit,
+        afterData: null,
+      });
+
+      // 5. 最新データの再取得
+      if (fetchShifts) await fetchShifts();
+      setSelectedShiftToEdit(null);
+      Alert.alert('削除完了', `${staffName}さんのシフト（${dateStr}）を削除しました。`);
+
+    } catch (err: any) {
+      console.error('Delete shift error:', err);
+      Alert.alert('エラー', 'シフトの削除に失敗しました: ' + (err.message || '不明なエラー'));
+    } finally {
+      setIsProcessingShift(false);
+    }
+  };
+
+  // --- 5. Web用ドラッグ＆ドロップPropsヘルパー ---
+  const getDraggableProps = (item: any, dateStr: string) => {
+    if (Platform.OS !== 'web') return {};
+    return {
+      draggable: true,
+      onDragStart: (e: any) => {
+        if (e && e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', JSON.stringify({
+            staffId: item.staff?.id,
+            staffName: item.staff?.name || item.name,
+            date: dateStr,
+            type: item.type,
+            hours: item.hours,
+            details: item.details,
+            requestId: item.requestId,
+            isAssistant: item.isAssistant,
+          }));
+        }
+        setDraggedItem({ ...item, sourceDate: dateStr });
+      },
+      onDragEnd: () => {
+        setDraggedItem(null);
+        setDragOverDate(null);
+      },
+      style: {
+        cursor: 'grab',
+        userSelect: 'none',
+      } as any,
+    };
+  };
+
+  const getDroppableProps = (dateStr: string) => {
+    if (Platform.OS !== 'web') return {};
+    return {
+      onDragOver: (e: any) => {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        if (dragOverDate !== dateStr) {
+          setDragOverDate(dateStr);
+        }
+      },
+      onDragLeave: (e: any) => {
+        if (dragOverDate === dateStr) {
+          setDragOverDate(null);
+        }
+      },
+      onDrop: async (e: any) => {
+        e.preventDefault();
+        setDragOverDate(null);
+        let payload = draggedItem;
+        if (e.dataTransfer) {
+          try {
+            const raw = e.dataTransfer.getData('text/plain');
+            if (raw) payload = JSON.parse(raw);
+          } catch (err) {
+            // ignore
+          }
+        }
+        if (!payload) return;
+        const sourceDate = payload.date || payload.sourceDate;
+        if (sourceDate === dateStr) return; // 同一日はスキップ
+        await handleMoveShift(payload, sourceDate, dateStr);
+        setDraggedItem(null);
+      },
+    };
+  };
+
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
   const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
 
@@ -740,6 +1103,8 @@ export const CalendarScreen: React.FC<any> = ({
         const targetStaff = (staffList || []).find((s: any) => (s?.name || '').replace(/\s/g, '').includes('佐久間'));
         const TARGET_UUID = targetStaff?.id || '';
 
+        const cellDateStr = d ? normalizeDate(getDateStr(d)) : '';
+
         // セル内表示用オブジェクトを生成するヘルパー
         const getDisplayLabelObj = (item: any, isException = false) => {
           const name = item.staff.name;
@@ -779,7 +1144,14 @@ export const CalendarScreen: React.FC<any> = ({
             name,
             label,
             isException,
-            staff: item.staff
+            staff: item.staff,
+            type: type,
+            hours: duration,
+            details: item.details,
+            requestId: item.requestId,
+            isAssistant: isAs,
+            isHomeVisit: item.isHomeVisit,
+            rawItem: item,
           };
         };
 
@@ -838,6 +1210,8 @@ export const CalendarScreen: React.FC<any> = ({
       }
 
       const isUnderLimit = workingCount < limit;
+      const cellDateStr = d ? normalizeDate(getDateStr(d)) : '';
+      const isDragOver = dragOverDate === cellDateStr && !!cellDateStr;
 
       cells.push(
         <TouchableOpacity 
@@ -846,29 +1220,42 @@ export const CalendarScreen: React.FC<any> = ({
             styles.dayCell, 
             isSelected && styles.selectedDay, 
             isToday && !isSelected && styles.todayCell,
-            (!isSelected && !!day && isUnderLimit) ? { backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: BORDER_RADIUS.sm } : null
+            (!isSelected && !!day && isUnderLimit) ? { backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: BORDER_RADIUS.sm } : null,
+            isDragOver && { backgroundColor: 'rgba(56, 189, 248, 0.25)', borderColor: '#38bdf8', borderWidth: 2, borderRadius: BORDER_RADIUS.sm }
           ]}
-          onPress={() => day && setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), day))}
+          onPress={() => {
+            if (day) {
+              const targetD = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+              setSelectedDate(targetD);
+              // 選択中セルの空き領域をタップした場合はスタッフ追加モーダルを表示
+              if (isSelected) {
+                setIsAddStaffModalVisible(true);
+              }
+            }
+          }}
           disabled={!day}
+          {...(cellDateStr ? getDroppableProps(cellDateStr) : {})}
         >
           {day && (
             <>
-              <ThemeText 
-                variant="caption" 
-                style={{ color: isSelected ? COLORS.background : dateColor, fontWeight: isSelected || isToday ? 'bold' : 'normal', fontSize: 10 }}
-              >
-                {day}
-              </ThemeText>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 3 }}>
+                <ThemeText 
+                  variant="caption" 
+                  style={{ color: isSelected ? COLORS.background : dateColor, fontWeight: isSelected || isToday ? 'bold' : 'normal', fontSize: 10 }}
+                >
+                  {day}
+                </ThemeText>
 
-              <ThemeText 
-                variant="caption" 
-                style={[
-                  styles.dayCount, 
-                  { color: isSelected ? COLORS.background : (workingCount > limit ? '#ef4444' : isUnderLimit ? '#3b82f6' : COLORS.textSecondary) }
-                ]}
-              >
-                {dayType === 'weekday' ? workingCount : `${workingCount}/${limit}`}
-              </ThemeText>
+                <ThemeText 
+                  variant="caption" 
+                  style={[
+                    styles.dayCount, 
+                    { color: isSelected ? COLORS.background : (workingCount > limit ? '#ef4444' : isUnderLimit ? '#3b82f6' : COLORS.textSecondary) }
+                  ]}
+                >
+                  {dayType === 'weekday' ? workingCount : `${workingCount}/${limit}`}
+                </ThemeText>
+              </View>
 
               {(holidayWorkers.length > 0 || offWorkers.length > 0 || cellExceptions.length > 0) && (
                 <View style={styles.holidayWorkersBox}>
@@ -879,22 +1266,43 @@ export const CalendarScreen: React.FC<any> = ({
                       
                     return (
                       <>
-                        {displayList.slice(0, 3).map((itemObj, idx) => (
-                          <ThemeText 
-                            key={idx} 
-                            style={[
-                              styles.holidayWorkerName, 
-                              isSelected && { color: 'white' },
-                              itemObj.isException 
-                                ? { color: COLORS.accent, fontWeight: 'bold' } 
-                                : (dayType === 'weekday' && { color: '#ef4444' }) // 休暇者は赤字で表示
-                            ]} 
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                          >
-                            {itemObj.name}{itemObj.label}
-                          </ThemeText>
-                        ))}
+                        {displayList.slice(0, 3).map((itemObj, idx) => {
+                          const isBeingDragged = draggedItem && (draggedItem.staff?.id === itemObj.staff?.id || draggedItem.staffId === itemObj.staff?.id) && draggedItem.sourceDate === cellDateStr;
+                          
+                          return (
+                            <TouchableOpacity
+                              key={idx}
+                              style={[
+                                styles.badgeItem,
+                                isBeingDragged && { opacity: 0.35 },
+                                itemObj.isException 
+                                  ? { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: COLORS.accent, borderWidth: 0.5 }
+                                  : (dayType === 'weekday' 
+                                      ? { backgroundColor: 'rgba(239, 68, 68, 0.12)' }
+                                      : { backgroundColor: 'rgba(56, 189, 248, 0.12)' })
+                              ]}
+                              onPress={(e) => {
+                                e?.stopPropagation?.();
+                                openQuickEditModal(itemObj, cellDateStr);
+                              }}
+                              {...getDraggableProps(itemObj, cellDateStr)}
+                            >
+                              <ThemeText 
+                                style={[
+                                  styles.holidayWorkerName, 
+                                  isSelected && { color: 'white' },
+                                  itemObj.isException 
+                                    ? { color: COLORS.accent, fontWeight: 'bold' } 
+                                    : (dayType === 'weekday' ? { color: '#ef4444' } : { color: '#38bdf8' })
+                                ]} 
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                              >
+                                {itemObj.name}{itemObj.label}
+                              </ThemeText>
+                            </TouchableOpacity>
+                          );
+                        })}
                         {displayList.length > 3 && (
                           <ThemeText style={[styles.holidayWorkerName, { opacity: 0.6, fontSize: 8 }, isSelected && { color: 'white' }]}>
                             他{displayList.length - 3}名
@@ -983,6 +1391,13 @@ export const CalendarScreen: React.FC<any> = ({
         <ThemeCard style={styles.detailCard}>
           <View style={styles.detailHeader}>
             <ThemeText variant="h2">{selectedDate.getMonth() + 1}月{selectedDate.getDate()}日の詳細</ThemeText>
+            <TouchableOpacity 
+              style={[styles.addStaffBtn, { backgroundColor: COLORS.primary }]}
+              onPress={() => setIsAddStaffModalVisible(true)}
+            >
+              <Plus size={16} color="white" />
+              <ThemeText variant="caption" bold color="white" style={{ marginLeft: 4 }}>シフト追加</ThemeText>
+            </TouchableOpacity>
           </View>
           <View style={styles.detailRow}>
             <View style={styles.detailItem}>
@@ -994,118 +1409,104 @@ export const CalendarScreen: React.FC<any> = ({
             </View>
           </View>
 
-          {/* 休日のみ詳細リストを表示する */}
-          {/* 詳細は常に表示 */}
-          {true && (
-            <>
-              {/* Working Staff Section */}
-              <View style={styles.leavesSection}>
-                <View style={styles.sectionDivider} />
-                <View style={styles.leavesTitleRow}><Users size={16} color={COLORS.primary} /><ThemeText variant="label" style={{ color: COLORS.primary, marginLeft: 8 }}>出勤者一覧</ThemeText></View>
-                {workingStaff.length > 0 ? workingStaff.map((item, idx) => {
-                  const targetStaff = (staffList || []).find((s: any) => (s?.name || '').replace(/\s/g, '').includes('佐久間'));
-                  const TARGET_UUID = targetStaff?.id || '';
-                  const isTarget = TARGET_UUID && item.staff?.id === TARGET_UUID;
+          {/* 出勤者一覧 */}
+          <View style={styles.leavesSection}>
+            <View style={styles.sectionDivider} />
+            <View style={styles.leavesTitleRow}><Users size={16} color={COLORS.primary} /><ThemeText variant="label" style={{ color: COLORS.primary, marginLeft: 8 }}>出勤者一覧</ThemeText></View>
+            {workingStaff.length > 0 ? workingStaff.map((item, idx) => {
+              const targetStaff = (staffList || []).find((s: any) => (s?.name || '').replace(/\s/g, '').includes('佐久間'));
+              const TARGET_UUID = targetStaff?.id || '';
+              const isTarget = TARGET_UUID && item.staff?.id === TARGET_UUID;
 
-                  const isTransferType = (item.type || '').includes('振替') || 
-                                         (item.details?.type || '').includes('振替') || 
-                                         (item.status || '').includes('振替') || 
-                                         (item.type || '').includes('振休') || 
-                                         (item.details?.type || '').includes('振休') || 
-                                         (item.status || '').includes('振休');
-                  
-                  const isAs = item.isAssistant || item.staff?.jobType === '助手' || item.staff?.role === '助手';
-                  const limit = isAs ? 7.5 : 7.75;
+              const isTransferType = (item.type || '').includes('振替') || 
+                                     (item.details?.type || '').includes('振替') || 
+                                     (item.status || '').includes('振替') || 
+                                     (item.type || '').includes('振休') || 
+                                     (item.details?.type || '').includes('振休') || 
+                                     (item.status || '').includes('振休');
+              
+              const isAs = item.isAssistant || item.staff?.jobType === '助手' || item.staff?.role === '助手';
+              const limit = isAs ? 7.5 : 7.75;
 
-                  let duration = item.hours ?? 
-                                   item.partialLeaveHours ?? 
-                                   item.leaveHours ?? 
-                                   item.details?.partialLeaveHours ?? 
-                                   item.details?.duration ?? 
-                                   item.details?.hours ?? 0;
-                  if (isTarget && isTransferType) {
-                    duration = limit;
-                  }
+              let duration = item.hours ?? 
+                               item.partialLeaveHours ?? 
+                               item.leaveHours ?? 
+                               item.details?.partialLeaveHours ?? 
+                               item.details?.duration ?? 
+                               item.details?.hours ?? 0;
+              if (isTarget && isTransferType) {
+                duration = limit;
+              }
 
-                  if (isTransferType && duration >= limit) {
-                    return null;
-                  }
-                  return (
-                    <View key={idx} style={styles.leafItem}>
-                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                        <ThemeText variant="caption" bold>
-                          {item.staff.name} {item.isHomeVisit ? '[訪問リハ]' : (item.isAssistant ? '[助手]' : `[${item.staff.jobType || item.staff.profession}]`)}
-                        </ThemeText>
-                        {(() => {
-                          let dur = item.details?.duration ?? item.hours ?? item.details?.hours ?? 0;
+              if (isTransferType && duration >= limit) {
+                return null;
+              }
+              return (
+                <TouchableOpacity 
+                  key={idx} 
+                  style={styles.leafItemClickable}
+                  onPress={() => openQuickEditModal(item, normalizeDate(getDateStr(selectedDate)))}
+                >
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemeText variant="caption" bold>
+                      {item.staff.name} {item.isHomeVisit ? '[訪問リハ]' : (item.isAssistant ? '[助手]' : `[${item.staff.jobType || item.staff.profession}]`)}
+                    </ThemeText>
+                    {(() => {
+                      let dur = item.details?.duration ?? item.hours ?? item.details?.hours ?? 0;
 
-                          // 🚨 吉田のゴーストデータ（6月11日と7月1日の時間休3.75h）を強制スルー
-                          const isYoshida = item.staff?.id === 'f003cc8e-2e9a-4cb0-8e1f-5c0bb03d024e' || item.staff?.name === '吉田';
-                          const isGhostDate = item.date === '2026-06-11' || item.date === '2026-07-01';
-                          if (isYoshida && isGhostDate && parseFloat(String(dur)) === 3.75) {
-                            dur = 0;
-                          }
+                      // 🚨 吉田のゴーストデータ（6月11日と7月1日の時間休3.75h）を強制スルー
+                      const isYoshida = item.staff?.id === 'f003cc8e-2e9a-4cb0-8e1f-5c0bb03d024e' || item.staff?.name === '吉田';
+                      const isGhostDate = item.date === '2026-06-11' || item.date === '2026-07-01';
+                      if (isYoshida && isGhostDate && parseFloat(String(dur)) === 3.75) {
+                        dur = 0;
+                      }
 
-                          if (dur > 0) {
-                            const text = (item.type || '') === '半日振替'
-                              ? ` 半日振替`
-                              : (item.type || '') === '特休＋時間休'
-                                ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
-                                : (item.type || '').includes('振替')
-                                  ? ` 振＋時`
-                                  : (item.type || '').includes('特')
-                                    ? ` 特休${dur}h`
-                                    : (item.type || '') === '出張'
-                                      ? ` 出張${dur}h`
-                                      : (item.type || '') === '休日時間外'
-                                        ? ` 休日時間外${dur}h`
-                                        : ` 時間休${dur}h`;
-                            return (
-                              <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
-                                {text}
-                              </ThemeText>
-                            );
-                          }
-                          return null;
-                        })()}
-                        {item.details?.startTime && (
+                      if (dur > 0) {
+                        const text = (item.type || '') === '半日振替'
+                          ? ` 半日振替`
+                          : (item.type || '') === '特休＋時間休'
+                            ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
+                            : (item.type || '').includes('振替')
+                              ? ` 振＋時`
+                              : (item.type || '').includes('特')
+                                ? ` 特休${dur}h`
+                                : (item.type || '') === '出張'
+                                  ? ` 出張${dur}h`
+                                  : (item.type || '') === '休日時間外'
+                                    ? ` 休日時間外${dur}h`
+                                    : ` 時間休${dur}h`;
+                        return (
                           <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
-                            {`${item.details.startTime}-${item.details.endTime}`}
+                            {text}
                           </ThemeText>
-                        )}
-                        {(() => {
-                          const isApprovedItem = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
-                          const isPendingItem = !isApprovedItem && (item.status === 'pending' || item.status === '申請中');
-                          return isPendingItem ? (
-                            <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold', marginLeft: 8 }}>
-                              [申請中]
-                            </ThemeText>
-                          ) : null;
-                        })()}
-                      </View>
-                      {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
-                        <View style={{ flexDirection: 'row', gap: 8 }}>
-                          {(() => {
-                            const isApprovedItem = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
-                            const isPendingItem = !isApprovedItem && (item.status === 'pending' || item.status === '申請中');
-                            return isPendingItem ? (
-                              <TouchableOpacity 
-                                style={[styles.smallActionBtn, { borderColor: COLORS.primary, backgroundColor: 'rgba(56, 189, 248, 0.05)' }]}
-                                onPress={() => item.requestId && approveRequest && approveRequest(item.requestId, 'approved')}
-                              >
-                                <Check size={14} color={COLORS.primary} />
-                              </TouchableOpacity>
-                            ) : null;
-                          })()}
-                        </View>
-                      )}
-                    </View>
-                  );
-                }) : (
-                  <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>出勤予定なし</ThemeText>
-                )}
-              </View>
-            {/* Off Staff Section */}
+                        );
+                      }
+                      return null;
+                    })()}
+                    {item.details?.startTime && (
+                      <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
+                        {`${item.details.startTime}-${item.details.endTime}`}
+                      </ThemeText>
+                    )}
+                    {(() => {
+                      const isApprovedItem = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
+                      const isPendingItem = !isApprovedItem && (item.status === 'pending' || item.status === '申請中');
+                      return isPendingItem ? (
+                        <ThemeText variant="caption" style={{ color: '#f59e0b', fontWeight: 'bold', marginLeft: 8 }}>
+                          [申請中]
+                        </ThemeText>
+                      ) : null;
+                    })()}
+                  </View>
+                  <Edit3 size={14} color={COLORS.textSecondary} style={{ opacity: 0.6 }} />
+                </TouchableOpacity>
+              );
+            }) : (
+              <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>出勤予定なし</ThemeText>
+            )}
+          </View>
+
+          {/* 休暇・休日一覧 */}
           <View style={styles.leavesSection}>
             <View style={styles.sectionDivider} />
             <View style={styles.leavesTitleRow}><UserMinus size={16} color="#ef4444" /><ThemeText variant="label" style={{ color: '#ef4444', marginLeft: 8 }}>休暇・休日</ThemeText></View>
@@ -1135,7 +1536,11 @@ export const CalendarScreen: React.FC<any> = ({
               }
               const isException = isTransferType && duration >= limit;
               return (
-                <View key={idx} style={styles.leafItem}>
+                <TouchableOpacity 
+                  key={idx} 
+                  style={styles.leafItemClickable}
+                  onPress={() => openQuickEditModal(item, normalizeDate(getDateStr(selectedDate)))}
+                >
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                     <ThemeText 
                       variant="caption" 
@@ -1186,14 +1591,12 @@ export const CalendarScreen: React.FC<any> = ({
                       })()}
                     </View>
                   )}
-                </View>
+                </TouchableOpacity>
               );
             }) : (
               <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, marginLeft: 8 }}>休暇者なし</ThemeText>
             )}
           </View>
-            </>
-          )}
         </ThemeCard>
       </View>
       </ScrollView>
@@ -1345,6 +1748,217 @@ export const CalendarScreen: React.FC<any> = ({
           </View>
         </View>
       </Modal>
+
+      {/* Quick Shift Edit / Move / Delete Modal */}
+      <Modal visible={!!selectedShiftToEdit} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 450 }]}>
+            <View style={styles.modalHeader}>
+              <View>
+                <ThemeText variant="h2">{selectedShiftToEdit?.staff?.name || selectedShiftToEdit?.staffName || 'スタッフ'} のシフト</ThemeText>
+                <ThemeText variant="caption" color={COLORS.textSecondary}>
+                  {selectedShiftToEdit?.date}（現在: {selectedShiftToEdit?.type || '未設定'}{selectedShiftToEdit?.hours ? ` ${selectedShiftToEdit?.hours}h` : ''}）
+                </ThemeText>
+              </View>
+              <TouchableOpacity onPress={() => setSelectedShiftToEdit(null)}>
+                <XCircle color={COLORS.textSecondary} size={24} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Tab Selection */}
+            <View style={styles.tabBar}>
+              <TouchableOpacity 
+                style={[styles.tabItem, editActionTab === 'type' && styles.tabItemActive]}
+                onPress={() => setEditActionTab('type')}
+              >
+                <Edit3 size={16} color={editActionTab === 'type' ? 'white' : COLORS.textSecondary} />
+                <ThemeText variant="caption" bold={editActionTab === 'type'} color={editActionTab === 'type' ? 'white' : COLORS.textSecondary} style={{ marginLeft: 6 }}>
+                  種別変更
+                </ThemeText>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.tabItem, editActionTab === 'move' && styles.tabItemActive]}
+                onPress={() => setEditActionTab('move')}
+              >
+                <Move size={16} color={editActionTab === 'move' ? 'white' : COLORS.textSecondary} />
+                <ThemeText variant="caption" bold={editActionTab === 'move'} color={editActionTab === 'move' ? 'white' : COLORS.textSecondary} style={{ marginLeft: 6 }}>
+                  別日へ移動
+                </ThemeText>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.tabItem, editActionTab === 'delete' && styles.tabItemDeleteActive]}
+                onPress={() => setEditActionTab('delete')}
+              >
+                <Trash2 size={16} color={editActionTab === 'delete' ? 'white' : '#ef4444'} />
+                <ThemeText variant="caption" bold={editActionTab === 'delete'} color={editActionTab === 'delete' ? 'white' : '#ef4444'} style={{ marginLeft: 6 }}>
+                  削除
+                </ThemeText>
+              </TouchableOpacity>
+            </View>
+
+            {/* TAB 1: 種別変更 */}
+            {editActionTab === 'type' && (
+              <View style={{ marginTop: 16 }}>
+                <ThemeText variant="label" style={{ marginBottom: 10 }}>変更後の種別を選択</ThemeText>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                  {['出勤', '年休', '公休', '特休', '時間休', '午前振替', '午後振替', '夏季休暇', '特休＋時間休', '出張', '休日時間外', '看護休暇'].map(t => (
+                    <TouchableOpacity 
+                      key={t}
+                      style={[
+                        styles.typeChip,
+                        newEditType === t && styles.typeChipActive
+                      ]}
+                      onPress={() => setNewEditType(t)}
+                    >
+                      <ThemeText variant="caption" bold={newEditType === t} color={newEditType === t ? 'white' : COLORS.text}>{t}</ThemeText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* 時間設定 */}
+                {(newEditType === '時間休' || newEditType === '特休' || newEditType === '特休＋時間休' || newEditType === '出張' || newEditType === '休日時間外') && (
+                  <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12 }}>
+                    <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
+                    {newEditType === '特休＋時間休' ? (
+                      <View style={{ gap: 12 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <ThemeText variant="caption">特休:</ThemeText>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                            <TouchableOpacity onPress={() => setNewEditSpecialHours(Math.max(0.25, newEditSpecialHours - 0.25))} style={styles.addStaffBtn}>
+                              <ThemeText bold>-</ThemeText>
+                            </TouchableOpacity>
+                            <ThemeText bold color={COLORS.primary}>{newEditSpecialHours.toFixed(2)}h</ThemeText>
+                            <TouchableOpacity onPress={() => setNewEditSpecialHours(Math.min(8.0, newEditSpecialHours + 0.25))} style={styles.addStaffBtn}>
+                              <ThemeText bold>+</ThemeText>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <ThemeText variant="caption">時間休:</ThemeText>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                            <TouchableOpacity onPress={() => setNewEditHourlyHours(Math.max(0.25, newEditHourlyHours - 0.25))} style={styles.addStaffBtn}>
+                              <ThemeText bold>-</ThemeText>
+                            </TouchableOpacity>
+                            <ThemeText bold color={COLORS.primary}>{newEditHourlyHours.toFixed(2)}h</ThemeText>
+                            <TouchableOpacity onPress={() => setNewEditHourlyHours(Math.min(8.0, newEditHourlyHours + 0.25))} style={styles.addStaffBtn}>
+                              <ThemeText bold>+</ThemeText>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+                        <TouchableOpacity onPress={() => setNewEditHours(Math.max(0.25, newEditHours - 0.25))} style={styles.addStaffBtn}>
+                          <ThemeText bold>-</ThemeText>
+                        </TouchableOpacity>
+                        <ThemeText variant="h2" color={COLORS.primary}>{newEditHours.toFixed(2)}h</ThemeText>
+                        <TouchableOpacity onPress={() => setNewEditHours(Math.min(8.0, newEditHours + 0.25))} style={styles.addStaffBtn}>
+                          <ThemeText bold>+</ThemeText>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity style={[styles.modalButton, styles.modalCancelButton]} onPress={() => setSelectedShiftToEdit(null)}>
+                    <ThemeText>キャンセル</ThemeText>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.modalSubmitButton]} 
+                    onPress={handleQuickEditType}
+                    disabled={isProcessingShift}
+                  >
+                    {isProcessingShift ? <ActivityIndicator color="white" /> : <ThemeText bold color="white">変更を保存</ThemeText>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* TAB 2: 日付移動 */}
+            {editActionTab === 'move' && (
+              <View style={{ marginTop: 16 }}>
+                <ThemeText variant="label" style={{ marginBottom: 8 }}>移動先の日付を選択（当月）</ThemeText>
+                
+                <ScrollView style={{ maxHeight: 200, marginBottom: 16 }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {Array.from({ length: daysInMonth }, (_, idx) => {
+                      const dayNum = idx + 1;
+                      const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                      const isCurrent = selectedShiftToEdit?.date === dateStr;
+                      const isTarget = targetMoveDate === dateStr;
+                      const tempDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), dayNum);
+                      const dType = getDayType(tempDate);
+
+                      return (
+                        <TouchableOpacity
+                          key={dayNum}
+                          disabled={isCurrent}
+                          style={[
+                            styles.moveDateChip,
+                            isTarget && styles.moveDateChipActive,
+                            isCurrent && { opacity: 0.35 }
+                          ]}
+                          onPress={() => setTargetMoveDate(dateStr)}
+                        >
+                          <ThemeText 
+                            variant="caption" 
+                            bold={isTarget}
+                            color={isTarget ? 'white' : (dType === 'sun' || dType === 'holiday' ? '#ef4444' : dType === 'sat' ? '#3b82f6' : COLORS.text)}
+                          >
+                            {dayNum}日{isCurrent ? '(現在)' : ''}
+                          </ThemeText>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity style={[styles.modalButton, styles.modalCancelButton]} onPress={() => setSelectedShiftToEdit(null)}>
+                    <ThemeText>キャンセル</ThemeText>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.modalSubmitButton]} 
+                    onPress={() => handleMoveShift(selectedShiftToEdit, selectedShiftToEdit?.date, targetMoveDate)}
+                    disabled={isProcessingShift || !targetMoveDate || targetMoveDate === selectedShiftToEdit?.date}
+                  >
+                    {isProcessingShift ? <ActivityIndicator color="white" /> : <ThemeText bold color="white">この日付へ移動</ThemeText>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* TAB 3: 削除 */}
+            {editActionTab === 'delete' && (
+              <View style={{ marginTop: 16 }}>
+                <View style={{ padding: 16, backgroundColor: 'rgba(239, 68, 68, 0.08)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)', marginBottom: 20 }}>
+                  <ThemeText bold color="#ef4444" style={{ marginBottom: 4 }}>予定の削除確認</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>
+                    {selectedShiftToEdit?.staff?.name || selectedShiftToEdit?.staffName} さんの {selectedShiftToEdit?.date} のシフト（{selectedShiftToEdit?.type}）を完全に削除して空欄に戻しますか？
+                  </ThemeText>
+                </View>
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity style={[styles.modalButton, styles.modalCancelButton]} onPress={() => setSelectedShiftToEdit(null)}>
+                    <ThemeText>キャンセル</ThemeText>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, { backgroundColor: '#ef4444' }]} 
+                    onPress={handleQuickDelete}
+                    disabled={isProcessingShift}
+                  >
+                    {isProcessingShift ? <ActivityIndicator color="white" /> : <ThemeText bold color="white">削除する</ThemeText>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1381,7 +1995,8 @@ const styles = StyleSheet.create({
   todayCell: { backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: BORDER_RADIUS.md, borderWidth: 1, borderColor: COLORS.primary },
   dayCount: { fontSize: 9.5, marginTop: 1, fontWeight: 'bold' },
   holidayWorkersBox: { width: '100%', marginTop: 3, paddingHorizontal: 2, alignItems: 'center', gap: 2 },
-  holidayWorkerName: { fontSize: 10, color: COLORS.text, fontWeight: 'bold', width: '100%', textAlign: 'center' },
+  holidayWorkerName: { fontSize: 9.5, color: COLORS.text, fontWeight: 'bold', width: '100%', textAlign: 'center' },
+  badgeItem: { width: '96%', paddingVertical: 2, paddingHorizontal: 3, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   requestBadge: { backgroundColor: '#ef4444', borderRadius: 4, paddingHorizontal: 2, paddingVertical: 1, marginTop: 1, alignItems: 'center', justifyContent: 'center', width: '90%' },
   requestText: { color: 'white', fontSize: 7, fontWeight: 'bold', textAlign: 'center' },
   detailScroll: { paddingHorizontal: SPACING.md, width: '100%' },
@@ -1394,6 +2009,7 @@ const styles = StyleSheet.create({
   sectionDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.05)', marginBottom: SPACING.md, width: '100%' },
   leavesTitleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.sm },
   leafItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, paddingLeft: 8, width: '100%' },
+  leafItemClickable: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, paddingHorizontal: 10, marginBottom: 4, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, width: '100%' },
   addStaffBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: BORDER_RADIUS.sm },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 20, width: '100%' },
   modalContent: { backgroundColor: COLORS.card, borderRadius: 24, padding: 24, width: '100%', borderWidth: 1, borderColor: COLORS.border },
@@ -1406,4 +2022,12 @@ const styles = StyleSheet.create({
   modalSubmitButton: { backgroundColor: COLORS.primary },
   smallActionBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: 'rgba(239, 68, 68, 0.05)', zIndex: 10 },
   finishBtn: { backgroundColor: COLORS.primary, height: 54, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4, zIndex: 20, width: '100%' },
+  tabBar: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 4, marginBottom: 12 },
+  tabItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8 },
+  tabItemActive: { backgroundColor: COLORS.primary },
+  tabItemDeleteActive: { backgroundColor: 'rgba(239, 68, 68, 0.2)', borderWidth: 1, borderColor: '#ef4444' },
+  typeChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, backgroundColor: 'rgba(255,255,255,0.04)' },
+  typeChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  moveDateChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: COLORS.border, backgroundColor: 'rgba(255,255,255,0.03)', minWidth: 52, alignItems: 'center' },
+  moveDateChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
 });
