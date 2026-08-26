@@ -255,9 +255,10 @@ export const CalendarScreen: React.FC<any> = ({
     return map;
   }, [requests, shifts, staffList]);
 
-  const isPrivileged = ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
+  const isPrivileged = ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者') || profile?.role?.includes('管理者') || profile?.role === 'admin') && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
+  const isAdmin = isPrivileged;
 
-    const getDetailedDayInfo = (date: Date) => {
+  const getDetailedDayInfo = (date: Date) => {
       const dateStr = normalizeDate(getDateStr(date)); // YYYY-MM-DD (正規化)
       const dayType = getDayType(date);
 
@@ -535,6 +536,10 @@ export const CalendarScreen: React.FC<any> = ({
   };
 
   const handleAddStaff = async (staffNames: string[]) => {
+    if (!isAdmin) {
+      Alert.alert('権限エラー', 'シフトの追加・変更は管理者のみ可能です。');
+      return;
+    }
     const dateStr = normalizeDate(getDateStr(selectedDate));
 
     if (selectedType === '空欄') {
@@ -699,6 +704,10 @@ export const CalendarScreen: React.FC<any> = ({
 
   // --- 1. D&D 移動処理 ---
   const handleMoveShift = async (item: any, fromDateStr: string, toDateStr: string) => {
+    if (!isAdmin) {
+      Alert.alert('権限エラー', 'シフトの移動は管理者のみ可能です。');
+      return;
+    }
     console.log('🔄 [handleMoveShift] Initiating move:', { item, fromDateStr, toDateStr });
     if (!item || !fromDateStr || !toDateStr || fromDateStr === toDateStr) {
       console.log('⚠️ [handleMoveShift] Skipped: invalid params or same date.');
@@ -717,7 +726,7 @@ export const CalendarScreen: React.FC<any> = ({
       const staffName = staff.name;
       const shiftType = item.type || '出勤';
       const hours = item.hours || null;
-      const details = item.details || { note: 'カレンダーD&D移動' };
+      const details = item.details || { note: '管理画面より日付移動' };
 
       console.log(`[handleMoveShift] Deleting existing records on ${fromDateStr} for staff ${staffName} (${cleanStaffId})...`);
 
@@ -772,7 +781,7 @@ export const CalendarScreen: React.FC<any> = ({
         date: toDateStr,
         type: shiftType,
         status: 'approved',
-        reason: 'カレンダーD&D移動',
+        reason: '管理画面より日付移動',
         hours: hours,
         details: newReq.details,
         is_manual: true,
@@ -804,6 +813,7 @@ export const CalendarScreen: React.FC<any> = ({
 
       // 5. 最新データ再取得
       if (fetchShifts) await fetchShifts();
+      setSelectedShiftToEdit(null);
       Alert.alert('移動完了', `${staffName}さんのシフトを ${toDateStr} に移動しました。`);
 
     } catch (err: any) {
@@ -816,6 +826,7 @@ export const CalendarScreen: React.FC<any> = ({
 
   // --- 2. クイック編集モーダルを開く ---
   const openQuickEditModal = (item: any, dateStr: string) => {
+    if (!isAdmin) return;
     const staff = staffList.find(s => s.id === item.staff?.id || s.id === item.staffId || normalizeName(s.name) === normalizeName(item.staff?.name || item.name));
     setSelectedShiftToEdit({
       ...item,
@@ -832,6 +843,10 @@ export const CalendarScreen: React.FC<any> = ({
 
   // --- 3. クイック種別変更確定 ---
   const handleQuickEditType = async () => {
+    if (!isAdmin) {
+      Alert.alert('権限エラー', 'シフトの変更は管理者のみ可能です。');
+      return;
+    }
     if (!selectedShiftToEdit) return;
     setIsProcessingShift(true);
 
@@ -932,6 +947,10 @@ export const CalendarScreen: React.FC<any> = ({
 
   // --- 4. クイック削除処理 ---
   const handleQuickDelete = async () => {
+    if (!isAdmin) {
+      Alert.alert('権限エラー', 'シフトの削除は管理者のみ可能です。');
+      return;
+    }
     if (!selectedShiftToEdit) return;
     setIsProcessingShift(true);
 
@@ -1164,7 +1183,7 @@ export const CalendarScreen: React.FC<any> = ({
             if (day) {
               const targetD = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
               setSelectedDate(targetD);
-              if (isSelected) {
+              if (isSelected && isAdmin) {
                 setIsAddStaffModalVisible(true);
               }
             }
@@ -1204,17 +1223,21 @@ export const CalendarScreen: React.FC<any> = ({
                         {displayList.slice(0, 3).map((itemObj, idx) => (
                           <TouchableOpacity
                             key={idx}
+                            disabled={!isAdmin}
                             style={[
                               styles.badgeItem,
                               itemObj.isException 
                                 ? { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: COLORS.accent, borderWidth: 0.5 }
                                 : (dayType === 'weekday' 
                                     ? { backgroundColor: 'rgba(239, 68, 68, 0.12)' }
-                                    : { backgroundColor: 'rgba(56, 189, 248, 0.12)' })
+                                    : { backgroundColor: 'rgba(56, 189, 248, 0.12)' }),
+                              !isAdmin && { cursor: 'default' } as any
                             ]}
                             onPress={(e) => {
                               e?.stopPropagation?.();
-                              openQuickEditModal(itemObj, cellDateStr);
+                              if (isAdmin) {
+                                openQuickEditModal(itemObj, cellDateStr);
+                              }
                             }}
                           >
                             <ThemeText 
@@ -1320,13 +1343,15 @@ export const CalendarScreen: React.FC<any> = ({
         <ThemeCard style={styles.detailCard}>
           <View style={styles.detailHeader}>
             <ThemeText variant="h2">{selectedDate.getMonth() + 1}月{selectedDate.getDate()}日の詳細</ThemeText>
-            <TouchableOpacity 
-              style={[styles.addStaffBtn, { backgroundColor: COLORS.primary }]}
-              onPress={() => setIsAddStaffModalVisible(true)}
-            >
-              <Plus size={16} color="white" />
-              <ThemeText variant="caption" bold color="white" style={{ marginLeft: 4 }}>シフト追加</ThemeText>
-            </TouchableOpacity>
+            {isAdmin && (
+              <TouchableOpacity 
+                style={[styles.addStaffBtn, { backgroundColor: COLORS.primary }]}
+                onPress={() => setIsAddStaffModalVisible(true)}
+              >
+                <Plus size={16} color="white" />
+                <ThemeText variant="caption" bold color="white" style={{ marginLeft: 4 }}>シフト追加</ThemeText>
+              </TouchableOpacity>
+            )}
           </View>
           <View style={styles.detailRow}>
             <View style={styles.detailItem}>
@@ -1373,8 +1398,9 @@ export const CalendarScreen: React.FC<any> = ({
               return (
                 <TouchableOpacity 
                   key={idx} 
-                  style={styles.leafItemClickable}
-                  onPress={() => openQuickEditModal(item, normalizeDate(getDateStr(selectedDate)))}
+                  style={isAdmin ? styles.leafItemClickable : styles.leafItem}
+                  onPress={() => isAdmin && openQuickEditModal(item, normalizeDate(getDateStr(selectedDate)))}
+                  disabled={!isAdmin}
                 >
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                     <ThemeText variant="caption" bold>
@@ -1427,7 +1453,7 @@ export const CalendarScreen: React.FC<any> = ({
                       ) : null;
                     })()}
                   </View>
-                  <Edit3 size={14} color={COLORS.textSecondary} style={{ opacity: 0.6 }} />
+                  {isAdmin && <Edit3 size={14} color={COLORS.textSecondary} style={{ opacity: 0.6 }} />}
                 </TouchableOpacity>
               );
             }) : (
@@ -1467,8 +1493,9 @@ export const CalendarScreen: React.FC<any> = ({
               return (
                 <TouchableOpacity 
                   key={idx} 
-                  style={styles.leafItemClickable}
-                  onPress={() => openQuickEditModal(item, normalizeDate(getDateStr(selectedDate)))}
+                  style={isAdmin ? styles.leafItemClickable : styles.leafItem}
+                  onPress={() => isAdmin && openQuickEditModal(item, normalizeDate(getDateStr(selectedDate)))}
+                  disabled={!isAdmin}
                 >
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                     <ThemeText 
@@ -1504,6 +1531,7 @@ export const CalendarScreen: React.FC<any> = ({
                       </ThemeText>
                     )}
                   </View>
+                  {isAdmin && <Edit3 size={14} color={COLORS.textSecondary} style={{ opacity: 0.6, marginRight: 4 }} />}
                   {(isPrivileged || (profile && item.staff && normalizeName(profile.name) === normalizeName(item.staff.name))) && (
                     <View style={{ flexDirection: 'row', gap: 8 }}>
                       {(() => {
