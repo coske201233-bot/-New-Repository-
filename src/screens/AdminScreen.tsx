@@ -5,11 +5,13 @@ import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING } from '../theme/theme';
 import { 
   ChevronRight, Database, FileOutput, 
-  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle, RefreshCw
+  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle, RefreshCw, History
 } from 'lucide-react-native';
 import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
+import { recordAuditLog } from '../utils/auditLogger';
+import { AuditLogModal } from '../components/AuditLogModal';
 import * as Print from 'expo-print';
 import { generateMonthlyShifts } from '../utils/shiftEngine';
 import { forceAppUpdate } from '../utils/appReloader';
@@ -47,12 +49,9 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   updateStaffList, patchStaff, fetchShifts, onNavigateToStaff
 }) => {
 
-
-
-
-
   const [editStaff, setEditStaff] = useState<any>(null);
   const [showStaffEditModal, setShowStaffEditModal] = useState(false);
+  const [showAuditLogModal, setShowAuditLogModal] = useState(false);
   const [editName, setEditName] = useState('');
   const [editJobType, setEditJobType] = useState('');
   const [editPlacement, setEditPlacement] = useState('');
@@ -97,12 +96,25 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   // --- Handlers ---
 
-
   const handleApproveRequest = async (req: any) => {
     try {
       const updatedReq = { ...req, status: 'approved' };
       setRequests(prev => prev.map(r => r.id === req.id ? updatedReq : r));
       await cloudStorage.upsertRequests([updatedReq]);
+
+      // 監査ログ記録
+      recordAuditLog({
+        operatorId: profile?.id,
+        operatorName: profile?.name || '管理者',
+        targetStaffId: req.staff_id || req.staffId,
+        targetStaffName: req.staff_name || req.staffName,
+        actionType: 'REQUEST_APPROVE',
+        targetDate: req.date,
+        details: `${req.staff_name || req.staffName || 'スタッフ'}さんの申請「${req.type || '申請'}」(${req.date}) を承認しました`,
+        beforeData: req,
+        afterData: updatedReq,
+      });
+
       Alert.alert('完了', '申請を承認しました。');
     } catch (error: any) {
       console.error("UPDATE ERROR:", error);
@@ -112,9 +124,26 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   const handleRejectRequest = async (id: string) => {
     try {
+      const targetReq = requests.find(r => r.id === id);
       // 物理削除を実行
       await cloudStorage.deleteRequest(id);
       setRequests(prev => prev.filter(r => r.id !== id));
+
+      // 監査ログ記録
+      if (targetReq) {
+        recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          targetStaffId: targetReq.staff_id || targetReq.staffId,
+          targetStaffName: targetReq.staff_name || targetReq.staffName,
+          actionType: 'REQUEST_REJECT',
+          targetDate: targetReq.date,
+          details: `${targetReq.staff_name || targetReq.staffName || 'スタッフ'}さんの申請「${targetReq.type || '申請'}」(${targetReq.date}) を却下・削除しました`,
+          beforeData: targetReq,
+          afterData: null,
+        });
+      }
+
       Alert.alert('完了', '申請を却下し、削除しました。');
     } catch (e) {
       console.error('Reject error:', e);
@@ -468,6 +497,24 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               </ThemeCard>
 
               <ThemeCard style={styles.itemRow}>
+                <View style={[styles.iconCircle, { backgroundColor: 'rgba(168, 85, 247, 0.1)' }]}>
+                  <History size={20} color="#a855f7" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <ThemeText bold>操作履歴（監査ログ）</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>シフト手動変更や申請の提出・承認・却下・削除の履歴を確認</ThemeText>
+                </View>
+                <TouchableOpacity 
+                  style={[styles.inlineBtn, { backgroundColor: 'rgba(168, 85, 247, 0.1)' }]} 
+                  onPress={() => setShowAuditLogModal(true)}
+                  activeOpacity={0.7}
+                >
+                  <ThemeText bold color="#a855f7" style={{ marginRight: 4 }}>履歴表示</ThemeText>
+                  <ChevronRight size={16} color="#a855f7" />
+                </TouchableOpacity>
+              </ThemeCard>
+
+              <ThemeCard style={styles.itemRow}>
                 <View style={[styles.iconCircle, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
                   <RefreshCw size={20} color="#38bdf8" />
                 </View>
@@ -495,12 +542,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </TouchableOpacity>
               </ThemeCard>
 
-
-
-
-
-
-
               <View style={{ marginTop: 24, paddingBottom: 40 }}>
                 <ThemeText bold variant="h2" style={{ marginBottom: 16 }}>📈 {currentMonth + 1}月の必要人数設定</ThemeText>
                 <View style={styles.limitGrid}>
@@ -518,6 +559,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}><LogOut size={20} color="#ef4444" /><ThemeText bold color="#ef4444" style={{ marginLeft: 10 }}>アプリからログアウト</ThemeText></TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* 操作履歴（監査ログ）モーダル */}
+      <AuditLogModal
+        visible={showAuditLogModal}
+        onClose={() => setShowAuditLogModal(false)}
+      />
 
     </SafeAreaView>
   );

@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Che
 import { getDayType, formatDate, getDateStr, normalizeName } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
+import { recordAuditLog } from '../utils/auditLogger';
 
 const getSeasonalTheme = (month: number) => {
   const themes: Record<number, { icon: string, color: string }> = {
@@ -504,6 +505,17 @@ export const CalendarScreen: React.FC<any> = ({
             // 4. ローカルステートの更新
             setRequests((prev: any[]) => prev.filter(r => !(r.staffName?.trim() === staffName.trim() && r.date === dateStr)));
 
+            // 5. 監査ログの記録
+            recordAuditLog({
+              operatorId: profile?.id,
+              operatorName: profile?.name || '管理者',
+              targetStaffId: staff?.id,
+              targetStaffName: staffName,
+              actionType: 'SHIFT_UPDATE',
+              targetDate: dateStr,
+              details: `${staffName}さんのシフト（${dateStr}）を解除・リセットしました`,
+            });
+
             Alert.alert('完了', 'シフトの解除・調整が完了しました。');
             fetchShifts();
           }
@@ -541,6 +553,20 @@ export const CalendarScreen: React.FC<any> = ({
           .in('staff_id', staffIds)
           .eq('date', dateStr)
           .eq('is_manual', true);
+      }
+
+      // 監査ログの記録
+      for (const name of staffNames) {
+        const st = staffList.find(s => normalizeName(s.name) === normalizeName(name) || s.id === name);
+        recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          targetStaffId: st?.id,
+          targetStaffName: st?.name || name,
+          actionType: 'SHIFT_UPDATE',
+          targetDate: dateStr,
+          details: `${st?.name || name}さんのシフト（${dateStr}）をクリアしました`,
+        });
       }
 
       setIsAddStaffModalVisible(false);
@@ -632,6 +658,21 @@ export const CalendarScreen: React.FC<any> = ({
       }
 
       setRequests((prev: any[]) => [...prev, ...newReqs]);
+
+      // 監査ログの記録
+      for (const r of newReqs) {
+        recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          targetStaffId: r.staff_id || r.staffId,
+          targetStaffName: r.staffName,
+          actionType: 'SHIFT_UPDATE',
+          targetDate: r.date,
+          details: `${r.staffName}さんのシフト（${r.date}）を「${r.type}」に設定しました${r.hours ? ` (${r.hours}h)` : ''}`,
+          afterData: r,
+        });
+      }
+
       setIsAddStaffModalVisible(false);
       setIsTypeModalVisible(false);
       setSelectedStaffToAdd([]);

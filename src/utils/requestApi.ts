@@ -1,14 +1,18 @@
 import { supabase } from './supabase';
+import { recordAuditLog } from './auditLogger';
 
 // 申請の削除（キャンセル）
-export const deleteShiftRequest = async (requestId: string) => {
+export const deleteShiftRequest = async (
+  requestId: string,
+  operator?: { id?: string; name?: string }
+) => {
   if (!requestId) throw new Error('申請IDが見つかりません');
   const cleanId = String(requestId).replace(/['"]/g, '').trim();
 
-  // 申請情報の事前取得
+  // 申請情報の事前取得（ログ記録用）
   const { data: req } = await supabase
     .from('requests')
-    .select('id, staff_id, date')
+    .select('*')
     .filter('id', 'eq', cleanId)
     .maybeSingle();
 
@@ -26,6 +30,21 @@ export const deleteShiftRequest = async (requestId: string) => {
       .from('shifts')
       .delete()
       .match({ staff_id: req.staff_id, date: req.date });
+  }
+
+  // 監査ログの記録
+  if (req) {
+    await recordAuditLog({
+      operatorId: operator?.id,
+      operatorName: operator?.name || 'システム',
+      targetStaffId: req.staff_id,
+      targetStaffName: req.staff_name,
+      actionType: 'REQUEST_DELETE',
+      targetDate: req.date,
+      details: `${req.staff_name || 'スタッフ'}さんの申請「${req.type || '申請'}」(${req.date || ''}) を削除しました`,
+      beforeData: req,
+      afterData: null,
+    });
   }
 
   return true;
