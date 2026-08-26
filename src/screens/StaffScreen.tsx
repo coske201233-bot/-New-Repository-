@@ -1147,9 +1147,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             if (!staff) return null;
             const isInactive = staff?.status === '無効';
             const stats = calculateStats(staff);
-            const activeMonthStr = activeDate ? `${activeDate.getFullYear()}-${String(activeDate.getMonth() + 1).padStart(2, '0')}` : '';
-            const isLeavePeriod = (!staff.leave_start_date || staff.leave_start_date.slice(0, 7) <= activeMonthStr) && (!staff.leave_end_date || activeMonthStr <= staff.leave_end_date.slice(0, 7));
-            const isLongTerm = staff?.status === '長期休暇' && isLeavePeriod;
+            const todayStr = getDateStr(new Date());
+            const lStart = staff?.leave_start_date || staff?.leaveStartDate || (typeof window !== 'undefined' ? (localStorage.getItem(`leave_start_date_${staff?.id}`) || localStorage.getItem(`leave_start_date_${staff?.email}`) || localStorage.getItem(`leave_start_date_${staff?.name}`)) : null);
+            const lEnd = staff?.leave_end_date || staff?.leaveEndDate || (typeof window !== 'undefined' ? (localStorage.getItem(`leave_end_date_${staff?.id}`) || localStorage.getItem(`leave_end_date_${staff?.email}`) || localStorage.getItem(`leave_end_date_${staff?.name}`)) : null);
+            const isLongTerm = staff?.status === '長期休暇' &&
+              (!lStart || lStart <= todayStr) &&
+              (!lEnd || todayStr <= lEnd);
             return (
               <ThemeCard key={staff.id} style={[styles.staffCard, isLongTerm && { opacity: 0.6 }, isInactive && { opacity: 0.45, borderColor: '#ef4444' }]}>
                 <View style={styles.cardHeader}>
