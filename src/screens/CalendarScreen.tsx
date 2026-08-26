@@ -506,7 +506,7 @@ export const CalendarScreen: React.FC<any> = ({
             setRequests((prev: any[]) => prev.filter(r => !(r.staffName?.trim() === staffName.trim() && r.date === dateStr)));
 
             // 5. 監査ログの記録
-            recordAuditLog({
+            await recordAuditLog({
               operatorId: profile?.id,
               operatorName: profile?.name || '管理者',
               targetStaffId: staff?.id,
@@ -558,7 +558,7 @@ export const CalendarScreen: React.FC<any> = ({
       // 監査ログの記録
       for (const name of staffNames) {
         const st = staffList.find(s => normalizeName(s.name) === normalizeName(name) || s.id === name);
-        recordAuditLog({
+        await recordAuditLog({
           operatorId: profile?.id,
           operatorName: profile?.name || '管理者',
           targetStaffId: st?.id,
@@ -661,7 +661,7 @@ export const CalendarScreen: React.FC<any> = ({
 
       // 監査ログの記録
       for (const r of newReqs) {
-        recordAuditLog({
+        await recordAuditLog({
           operatorId: profile?.id,
           operatorName: profile?.name || '管理者',
           targetStaffId: r.staff_id || r.staffId,

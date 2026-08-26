@@ -14,6 +14,7 @@ import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
 import { calculateRemainingLeaveHours, formatRemainingLeave, calculateUsedLeaveHours, calculateMandatoryLeaveStatus } from '../utils/leaveUtils';
 import { createStaffApi, updateStaffInfoApi, updateStaffPasswordApi, deleteStaffApi } from '../utils/adminStaffApi';
+import { recordAuditLog } from '../utils/auditLogger';
 import * as Print from 'expo-print';
 
 interface StaffScreenProps {
@@ -691,6 +692,18 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       // [V75.2] CORRECT SAVE LOGIC: Use cloudStorage directly
       await cloudStorage.upsertRequestsAndShifts([newReq]);
       
+      // 監査ログの記録
+      await recordAuditLog({
+        operatorId: profile?.id,
+        operatorName: profile?.name || '管理者',
+        targetStaffId: selectedStaff.id,
+        targetStaffName: selectedStaff.name,
+        actionType: 'SHIFT_UPDATE',
+        targetDate: selectedDay,
+        details: `${selectedStaff.name}さんの予定（${selectedDay}）を「${type}」に設定しました${newReq.hours ? ` (${newReq.hours}h)` : ''}`,
+        afterData: newReq
+      });
+
       if (fetchShifts) {
         await fetchShifts(); // 表示を最新の状態に更新
       }
@@ -723,7 +736,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         for (const r of existing) {
           if (r.id) {
             if (onDeleteRequest) {
-              onDeleteRequest(r.id);
+              await onDeleteRequest(r.id);
             } else {
               setRequests((prev: any[]) => prev.filter((req: any) => req.id !== r.id));
               await cloudStorage.upsertRequests([{ ...r, status: 'deleted', updatedAt: new Date().toISOString() }]);
@@ -739,6 +752,18 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             .eq('date', selectedDay);
         }
         
+        // 監査ログの記録
+        await recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          targetStaffId: selectedStaff.id,
+          targetStaffName: selectedStaff.name,
+          actionType: 'SHIFT_UPDATE',
+          targetDate: selectedDay,
+          details: `${selectedStaff.name}さんの予定（${selectedDay}）を削除しました`,
+          beforeData: existing
+        });
+
         await fetchShifts();
         
         // Instead of setting selectedDay to null and closing everything, just update the state

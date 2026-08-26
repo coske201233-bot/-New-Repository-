@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { deduplicateRequests } from './requestUtils';
+import { recordAuditLog } from './auditLogger';
 import { Alert } from 'react-native';
 
 // Helpers to map between camelCase (JS) and snake_case (SQL)
@@ -398,10 +399,10 @@ export const cloudStorage = {
     // UUID形式の文字列であることを確認（前後の空白およびクォートを除去）
     const cleanId = String(id).replace(/['"]/g, '').trim();
 
-    // 1. 削除前に該当の申請データ（staff_id と date）を取得
+    // 1. 削除前に該当の申請データを取得（ログ記録用）
     const { data: targetRequest, error: fetchErr } = await supabase
       .from('requests')
-      .select('id, staff_id, date')
+      .select('*')
       .filter('id', 'eq', cleanId)
       .maybeSingle();
 
@@ -434,6 +435,21 @@ export const cloudStorage = {
         console.warn('Shift Sync Delete Warning (シフトの連動削除スキップまたは警告):', err2.message);
       }
     }
+
+    // 4. 監査ログの記録
+    if (targetRequest) {
+      await recordAuditLog({
+        operatorName: 'システム',
+        targetStaffId: targetRequest.staff_id,
+        targetStaffName: targetRequest.staff_name,
+        actionType: 'REQUEST_DELETE',
+        targetDate: targetRequest.date,
+        details: `${targetRequest.staff_name || 'スタッフ'}さんの申請「${targetRequest.type || '申請'}」(${targetRequest.date || ''}) を削除しました`,
+        beforeData: targetRequest,
+        afterData: null,
+      });
+    }
+
     console.log(`✅ Record ${cleanId} deleted from requests (and linked shift if existed).`);
     return data;
   },
@@ -441,6 +457,12 @@ export const cloudStorage = {
     if (!ids || ids.length === 0) return;
     const cleanIds = ids.filter(Boolean).map(id => String(id).replace(/['"]/g, '').trim()).filter(id => id.length > 0);
     if (cleanIds.length === 0) return;
+
+    // 削除対象の申請データを事前取得
+    const { data: targets } = await supabase
+      .from('requests')
+      .select('*')
+      .in('id', cleanIds);
 
     const chunkSize = 50;
     for (let i = 0; i < cleanIds.length; i += chunkSize) {
@@ -455,6 +477,23 @@ export const cloudStorage = {
       const { error: err2 } = await supabase.from('shifts').delete().in('id', chunk);
       if (err2) console.error('Bulk shift deletion error:', err2);
     }
+
+    // 監査ログの一括記録
+    if (targets && targets.length > 0) {
+      for (const t of targets) {
+        await recordAuditLog({
+          operatorName: 'システム',
+          targetStaffId: t.staff_id,
+          targetStaffName: t.staff_name,
+          actionType: 'REQUEST_DELETE',
+          targetDate: t.date,
+          details: `${t.staff_name || 'スタッフ'}さんの申請「${t.type || '申請'}」(${t.date || ''}) を一括削除しました`,
+          beforeData: t,
+          afterData: null,
+        });
+      }
+    }
+
     console.log(`✅ ${cleanIds.length} records deleted from both tables.`);
   },
 

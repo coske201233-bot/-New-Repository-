@@ -103,7 +103,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       await cloudStorage.upsertRequests([updatedReq]);
 
       // 監査ログ記録
-      recordAuditLog({
+      await recordAuditLog({
         operatorId: profile?.id,
         operatorName: profile?.name || '管理者',
         targetStaffId: req.staff_id || req.staffId,
@@ -131,7 +131,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
       // 監査ログ記録
       if (targetReq) {
-        recordAuditLog({
+        await recordAuditLog({
           operatorId: profile?.id,
           operatorName: profile?.name || '管理者',
           targetStaffId: targetReq.staff_id || targetReq.staffId,

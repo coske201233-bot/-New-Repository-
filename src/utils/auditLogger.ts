@@ -27,9 +27,9 @@ export interface AuditLogRecord {
 }
 
 /**
- * 操作ログ（監査ログ）を Supabase の audit_logs テーブルへ非同期で書き込む共通関数
+ * 操作ログ（監査ログ）を Supabase の audit_logs テーブルへ書き込む共通関数
  */
-export const recordAuditLog = async (params: AuditLogParams): Promise<void> => {
+export const recordAuditLog = async (params: AuditLogParams): Promise<boolean> => {
   try {
     const payload = {
       operator_id: params.operatorId || null,
@@ -38,20 +38,24 @@ export const recordAuditLog = async (params: AuditLogParams): Promise<void> => {
       target_staff_name: params.targetStaffName || '',
       action_type: params.actionType,
       target_date: params.targetDate || null,
-      details: params.details,
+      details: params.details || '',
       before_data: params.beforeData || null,
       after_data: params.afterData || null,
       created_at: new Date().toISOString(),
     };
 
-    console.log('[AuditLog] Recording:', payload.action_type, payload.details);
+    console.log('[AuditLog] Inserting into audit_logs:', payload.action_type, payload.details, payload);
 
-    const { error } = await supabase.from('audit_logs').insert([payload]);
+    const { data, error } = await supabase.from('audit_logs').insert([payload]).select();
     if (error) {
-      console.warn('[AuditLog] Supabase insert warning:', error.message);
+      console.error('❌ [AuditLog] Supabase INSERT error:', error.message, error.details, error);
+      return false;
     }
+    console.log('✅ [AuditLog] Successfully recorded audit log:', data);
+    return true;
   } catch (error) {
-    console.warn('[AuditLog] Failed to record:', error);
+    console.error('❌ [AuditLog] Fatal error recording audit log:', error);
+    return false;
   }
 };
 

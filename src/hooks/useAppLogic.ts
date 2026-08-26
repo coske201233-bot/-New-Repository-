@@ -324,7 +324,7 @@ export const useAppLogic = () => {
       shifts.fetchShifts(); 
 
       // 監査ログの記録
-      recordAuditLog({
+      await recordAuditLog({
         operatorId: authUid,
         operatorName: officialName,
         targetStaffId: trueStaffId,
@@ -359,7 +359,7 @@ export const useAppLogic = () => {
       shifts.fetchShifts();
 
       const isReject = status === 'rejected' || status === '却下';
-      recordAuditLog({
+      await recordAuditLog({
         operatorId: auth.profile?.id || auth.user?.id,
         operatorName: auth.profile?.name || '管理者',
         targetStaffId: updatedItem.staff_id || updatedItem.staffId || updatedItem.user_id,
@@ -407,7 +407,7 @@ export const useAppLogic = () => {
 
       // 監査ログの一括記録
       for (const r of approvedItems) {
-        recordAuditLog({
+        await recordAuditLog({
           operatorId: auth.profile?.id || auth.user?.id,
           operatorName: auth.profile?.name || '管理者',
           targetStaffId: r.staff_id || r.staffId || r.user_id,
@@ -471,7 +471,7 @@ export const useAppLogic = () => {
       await cloudStorage.upsertRequestsAndShifts([newWithStatus]);
       shifts.fetchShifts();
 
-      recordAuditLog({
+      await recordAuditLog({
         operatorId: auth.profile?.id || auth.user?.id,
         operatorName: auth.profile?.name || '管理者',
         targetStaffId: updatedItem.staff_id || updatedItem.staffId || updatedItem.user_id,
