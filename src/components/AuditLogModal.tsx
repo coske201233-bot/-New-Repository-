@@ -63,8 +63,14 @@ export const AuditLogModal: React.FC<AuditLogModalProps> = ({ visible, onClose }
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
       // 1. タイプフィルター
-      if (filterType !== 'ALL' && log.action_type !== filterType) {
-        return false;
+      if (filterType !== 'ALL') {
+        if (filterType === 'DELETE' || filterType === 'REQUEST_DELETE' || filterType === 'SHIFT_DELETE') {
+          if (log.action_type !== 'SHIFT_DELETE' && log.action_type !== 'REQUEST_DELETE') {
+            return false;
+          }
+        } else if (log.action_type !== filterType) {
+          return false;
+        }
       }
       // 2. 検索クエリ
       if (searchQuery.trim()) {
@@ -92,12 +98,14 @@ export const AuditLogModal: React.FC<AuditLogModalProps> = ({ visible, onClose }
     switch (actionType) {
       case 'SHIFT_UPDATE':
         return { label: 'シフト変更', color: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)', icon: Calendar };
+      case 'SHIFT_DELETE':
+        return { label: 'シフト削除', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', icon: Trash2 };
       case 'REQUEST_CREATE':
         return { label: '申請提出', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)', icon: Clock };
       case 'REQUEST_APPROVE':
         return { label: '申請承認', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)', icon: CheckCircle2 };
       case 'REQUEST_REJECT':
-        return { label: '申請却下', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', icon: XCircle };
+        return { label: '申請却下', color: '#f43f5e', bg: 'rgba(244, 63, 94, 0.15)', icon: XCircle };
       case 'REQUEST_DELETE':
         return { label: '申請削除', color: '#f97316', bg: 'rgba(249, 115, 22, 0.15)', icon: Trash2 };
       default:
@@ -128,7 +136,7 @@ export const AuditLogModal: React.FC<AuditLogModalProps> = ({ visible, onClose }
     { key: 'REQUEST_CREATE', label: '申請提出' },
     { key: 'REQUEST_APPROVE', label: '承認' },
     { key: 'REQUEST_REJECT', label: '却下' },
-    { key: 'REQUEST_DELETE', label: '削除' },
+    { key: 'DELETE', label: '削除' },
   ];
 
   return (
