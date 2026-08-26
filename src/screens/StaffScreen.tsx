@@ -168,6 +168,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const [regStatus, setRegStatus] = useState('常勤');
   const [regLeaveStartDate, setRegLeaveStartDate] = useState('');
   const [regLeaveEndDate, setRegLeaveEndDate] = useState('');
+  const [activeLeaveDatePicker, setActiveLeaveDatePicker] = useState<'start' | 'end' | null>(null);
+  const [leavePickerMonth, setLeavePickerMonth] = useState<Date>(new Date());
   const [regInitialLeaveDays, setRegInitialLeaveDays] = useState('20');
   const [editingStaff, setEditingStaff] = useState<any>(null);
   const [regHolidaySetting, setRegHolidaySetting] = useState(false);
@@ -1642,25 +1644,79 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                     <ThemeText variant="label" style={{ marginBottom: 8, color: '#38bdf8' }}>長期休暇の期間指定</ThemeText>
                     <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
                       <View style={{ flex: 1 }}>
-                        <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginBottom: 4 }}>開始日 (YYYY-MM-DD)</ThemeText>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="2026-04-01"
-                          placeholderTextColor="rgba(255,255,255,0.3)"
-                          value={regLeaveStartDate}
-                          onChangeText={setRegLeaveStartDate}
-                        />
+                        <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginBottom: 4 }}>開始日</ThemeText>
+                        {Platform.OS === 'web' ? (
+                          <input
+                            type="date"
+                            value={regLeaveStartDate}
+                            onChange={(e: any) => setRegLeaveStartDate(e.target.value)}
+                            style={{
+                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                              border: '1px solid rgba(255, 255, 255, 0.2)',
+                              borderRadius: 8,
+                              padding: '10px 12px',
+                              color: '#ffffff',
+                              fontSize: 14,
+                              width: '100%',
+                              boxSizing: 'border-box',
+                              outline: 'none',
+                              colorScheme: 'dark',
+                              cursor: 'pointer',
+                            }}
+                          />
+                        ) : (
+                          <TouchableOpacity
+                            style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12 }]}
+                            onPress={() => {
+                              const d = regLeaveStartDate ? new Date(regLeaveStartDate) : new Date();
+                              setLeavePickerMonth(isNaN(d.getTime()) ? new Date() : d);
+                              setActiveLeaveDatePicker('start');
+                            }}
+                          >
+                            <ThemeText color={regLeaveStartDate ? 'white' : 'rgba(255,255,255,0.3)'}>
+                              {regLeaveStartDate || '開始日を選択'}
+                            </ThemeText>
+                            <Calendar size={16} color={COLORS.textSecondary} />
+                          </TouchableOpacity>
+                        )}
                       </View>
                       <ThemeText color={COLORS.textSecondary} style={{ marginTop: 16 }}>〜</ThemeText>
                       <View style={{ flex: 1 }}>
-                        <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginBottom: 4 }}>終了日 (YYYY-MM-DD)</ThemeText>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="2026-06-30"
-                          placeholderTextColor="rgba(255,255,255,0.3)"
-                          value={regLeaveEndDate}
-                          onChangeText={setRegLeaveEndDate}
-                        />
+                        <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginBottom: 4 }}>終了日</ThemeText>
+                        {Platform.OS === 'web' ? (
+                          <input
+                            type="date"
+                            value={regLeaveEndDate}
+                            onChange={(e: any) => setRegLeaveEndDate(e.target.value)}
+                            style={{
+                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                              border: '1px solid rgba(255, 255, 255, 0.2)',
+                              borderRadius: 8,
+                              padding: '10px 12px',
+                              color: '#ffffff',
+                              fontSize: 14,
+                              width: '100%',
+                              boxSizing: 'border-box',
+                              outline: 'none',
+                              colorScheme: 'dark',
+                              cursor: 'pointer',
+                            }}
+                          />
+                        ) : (
+                          <TouchableOpacity
+                            style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12 }]}
+                            onPress={() => {
+                              const d = regLeaveEndDate ? new Date(regLeaveEndDate) : new Date();
+                              setLeavePickerMonth(isNaN(d.getTime()) ? new Date() : d);
+                              setActiveLeaveDatePicker('end');
+                            }}
+                          >
+                            <ThemeText color={regLeaveEndDate ? 'white' : 'rgba(255,255,255,0.3)'}>
+                              {regLeaveEndDate || '終了日を選択'}
+                            </ThemeText>
+                            <Calendar size={16} color={COLORS.textSecondary} />
+                          </TouchableOpacity>
+                        )}
                       </View>
                     </View>
                   </View>
@@ -1845,6 +1901,110 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             >
               <ThemeText bold>キャンセル</ThemeText>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Leave Date Picker Modal (Mobile Native Fallback) */}
+      <Modal visible={!!activeLeaveDatePicker} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+          <View style={{ width: '90%', maxWidth: 360, backgroundColor: '#0f172a', borderRadius: 24, padding: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <ThemeText variant="h2">
+                {activeLeaveDatePicker === 'start' ? '休暇開始日を選択' : '休暇終了日を選択'}
+              </ThemeText>
+              <TouchableOpacity onPress={() => setActiveLeaveDatePicker(null)}>
+                <X size={20} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <TouchableOpacity 
+                style={{ padding: 8 }} 
+                onPress={() => setLeavePickerMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+              >
+                <ChevronLeft size={20} color="white" />
+              </TouchableOpacity>
+              <ThemeText bold variant="h2" style={{ fontSize: 16 }}>
+                {`${leavePickerMonth.getFullYear()}年 ${leavePickerMonth.getMonth() + 1}月`}
+              </ThemeText>
+              <TouchableOpacity 
+                style={{ padding: 8 }} 
+                onPress={() => setLeavePickerMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+              >
+                <ChevronRight size={20} color="white" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+              {['日', '月', '火', '水', '木', '金', '土'].map((d, i) => (
+                <ThemeText 
+                  key={d} 
+                  style={{ flex: 1, textAlign: 'center', fontSize: 12, fontWeight: 'bold', color: i === 0 ? '#ef4444' : i === 6 ? '#38bdf8' : COLORS.textSecondary }}
+                >
+                  {d}
+                </ThemeText>
+              ))}
+            </View>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              {(getMonthInfo(leavePickerMonth.getFullYear(), leavePickerMonth.getMonth()) || []).map((d, idx) => {
+                if (d.empty) {
+                  return <View key={`empty-${idx}`} style={{ width: `${100 / 7}%`, height: 40 }} />;
+                }
+                const isSelected = activeLeaveDatePicker === 'start' 
+                  ? regLeaveStartDate === d.dateStr 
+                  : regLeaveEndDate === d.dateStr;
+                return (
+                  <TouchableOpacity
+                    key={d.dateStr}
+                    style={{
+                      width: `${100 / 7}%`,
+                      height: 40,
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      borderRadius: 8,
+                      backgroundColor: isSelected ? COLORS.primary : 'transparent',
+                    }}
+                    onPress={() => {
+                      if (activeLeaveDatePicker === 'start') {
+                        setRegLeaveStartDate(d.dateStr);
+                      } else {
+                        setRegLeaveEndDate(d.dateStr);
+                      }
+                      setActiveLeaveDatePicker(null);
+                    }}
+                  >
+                    <ThemeText 
+                      bold={isSelected} 
+                      color={isSelected ? 'white' : d.isH ? '#ef4444' : 'white'}
+                      style={{ fontSize: 13 }}
+                    >
+                      {d.day}
+                    </ThemeText>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+              <TouchableOpacity 
+                style={{ flex: 1, height: 44, borderRadius: 10, backgroundColor: 'rgba(239, 68, 68, 0.15)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)', justifyContent: 'center', alignItems: 'center' }} 
+                onPress={() => {
+                  if (activeLeaveDatePicker === 'start') setRegLeaveStartDate('');
+                  else setRegLeaveEndDate('');
+                  setActiveLeaveDatePicker(null);
+                }}
+              >
+                <ThemeText bold color="#f87171">クリア</ThemeText>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={{ flex: 1, height: 44, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center' }} 
+                onPress={() => setActiveLeaveDatePicker(null)}
+              >
+                <ThemeText bold color="white">閉じる</ThemeText>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
