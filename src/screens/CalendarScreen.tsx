@@ -703,7 +703,7 @@ export const CalendarScreen: React.FC<any> = ({
     }
   };
 
-  // --- 1. D&D 移動処理 ---
+  // --- 1. シフト移動処理 ---
   const handleMoveShift = async (item: any, fromDateStr: string, toDateStr: string) => {
     if (!isAdmin) {
       Alert.alert('権限エラー', 'シフトの移動は管理者のみ可能です。');
@@ -731,20 +731,28 @@ export const CalendarScreen: React.FC<any> = ({
 
       console.log(`[handleMoveShift] Deleting existing records on ${fromDateStr} for staff ${staffName} (${cleanStaffId})...`);
 
-      // 1. 移動元の古い日付のシフト/リクエストを削除
+      // 1. 移動元の古い日付のシフト（shiftsテーブル）を完全削除（staff_id と staff_name の両方でクエリ）
       await supabase.from('shifts').delete()
         .eq('staff_id', cleanStaffId)
         .eq('date', fromDateStr);
 
+      await supabase.from('shifts').delete()
+        .eq('staff_name', staffName)
+        .eq('date', fromDateStr);
+
+      // 2. 移動元の古い日付のリクエスト（requestsテーブル）を完全削除
       if (item.requestId && !String(item.requestId).startsWith('auto-')) {
         await supabase.from('requests').delete().eq('id', item.requestId);
-      } else {
-        await supabase.from('requests').delete()
-          .eq('staff_id', cleanStaffId)
-          .eq('date', fromDateStr);
       }
+      await supabase.from('requests').delete()
+        .eq('staff_id', cleanStaffId)
+        .eq('date', fromDateStr);
 
-      // 2. 移動先の日付へ新規シフト/リクエストを upsert
+      await supabase.from('requests').delete()
+        .eq('staff_name', staffName)
+        .eq('date', fromDateStr);
+
+      // 3. 移動先の日付へ新規シフト/リクエストを upsert
       const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
       const newReq = {
         id: newId,
@@ -789,15 +797,28 @@ export const CalendarScreen: React.FC<any> = ({
       });
       if (rErr) console.warn('Requests sync warning:', rErr.message);
 
-      // 3. ローカルステートの更新
+      // 4. ローカルステートの完全除去と追加（名前・ID両方で移動元を完全フィルタリング）
+      const normStaffName = normalizeName(staffName);
       setRequests((prev: any[]) => {
-        const filtered = prev.filter(r => !(
-          (r.id === item.requestId || String(r.staff_id || r.staffId) === cleanStaffId) && r.date === fromDateStr
-        ));
+        const filtered = (prev || []).filter(r => {
+          if (!r) return false;
+          const rDate = normalizeDate(r.date);
+          if (rDate !== fromDateStr) return true; // 別の日付はそのまま保持
+
+          const rId = String(r.id || '');
+          const rStaffId = String(r.staff_id || r.staffId || '').trim();
+          const rStaffName = normalizeName(r.staff_name || r.staffName || r.name || '');
+
+          const isMatchId = item.requestId && rId === String(item.requestId);
+          const isMatchStaffId = cleanStaffId && rStaffId === cleanStaffId;
+          const isMatchName = normStaffName && rStaffName === normStaffName;
+
+          return !(isMatchId || isMatchStaffId || isMatchName);
+        });
         return [...filtered, newReq];
       });
 
-      // 4. 監査ログの記録
+      // 5. 監査ログの記録
       await recordAuditLog({
         operatorId: profile?.id,
         operatorName: profile?.name || '管理者',
@@ -812,7 +833,7 @@ export const CalendarScreen: React.FC<any> = ({
 
       console.log(`✅ [handleMoveShift] Successfully moved shift to ${toDateStr}.`);
 
-      // 5. 最新データ再取得
+      // 6. 最新データの再取得と同期
       if (fetchShifts) await fetchShifts();
       setSelectedShiftToEdit(null);
       Alert.alert('移動完了', `${staffName}さんのシフトを ${toDateStr} に移動しました。`);
