@@ -87,6 +87,7 @@ export const CalendarScreen: React.FC<any> = ({
   const [newEditSpecialHours, setNewEditSpecialHours] = useState<number>(1.0);
   const [newEditHourlyHours, setNewEditHourlyHours] = useState<number>(1.0);
   const [targetMoveDate, setTargetMoveDate] = useState<string>('');
+  const [moveTargetMonth, setMoveTargetMonth] = useState<Date>(currentDate);
   const [isProcessingShift, setIsProcessingShift] = useState<boolean>(false);
 
   const currentMonthKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}`;
@@ -838,6 +839,19 @@ export const CalendarScreen: React.FC<any> = ({
     setNewEditSpecialHours(item.details?.specialHours ?? 1.0);
     setNewEditHourlyHours(item.details?.hourlyHours ?? 1.0);
     setTargetMoveDate(dateStr);
+    
+    // 対象シフトの年月で移動先選択カレンダーを初期化
+    if (dateStr) {
+      const parts = dateStr.split('-');
+      if (parts.length >= 2) {
+        setMoveTargetMonth(new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1));
+      } else {
+        setMoveTargetMonth(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+      }
+    } else {
+      setMoveTargetMonth(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+    }
+
     setEditActionTab('type');
   };
 
@@ -1840,39 +1854,74 @@ export const CalendarScreen: React.FC<any> = ({
             {/* TAB 2: 日付移動 */}
             {editActionTab === 'move' && (
               <View style={{ marginTop: 16 }}>
-                <ThemeText variant="label" style={{ marginBottom: 8 }}>移動先の日付を選択（当月）</ThemeText>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <ThemeText variant="label">移動先の日付を選択</ThemeText>
+
+                  {/* 月切り替えコントロール */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 10, paddingHorizontal: 4, paddingVertical: 2 }}>
+                    <TouchableOpacity 
+                      style={{ padding: 6 }} 
+                      onPress={() => {
+                        const newM = new Date(moveTargetMonth.getFullYear(), moveTargetMonth.getMonth() - 1, 1);
+                        setMoveTargetMonth(newM);
+                      }}
+                    >
+                      <ChevronLeft size={16} color={COLORS.text} />
+                    </TouchableOpacity>
+
+                    <ThemeText variant="caption" bold style={{ paddingHorizontal: 8 }}>
+                      {moveTargetMonth.getFullYear()}年 {moveTargetMonth.getMonth() + 1}月
+                    </ThemeText>
+
+                    <TouchableOpacity 
+                      style={{ padding: 6 }} 
+                      onPress={() => {
+                        const newM = new Date(moveTargetMonth.getFullYear(), moveTargetMonth.getMonth() + 1, 1);
+                        setMoveTargetMonth(newM);
+                      }}
+                    >
+                      <ChevronRight size={16} color={COLORS.text} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
                 
                 <ScrollView style={{ maxHeight: 200, marginBottom: 16 }}>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                    {Array.from({ length: daysInMonth }, (_, idx) => {
-                      const dayNum = idx + 1;
-                      const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-                      const isCurrent = selectedShiftToEdit?.date === dateStr;
-                      const isTarget = targetMoveDate === dateStr;
-                      const tempDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), dayNum);
-                      const dType = getDayType(tempDate);
+                    {(() => {
+                      const targetYear = moveTargetMonth.getFullYear();
+                      const targetMonth = moveTargetMonth.getMonth();
+                      const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
 
-                      return (
-                        <TouchableOpacity
-                          key={dayNum}
-                          disabled={isCurrent}
-                          style={[
-                            styles.moveDateChip,
-                            isTarget && styles.moveDateChipActive,
-                            isCurrent && { opacity: 0.35 }
-                          ]}
-                          onPress={() => setTargetMoveDate(dateStr)}
-                        >
-                          <ThemeText 
-                            variant="caption" 
-                            bold={isTarget}
-                            color={isTarget ? 'white' : (dType === 'sun' || dType === 'holiday' ? '#ef4444' : dType === 'sat' ? '#3b82f6' : COLORS.text)}
+                      return Array.from({ length: daysInTargetMonth }, (_, idx) => {
+                        const dayNum = idx + 1;
+                        const dateStr = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                        const isCurrent = selectedShiftToEdit?.date === dateStr;
+                        const isTarget = targetMoveDate === dateStr;
+                        const tempDate = new Date(targetYear, targetMonth, dayNum);
+                        const dType = getDayType(tempDate);
+
+                        return (
+                          <TouchableOpacity
+                            key={dayNum}
+                            disabled={isCurrent}
+                            style={[
+                              styles.moveDateChip,
+                              isTarget && styles.moveDateChipActive,
+                              isCurrent && { opacity: 0.35 }
+                            ]}
+                            onPress={() => setTargetMoveDate(dateStr)}
                           >
-                            {dayNum}日{isCurrent ? '(現在)' : ''}
-                          </ThemeText>
-                        </TouchableOpacity>
-                      );
-                    })}
+                            <ThemeText 
+                              variant="caption" 
+                              bold={isTarget}
+                              color={isTarget ? 'white' : (dType === 'sun' || dType === 'holiday' ? '#ef4444' : dType === 'sat' ? '#3b82f6' : COLORS.text)}
+                            >
+                              {dayNum}日{isCurrent ? '(現在)' : ''}
+                            </ThemeText>
+                          </TouchableOpacity>
+                        );
+                      });
+                    })()}
                   </View>
                 </ScrollView>
 
@@ -1885,7 +1934,11 @@ export const CalendarScreen: React.FC<any> = ({
                     onPress={() => handleMoveShift(selectedShiftToEdit, selectedShiftToEdit?.date, targetMoveDate)}
                     disabled={isProcessingShift || !targetMoveDate || targetMoveDate === selectedShiftToEdit?.date}
                   >
-                    {isProcessingShift ? <ActivityIndicator color="white" /> : <ThemeText bold color="white">この日付へ移動</ThemeText>}
+                    {isProcessingShift ? <ActivityIndicator color="white" /> : (
+                      <ThemeText bold color="white">
+                        {targetMoveDate ? `${targetMoveDate.split('-')[1]}月${parseInt(targetMoveDate.split('-')[2], 10)}日へ移動` : 'この日付へ移動'}
+                      </ThemeText>
+                    )}
                   </TouchableOpacity>
                 </View>
               </View>
