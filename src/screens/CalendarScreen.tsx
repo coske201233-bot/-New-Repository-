@@ -79,10 +79,6 @@ export const CalendarScreen: React.FC<any> = ({
   const [adminHourlyHours, setAdminHourlyHours] = useState(1.0);
   const [isTypeModalVisible, setIsTypeModalVisible] = useState(false);
 
-  // --- ドラッグ＆ドロップ用 State ---
-  const [draggedItem, setDraggedItem] = useState<any | null>(null);
-  const [dragOverDate, setDragOverDate] = useState<string | null>(null);
-
   // --- クイック編集・アクションモーダル用 State ---
   const [selectedShiftToEdit, setSelectedShiftToEdit] = useState<any | null>(null);
   const [editActionTab, setEditActionTab] = useState<'type' | 'move' | 'delete'>('type');
@@ -993,109 +989,6 @@ export const CalendarScreen: React.FC<any> = ({
     }
   };
 
-  // --- 5. Web用ドラッグ＆ドロップPropsヘルパー ---
-  const getDraggableProps = (item: any, dateStr: string) => {
-    if (Platform.OS !== 'web') return {};
-    return {
-      draggable: true,
-      onDragStart: (e: any) => {
-        e.stopPropagation();
-        const payload = {
-          staffId: item.staff?.id || item.staffId,
-          staffName: item.staff?.name || item.staffName || item.name,
-          date: dateStr,
-          sourceDate: dateStr,
-          type: item.type,
-          hours: item.hours,
-          details: item.details,
-          requestId: item.requestId,
-          isAssistant: item.isAssistant,
-        };
-        if (e && e.dataTransfer) {
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', JSON.stringify(payload));
-        }
-        console.log('🚀 [D&D DragStart]', payload);
-        setDraggedItem(payload);
-      },
-      onDragEnd: (e: any) => {
-        e?.stopPropagation?.();
-        setDraggedItem(null);
-        setDragOverDate(null);
-      },
-      style: {
-        cursor: 'grab',
-        userSelect: 'none',
-      } as any,
-    };
-  };
-
-  const getDroppableProps = (dateStr: string) => {
-    if (Platform.OS !== 'web') return {};
-    return {
-      onDragOver: (e: any) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.dataTransfer) {
-          e.dataTransfer.dropEffect = 'move';
-        }
-        if (dragOverDate !== dateStr) {
-          setDragOverDate(dateStr);
-        }
-      },
-      onDragEnter: (e: any) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (dragOverDate !== dateStr) {
-          setDragOverDate(dateStr);
-        }
-      },
-      onDragLeave: (e: any) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (dragOverDate === dateStr) {
-          setDragOverDate(null);
-        }
-      },
-      onDrop: async (e: any) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDragOverDate(null);
-
-        let payload: any = null;
-        if (e.dataTransfer) {
-          try {
-            const raw = e.dataTransfer.getData('text/plain');
-            if (raw) {
-              payload = JSON.parse(raw);
-            }
-          } catch (err) {
-            console.warn('[D&D] Failed to parse dataTransfer json:', err);
-          }
-        }
-        if (!payload) {
-          payload = draggedItem;
-        }
-
-        console.log('🎯 [D&D Drop]', { payload, targetDate: dateStr });
-
-        if (!payload) {
-          console.warn('[D&D Drop] No payload found.');
-          return;
-        }
-
-        const sourceDate = payload.date || payload.sourceDate;
-        if (sourceDate === dateStr) {
-          console.log('[D&D Drop] Same date, skipping.');
-          return;
-        }
-
-        await handleMoveShift(payload, sourceDate, dateStr);
-        setDraggedItem(null);
-      },
-    };
-  };
-
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
   const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
 
@@ -1257,48 +1150,30 @@ export const CalendarScreen: React.FC<any> = ({
 
       const isUnderLimit = workingCount < limit;
       const cellDateStr = d ? normalizeDate(getDateStr(d)) : '';
-      const isDragOver = dragOverDate === cellDateStr && !!cellDateStr;
 
       cells.push(
-        <View 
+        <TouchableOpacity 
           key={`day-${i}`} 
           style={[
             styles.dayCell, 
             isSelected && styles.selectedDay, 
             isToday && !isSelected && styles.todayCell,
             (!isSelected && !!day && isUnderLimit) ? { backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: BORDER_RADIUS.sm } : null,
-            isDragOver && { backgroundColor: 'rgba(56, 189, 248, 0.3)', borderColor: '#38bdf8', borderWidth: 2, borderRadius: BORDER_RADIUS.sm }
           ]}
-          {...(cellDateStr ? getDroppableProps(cellDateStr) : {})}
-          {...(Platform.OS === 'web' ? {
-            onClick: (e: any) => {
-              if (day) {
-                const targetD = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
-                setSelectedDate(targetD);
-                if (isSelected) {
-                  setIsAddStaffModalVisible(true);
-                }
+          onPress={() => {
+            if (day) {
+              const targetD = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+              setSelectedDate(targetD);
+              if (isSelected) {
+                setIsAddStaffModalVisible(true);
               }
             }
-          } : {})}
+          }}
+          disabled={!day}
         >
           {day && (
             <>
-              {/* Native (Mobile) 用のクリック領域 */}
-              {Platform.OS !== 'web' && (
-                <TouchableOpacity 
-                  style={StyleSheet.absoluteFill} 
-                  onPress={() => {
-                    const targetD = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
-                    setSelectedDate(targetD);
-                    if (isSelected) {
-                      setIsAddStaffModalVisible(true);
-                    }
-                  }}
-                />
-              )}
-
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 3, pointerEvents: 'none' as any }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 3 }}>
                 <ThemeText 
                   variant="caption" 
                   style={{ color: isSelected ? COLORS.background : dateColor, fontWeight: isSelected || isToday ? 'bold' : 'normal', fontSize: 10 }}
@@ -1326,43 +1201,37 @@ export const CalendarScreen: React.FC<any> = ({
                       
                     return (
                       <>
-                        {displayList.slice(0, 3).map((itemObj, idx) => {
-                          const isBeingDragged = draggedItem && (draggedItem.staff?.id === itemObj.staff?.id || draggedItem.staffId === itemObj.staff?.id) && draggedItem.sourceDate === cellDateStr;
-                          
-                          return (
-                            <TouchableOpacity
-                              key={idx}
+                        {displayList.slice(0, 3).map((itemObj, idx) => (
+                          <TouchableOpacity
+                            key={idx}
+                            style={[
+                              styles.badgeItem,
+                              itemObj.isException 
+                                ? { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: COLORS.accent, borderWidth: 0.5 }
+                                : (dayType === 'weekday' 
+                                    ? { backgroundColor: 'rgba(239, 68, 68, 0.12)' }
+                                    : { backgroundColor: 'rgba(56, 189, 248, 0.12)' })
+                            ]}
+                            onPress={(e) => {
+                              e?.stopPropagation?.();
+                              openQuickEditModal(itemObj, cellDateStr);
+                            }}
+                          >
+                            <ThemeText 
                               style={[
-                                styles.badgeItem,
-                                isBeingDragged && { opacity: 0.35 },
+                                styles.holidayWorkerName, 
+                                isSelected && { color: 'white' },
                                 itemObj.isException 
-                                  ? { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: COLORS.accent, borderWidth: 0.5 }
-                                  : (dayType === 'weekday' 
-                                      ? { backgroundColor: 'rgba(239, 68, 68, 0.12)' }
-                                      : { backgroundColor: 'rgba(56, 189, 248, 0.12)' })
-                              ]}
-                              onPress={(e) => {
-                                e?.stopPropagation?.();
-                                openQuickEditModal(itemObj, cellDateStr);
-                              }}
-                              {...getDraggableProps(itemObj, cellDateStr)}
+                                  ? { color: COLORS.accent, fontWeight: 'bold' } 
+                                  : (dayType === 'weekday' ? { color: '#ef4444' } : { color: '#38bdf8' })
+                              ]} 
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
                             >
-                              <ThemeText 
-                                style={[
-                                  styles.holidayWorkerName, 
-                                  isSelected && { color: 'white' },
-                                  itemObj.isException 
-                                    ? { color: COLORS.accent, fontWeight: 'bold' } 
-                                    : (dayType === 'weekday' ? { color: '#ef4444' } : { color: '#38bdf8' })
-                                ]} 
-                                numberOfLines={1}
-                                adjustsFontSizeToFit
-                              >
-                                {itemObj.name}{itemObj.label}
-                              </ThemeText>
-                            </TouchableOpacity>
-                          );
-                        })}
+                              {itemObj.name}{itemObj.label}
+                            </ThemeText>
+                          </TouchableOpacity>
+                        ))}
                         {displayList.length > 3 && (
                           <ThemeText style={[styles.holidayWorkerName, { opacity: 0.6, fontSize: 8 }, isSelected && { color: 'white' }]}>
                             他{displayList.length - 3}名
@@ -1375,7 +1244,7 @@ export const CalendarScreen: React.FC<any> = ({
               )}
             </>
           )}
-        </View>
+        </TouchableOpacity>
       );
     });
 
