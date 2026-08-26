@@ -308,12 +308,19 @@ export default async function handler(req: any, res: any) {
             role,
             no_holiday,
             holidaySetting,
+            leave_start_date,
+            leave_end_date,
+            leaveStartDate,
+            leaveEndDate,
           } = effectivePayload;
 
           const targetStaffId = staffId || userId;
           if (!targetStaffId) {
             return res.status(400).json({ error: 'staffId または userId が必要です。' });
           }
+
+          const finalLeaveStartDate = leave_start_date !== undefined ? leave_start_date : leaveStartDate;
+          const finalLeaveEndDate = leave_end_date !== undefined ? leave_end_date : leaveEndDate;
 
           // 既存の staff レコードを取得して user_id / email を確認
           const { data: existingStaff } = await supabaseAdmin
@@ -349,6 +356,8 @@ export default async function handler(req: any, res: any) {
               ...(appRole && { role: appRole }),
               ...(position && { position }),
               ...((jobType || profession) && { profession: jobType || profession }),
+              ...(finalLeaveStartDate !== undefined && { leave_start_date: finalLeaveStartDate }),
+              ...(finalLeaveEndDate !== undefined && { leave_end_date: finalLeaveEndDate }),
             };
 
             const { error: authUpdateError } = await supabaseAdmin.auth.admin.updateUserById(
@@ -372,18 +381,35 @@ export default async function handler(req: any, res: any) {
           if (placement !== undefined) staffUpdatePayload.placement = placement;
           if (status !== undefined) staffUpdatePayload.status = status;
           if (appRole !== undefined) staffUpdatePayload.role = appRole;
+          if (finalLeaveStartDate !== undefined) staffUpdatePayload.leave_start_date = finalLeaveStartDate;
+          if (finalLeaveEndDate !== undefined) staffUpdatePayload.leave_end_date = finalLeaveEndDate;
           if (no_holiday !== undefined) {
             staffUpdatePayload.no_holiday = !!no_holiday;
           } else if (holidaySetting !== undefined) {
             staffUpdatePayload.no_holiday = !!holidaySetting;
           }
 
-          const { data: updatedStaff, error: staffUpdateErr } = await supabaseAdmin
+          let { data: updatedStaff, error: staffUpdateErr } = await supabaseAdmin
             .from('staff')
             .update(staffUpdatePayload)
             .eq('id', targetStaffId)
             .select()
             .single();
+
+          if (staffUpdateErr && (staffUpdateErr.message?.includes('leave_start_date') || staffUpdateErr.message?.includes('leave_end_date') || staffUpdateErr.code === '42703')) {
+            console.warn('Staff update without leave date columns fallback:', staffUpdateErr.message);
+            const fallbackPayload = { ...staffUpdatePayload };
+            delete fallbackPayload.leave_start_date;
+            delete fallbackPayload.leave_end_date;
+            const resFallback = await supabaseAdmin
+              .from('staff')
+              .update(fallbackPayload)
+              .eq('id', targetStaffId)
+              .select()
+              .single();
+            updatedStaff = resFallback.data;
+            staffUpdateErr = resFallback.error;
+          }
 
           if (staffUpdateErr) {
             console.error('Staff Update Error:', staffUpdateErr);

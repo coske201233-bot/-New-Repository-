@@ -112,10 +112,23 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             initDays = Number(item.initial_leave_days);
           }
 
+          let leaveStart = item.leave_start_date || item.leaveStartDate || null;
+          let leaveEnd = item.leave_end_date || item.leaveEndDate || null;
+          if (typeof window !== 'undefined') {
+            const lsStart = localStorage.getItem(`leave_start_date_${item.id || item.email || item.name}`);
+            const lsEnd = localStorage.getItem(`leave_end_date_${item.id || item.email || item.name}`);
+            if (lsStart) leaveStart = lsStart;
+            if (lsEnd) leaveEnd = lsEnd;
+          }
+
           return {
             ...item,
             initial_leave_days: initDays,
-            initialLeaveDays: initDays
+            initialLeaveDays: initDays,
+            leave_start_date: leaveStart,
+            leaveStartDate: leaveStart,
+            leave_end_date: leaveEnd,
+            leaveEndDate: leaveEnd
           };
         });
         setDebugStaffList(mappedData);
@@ -153,6 +166,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const [regJobType, setRegJobType] = useState('PT');
   const [regPlacement, setRegPlacement] = useState('4F');
   const [regStatus, setRegStatus] = useState('常勤');
+  const [regLeaveStartDate, setRegLeaveStartDate] = useState('');
+  const [regLeaveEndDate, setRegLeaveEndDate] = useState('');
   const [regInitialLeaveDays, setRegInitialLeaveDays] = useState('20');
   const [editingStaff, setEditingStaff] = useState<any>(null);
   const [regHolidaySetting, setRegHolidaySetting] = useState(false);
@@ -214,6 +229,17 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       else if (s3 !== null && !isNaN(parseFloat(s3))) savedVal = parseFloat(s3);
     }
     setRegInitialLeaveDays(String(savedVal));
+
+    let leaveStartVal = staffToEdit.leave_start_date || staffToEdit.leaveStartDate || '';
+    let leaveEndVal = staffToEdit.leave_end_date || staffToEdit.leaveEndDate || '';
+    if (typeof window !== 'undefined') {
+      const ls1 = localStorage.getItem(`leave_start_date_${staffToEdit.id}`) || localStorage.getItem(`leave_start_date_${staffToEdit.email}`) || localStorage.getItem(`leave_start_date_${staffToEdit.name}`);
+      const le1 = localStorage.getItem(`leave_end_date_${staffToEdit.id}`) || localStorage.getItem(`leave_end_date_${staffToEdit.email}`) || localStorage.getItem(`leave_end_date_${staffToEdit.name}`);
+      if (ls1) leaveStartVal = ls1;
+      if (le1) leaveEndVal = le1;
+    }
+    setRegLeaveStartDate(leaveStartVal);
+    setRegLeaveEndDate(leaveEndVal);
     
     // アプリ権限: DBの role カラム（"管理者,スタッフ" 等）を基に判定
     const isUserAdmin = staffToEdit.role?.includes('管理者') || staffToEdit.permissions?.includes('管理者');
@@ -349,6 +375,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     try {
       const initLeaveDaysNum = parseFloat(regInitialLeaveDays) || 20;
 
+      const leaveStart = regStatus === '長期休暇' ? (regLeaveStartDate.trim() || null) : null;
+      const leaveEnd = regStatus === '長期休暇' ? (regLeaveEndDate.trim() || null) : null;
+
       const payload = {
         name: regName.trim(),
         email: finalEmail,
@@ -357,6 +386,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         profession: regJobType,
         placement: regPlacement,
         status: regStatus,
+        leave_start_date: leaveStart,
+        leave_end_date: leaveEnd,
         no_holiday: regHolidaySetting,
         initial_leave_days: initLeaveDaysNum,
       };
@@ -370,6 +401,31 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           localStorage.setItem(uKey1, String(initLeaveDaysNum));
           localStorage.setItem(uKey2, String(initLeaveDaysNum));
           localStorage.setItem(uKey3, String(initLeaveDaysNum));
+
+          const lKeyStart1 = `leave_start_date_${editingStaff.id}`;
+          const lKeyStart2 = `leave_start_date_${finalEmail}`;
+          const lKeyStart3 = `leave_start_date_${regName.trim()}`;
+          const lKeyEnd1 = `leave_end_date_${editingStaff.id}`;
+          const lKeyEnd2 = `leave_end_date_${finalEmail}`;
+          const lKeyEnd3 = `leave_end_date_${regName.trim()}`;
+          if (leaveStart) {
+            localStorage.setItem(lKeyStart1, leaveStart);
+            localStorage.setItem(lKeyStart2, leaveStart);
+            localStorage.setItem(lKeyStart3, leaveStart);
+          } else {
+            localStorage.removeItem(lKeyStart1);
+            localStorage.removeItem(lKeyStart2);
+            localStorage.removeItem(lKeyStart3);
+          }
+          if (leaveEnd) {
+            localStorage.setItem(lKeyEnd1, leaveEnd);
+            localStorage.setItem(lKeyEnd2, leaveEnd);
+            localStorage.setItem(lKeyEnd3, leaveEnd);
+          } else {
+            localStorage.removeItem(lKeyEnd1);
+            localStorage.removeItem(lKeyEnd2);
+            localStorage.removeItem(lKeyEnd3);
+          }
         }
 
         // サーバーサイド API 呼び出し (Auth & Staff 同期更新)
@@ -1089,8 +1145,11 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             if (!staff) return null;
             const isInactive = staff?.status === '無効';
             const stats = calculateStats(staff);
+            const activeMonthStr = activeDate ? `${activeDate.getFullYear()}-${String(activeDate.getMonth() + 1).padStart(2, '0')}` : '';
+            const isLeavePeriod = (!staff.leave_start_date || staff.leave_start_date.slice(0, 7) <= activeMonthStr) && (!staff.leave_end_date || activeMonthStr <= staff.leave_end_date.slice(0, 7));
+            const isLongTerm = staff?.status === '長期休暇' && isLeavePeriod;
             return (
-              <ThemeCard key={staff.id} style={[styles.staffCard, staff?.status === '長期休暇' && { opacity: 0.6 }, isInactive && { opacity: 0.45, borderColor: '#ef4444' }]}>
+              <ThemeCard key={staff.id} style={[styles.staffCard, isLongTerm && { opacity: 0.6 }, isInactive && { opacity: 0.45, borderColor: '#ef4444' }]}>
                 <View style={styles.cardHeader}>
                   <TouchableOpacity style={{ flex: 1 }} onPress={() => { setSelectedStaff(staff); setSelectedDay(null); setIsCalendarModalVisible(true); }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1577,6 +1636,35 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                     </TouchableOpacity>
                   ))}
                 </View>
+
+                {regStatus === '長期休暇' && (
+                  <View style={{ marginTop: 12, padding: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+                    <ThemeText variant="label" style={{ marginBottom: 8, color: '#38bdf8' }}>長期休暇の期間指定</ThemeText>
+                    <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                      <View style={{ flex: 1 }}>
+                        <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginBottom: 4 }}>開始日 (YYYY-MM-DD)</ThemeText>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="2026-04-01"
+                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          value={regLeaveStartDate}
+                          onChangeText={setRegLeaveStartDate}
+                        />
+                      </View>
+                      <ThemeText color={COLORS.textSecondary} style={{ marginTop: 16 }}>〜</ThemeText>
+                      <View style={{ flex: 1 }}>
+                        <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginBottom: 4 }}>終了日 (YYYY-MM-DD)</ThemeText>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="2026-06-30"
+                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          value={regLeaveEndDate}
+                          onChangeText={setRegLeaveEndDate}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                )}
 
                 <ThemeText variant="label" style={{ marginBottom: 8, marginTop: 14 }}>休日設定 (自動割当条件)</ThemeText>
                 <TouchableOpacity 

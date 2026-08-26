@@ -13,6 +13,8 @@ export interface CreateStaffParams {
   initial_leave_days?: number;
   no_holiday?: boolean;
   holidaySetting?: boolean;
+  leave_start_date?: string | null;
+  leave_end_date?: string | null;
 }
 
 export interface UpdateStaffParams {
@@ -26,6 +28,8 @@ export interface UpdateStaffParams {
   placement?: string;
   status?: string;
   role?: string;
+  leave_start_date?: string | null;
+  leave_end_date?: string | null;
   initial_leave_days?: number;
   no_holiday?: boolean;
   holidaySetting?: boolean;

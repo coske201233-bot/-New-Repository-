@@ -270,7 +270,8 @@ export const CalendarScreen: React.FC<any> = ({
         if (!staff || !staff.name) return;
         
         const status = staff.status?.trim() || '通常';
-        const isInactive = status === '長期休暇' || status === '入職前';
+        const isLeavePeriod = (!staff.leave_start_date || staff.leave_start_date <= dateStr) && (!staff.leave_end_date || dateStr <= staff.leave_end_date);
+        const isInactive = (status === '長期休暇' && isLeavePeriod) || status === '入職前';
         if (isInactive) return;
 
         const jobType = staff.jobType || staff.profession || '';
@@ -1614,7 +1615,9 @@ export const CalendarScreen: React.FC<any> = ({
               {staffList
                 .filter(s => {
                   const mStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-                  const isLongTerm = s.status === '長期休暇' || s.status === '入職前';
+                  const selDateStr = getDateStr(selectedDate);
+                  const isLeavePeriod = (!s.leave_start_date || s.leave_start_date <= selDateStr) && (!s.leave_end_date || selDateStr <= s.leave_end_date);
+                  const isLongTerm = (s.status === '長期休暇' && isLeavePeriod) || s.status === '入職前';
                   const isNoHoliday = (getDayType(selectedDate) !== 'weekday') && (s.monthlyNoHoliday?.[mStr] ?? s.noHoliday);
                   // [V61.3] 既に手動データが存在していても、何度でも上書き修正できるように除外フィルターを撤廃
                   

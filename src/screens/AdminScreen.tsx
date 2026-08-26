@@ -178,7 +178,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       // 長期休暇・入職前のスタッフのみ除外
       const listToPrint = staffList.filter(s => {
         if (!s || !s.name) return false;
-        if (s.status === '長期休暇' || s.status === '入職前') return false;
+        const isLeavePeriod = (!s.leave_start_date || s.leave_start_date.slice(0, 7) <= currentMonthKey) && (!s.leave_end_date || currentMonthKey <= s.leave_end_date.slice(0, 7));
+        if ((s.status === '長期休暇' && isLeavePeriod) || s.status === '入職前') return false;
         return true;
       });
       listToPrint.forEach(s => {

@@ -75,14 +75,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     // ---------------------------------------------------------
     // 1. 正規化データアクセスヘルパー (日英両対応)
     // ---------------------------------------------------------
+    const todayStr = getDateStr(new Date());
     const getStaffData = (s: any) => {
-      if (!s) return { job: '', role: '', placement: '', status: '通常' };
       return {
         job: s?.職種 || s?.jobType || s?.profession || s?.job_type || '',
         role: s?.役割 || s?.role || s?.position || '',
         placement: s?.配置 || s?.placement || '',
         status: s?.ステータス || s?.status || '通常',
+        leave_start_date: s?.leave_start_date || s?.leaveStartDate || '',
+        leave_end_date: s?.leave_end_date || s?.leaveEndDate || '',
       };
+    };
+
+    const isStaffOnLeave = (data: any, dStr: string = todayStr) => {
+      if (data.status !== '長期休暇') return false;
+      return (!data.leave_start_date || data.leave_start_date <= dStr) && (!data.leave_end_date || dStr <= data.leave_end_date);
     };
 
     const isExcluded = (s: any) => {
@@ -91,7 +98,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       const isVisit = data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ';
       const isHokatsu = data.role === '包括' || data.placement === '包括' || data.job === '包括';
       const isHainyo = data.role === '排尿' || data.role === '排尿支援' || data.placement === '排尿' || data.placement === '排尿支援';
-      const isInactive = data.status === '長期休暇' || data.status === '入職前';
+      const isInactive = isStaffOnLeave(data) || data.status === '入職前';
       const isAssistant = data.job === '助手' || data.role === '助手' || data.placement === '助手';
       return isVisit || isHokatsu || isHainyo || isInactive || isAssistant;
     };
@@ -121,36 +128,36 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         const data = getStaffData(s);
         const isAssistant = data.job === '助手' || data.role === '助手' || data.placement === '助手';
         const isVisit = data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ';
-        const isInactive = data.status === '長期休暇' || data.status === '入職前';
+        const isInactive = isStaffOnLeave(data) || data.status === '入職前';
         return !isAssistant && !isVisit && !isInactive;
       }).length;
 
       const visit = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.status !== '長期休暇' && data.status !== '入職前' && 
+        return !isStaffOnLeave(data) && data.status !== '入職前' && 
                (data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ');
       }).length;
 
       const assistant = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.status !== '長期休暇' && data.status !== '入職前' && 
+        return !isStaffOnLeave(data) && data.status !== '入職前' && 
                (data.job === '助手' || data.role === '助手' || data.placement === '助手');
       }).length;
 
       const inactive = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.status === '長期休暇';
+        return isStaffOnLeave(data);
       }).length;
 
       const hokatsuCount = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.status !== '長期休暇' && data.status !== '入職前' && 
+        return !isStaffOnLeave(data) && data.status !== '入職前' && 
                (data.role === '包括' || data.placement === '包括' || data.job === '包括');
       }).length;
 
       const hainyoCount = safeStaff.filter(s => {
         const data = getStaffData(s);
-        return data.status !== '長期休暇' && data.status !== '入職前' && 
+        return !isStaffOnLeave(data) && data.status !== '入職前' && 
                (data.role === '排尿' || data.role === '排尿支援' || data.placement === '排尿' || data.placement === '排尿支援');
       }).length;
       
@@ -165,7 +172,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         label,
         count: safeStaff.filter(s => {
           const data = getStaffData(s);
-          const isInactive = data.status === '長期休暇' || data.status === '入職前';
+          const isInactive = isStaffOnLeave(data) || data.status === '入職前';
           if (isInactive) return false;
           
           const p = data.placement || '';
@@ -198,7 +205,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
     const hospitalAttending = safeStaff.filter(s => {
       const data = getStaffData(s);
-      const isOut = data.status === '長期休暇' || data.status === '入職前';
+      const isOut = isStaffOnLeave(data) || data.status === '入職前';
       return isWorkingToday(s.name) && 
              (hospitalPlacements.includes(data.placement) || data.placement === '院内' || ['包括', '排尿', '排尿支援'].includes(data.placement)) &&
              data.job !== '助手' &&
