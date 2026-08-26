@@ -1177,7 +1177,7 @@ export const CalendarScreen: React.FC<any> = ({
             styles.dayCell, 
             isSelected && styles.selectedDay, 
             isToday && !isSelected && styles.todayCell,
-            (!isSelected && !!day && isUnderLimit) ? { backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: BORDER_RADIUS.sm } : null,
+            (!isSelected && !isToday && !!day && isUnderLimit) ? { backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: BORDER_RADIUS.sm } : null,
           ]}
           onPress={() => {
             if (day) {
@@ -1192,10 +1192,11 @@ export const CalendarScreen: React.FC<any> = ({
         >
           {day && (
             <>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 3 }}>
+              {/* セル上部ヘッダー（日付と人数カウントの左右配置） */}
+              <View style={styles.cellHeaderRow}>
                 <ThemeText 
                   variant="caption" 
-                  style={{ color: isSelected ? COLORS.background : dateColor, fontWeight: isSelected || isToday ? 'bold' : 'normal', fontSize: 10 }}
+                  style={{ color: dateColor, fontWeight: isSelected || isToday ? 'bold' : '600', fontSize: 10.5 }}
                 >
                   {day}
                 </ThemeText>
@@ -1204,13 +1205,14 @@ export const CalendarScreen: React.FC<any> = ({
                   variant="caption" 
                   style={[
                     styles.dayCount, 
-                    { color: isSelected ? COLORS.background : (workingCount > limit ? '#ef4444' : isUnderLimit ? '#3b82f6' : COLORS.textSecondary) }
+                    { color: workingCount > limit ? '#ef4444' : isUnderLimit ? '#3b82f6' : COLORS.textSecondary }
                   ]}
                 >
                   {dayType === 'weekday' ? workingCount : `${workingCount}/${limit}`}
                 </ThemeText>
               </View>
 
+              {/* シフト・休暇バッジ一覧 */}
               {(holidayWorkers.length > 0 || offWorkers.length > 0 || cellExceptions.length > 0) && (
                 <View style={styles.holidayWorkersBox}>
                   {(() => {
@@ -1243,7 +1245,6 @@ export const CalendarScreen: React.FC<any> = ({
                             <ThemeText 
                               style={[
                                 styles.holidayWorkerName, 
-                                isSelected && { color: 'white' },
                                 itemObj.isException 
                                   ? { color: COLORS.accent, fontWeight: 'bold' } 
                                   : (dayType === 'weekday' ? { color: '#ef4444' } : { color: '#38bdf8' })
@@ -1256,9 +1257,11 @@ export const CalendarScreen: React.FC<any> = ({
                           </TouchableOpacity>
                         ))}
                         {displayList.length > 3 && (
-                          <ThemeText style={[styles.holidayWorkerName, { opacity: 0.6, fontSize: 8 }, isSelected && { color: 'white' }]}>
-                            他{displayList.length - 3}名
-                          </ThemeText>
+                          <View style={styles.moreWorkersBadge}>
+                            <ThemeText style={styles.moreWorkersText}>
+                              他{displayList.length - 3}名
+                            </ThemeText>
+                          </View>
                         )}
                       </>
                     );
@@ -1947,13 +1950,16 @@ const styles = StyleSheet.create({
   weekDayText: { flex: 1, textAlign: 'center', color: COLORS.textSecondary },
   calendarGrid: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', width: '100%' },
   calendarRow: { flexDirection: 'row', height: 110, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', width: '100%' },
-  dayCell: { flex: 1, padding: 2, alignItems: 'center', justifyContent: 'flex-start' },
-  selectedDay: { backgroundColor: COLORS.primary, borderRadius: BORDER_RADIUS.md },
-  todayCell: { backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: BORDER_RADIUS.md, borderWidth: 1, borderColor: COLORS.primary },
-  dayCount: { fontSize: 9.5, marginTop: 1, fontWeight: 'bold' },
-  holidayWorkersBox: { width: '100%', marginTop: 3, paddingHorizontal: 2, alignItems: 'center', gap: 2 },
-  holidayWorkerName: { fontSize: 9.5, color: COLORS.text, fontWeight: 'bold', width: '100%', textAlign: 'center' },
-  badgeItem: { width: '96%', paddingVertical: 2, paddingHorizontal: 3, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
+  dayCell: { flex: 1, padding: 3, alignItems: 'center', justifyContent: 'flex-start' },
+  selectedDay: { backgroundColor: 'rgba(56, 189, 248, 0.12)', borderWidth: 2, borderColor: '#38bdf8', borderRadius: BORDER_RADIUS.md },
+  todayCell: { backgroundColor: 'rgba(56, 189, 248, 0.05)', borderRadius: BORDER_RADIUS.md, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.4)' },
+  cellHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 2, marginBottom: 2 },
+  dayCount: { fontSize: 9.5, fontWeight: 'bold' },
+  holidayWorkersBox: { width: '100%', marginTop: 2, paddingHorizontal: 1, alignItems: 'center', gap: 2 },
+  holidayWorkerName: { fontSize: 9.5, fontWeight: 'bold', width: '100%', textAlign: 'center' },
+  badgeItem: { width: '98%', paddingVertical: 2, paddingHorizontal: 3, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
+  moreWorkersBadge: { width: '100%', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  moreWorkersText: { fontSize: 8, color: COLORS.textSecondary, fontWeight: '600', textAlign: 'center' },
   requestBadge: { backgroundColor: '#ef4444', borderRadius: 4, paddingHorizontal: 2, paddingVertical: 1, marginTop: 1, alignItems: 'center', justifyContent: 'center', width: '90%' },
   requestText: { color: 'white', fontSize: 7, fontWeight: 'bold', textAlign: 'center' },
   detailScroll: { paddingHorizontal: SPACING.md, width: '100%' },
