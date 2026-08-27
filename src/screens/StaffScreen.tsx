@@ -115,10 +115,24 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           let leaveStart = item.leave_start_date || item.leaveStartDate || null;
           let leaveEnd = item.leave_end_date || item.leaveEndDate || null;
           if (typeof window !== 'undefined') {
-            const lsStart = localStorage.getItem(`leave_start_date_${item.id || item.email || item.name}`);
-            const lsEnd = localStorage.getItem(`leave_end_date_${item.id || item.email || item.name}`);
-            if (lsStart) leaveStart = lsStart;
-            if (lsEnd) leaveEnd = lsEnd;
+            const lsStart = localStorage.getItem(`leave_start_date_${item.id}`) || localStorage.getItem(`leave_start_date_${item.email}`) || localStorage.getItem(`leave_start_date_${item.name}`);
+            const lsEnd = localStorage.getItem(`leave_end_date_${item.id}`) || localStorage.getItem(`leave_end_date_${item.email}`) || localStorage.getItem(`leave_end_date_${item.name}`);
+            
+            if (leaveStart) {
+              localStorage.setItem(`leave_start_date_${item.id}`, leaveStart);
+              if (item.email) localStorage.setItem(`leave_start_date_${item.email}`, leaveStart);
+              if (item.name) localStorage.setItem(`leave_start_date_${item.name}`, leaveStart);
+            } else if (lsStart && item.status === '長期休暇') {
+              leaveStart = lsStart;
+            }
+
+            if (leaveEnd) {
+              localStorage.setItem(`leave_end_date_${item.id}`, leaveEnd);
+              if (item.email) localStorage.setItem(`leave_end_date_${item.email}`, leaveEnd);
+              if (item.name) localStorage.setItem(`leave_end_date_${item.name}`, leaveEnd);
+            } else if (lsEnd && item.status === '長期休暇') {
+              leaveEnd = lsEnd;
+            }
           }
 
           return {
@@ -438,6 +452,21 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         });
 
         setStatusMsg('🎉 変更を保存しました！');
+        if (props.setStaffList) {
+          props.setStaffList((prev: any[]) => (prev || []).map(s => {
+            if (s.id === editingStaff.id || s.email === finalEmail) {
+              return {
+                ...s,
+                ...payload,
+                leave_start_date: leaveStart,
+                leaveStartDate: leaveStart,
+                leave_end_date: leaveEnd,
+                leaveEndDate: leaveEnd,
+              };
+            }
+            return s;
+          }));
+        }
         await fetchStaff();
         setTimeout(() => { 
           setStatusMsg(''); 

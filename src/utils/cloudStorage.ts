@@ -66,8 +66,22 @@ export const cloudStorage = {
         if (typeof window !== 'undefined') {
           const lsStart = localStorage.getItem(`leave_start_date_${s.id}`) || localStorage.getItem(`leave_start_date_${s.email}`) || localStorage.getItem(`leave_start_date_${s.name}`);
           const lsEnd = localStorage.getItem(`leave_end_date_${s.id}`) || localStorage.getItem(`leave_end_date_${s.email}`) || localStorage.getItem(`leave_end_date_${s.name}`);
-          if (lsStart) lStart = lsStart;
-          if (lsEnd) lEnd = lsEnd;
+          
+          if (lStart) {
+            localStorage.setItem(`leave_start_date_${s.id}`, lStart);
+            if (s.email) localStorage.setItem(`leave_start_date_${s.email}`, lStart);
+            if (s.name) localStorage.setItem(`leave_start_date_${s.name}`, lStart);
+          } else if (lsStart && (mapped.status === '長期休暇' || s.status === '長期休暇')) {
+            lStart = lsStart;
+          }
+
+          if (lEnd) {
+            localStorage.setItem(`leave_end_date_${s.id}`, lEnd);
+            if (s.email) localStorage.setItem(`leave_end_date_${s.email}`, lEnd);
+            if (s.name) localStorage.setItem(`leave_end_date_${s.name}`, lEnd);
+          } else if (lsEnd && (mapped.status === '長期休暇' || s.status === '長期休暇')) {
+            lEnd = lsEnd;
+          }
         }
         return {
           ...mapped,
