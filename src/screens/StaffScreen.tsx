@@ -1148,11 +1148,24 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             const isInactive = staff?.status === '無効';
             const stats = calculateStats(staff);
             const todayStr = getDateStr(new Date());
-            const lStart = staff?.leave_start_date || staff?.leaveStartDate || (typeof window !== 'undefined' ? (localStorage.getItem(`leave_start_date_${staff?.id}`) || localStorage.getItem(`leave_start_date_${staff?.email}`) || localStorage.getItem(`leave_start_date_${staff?.name}`)) : null);
-            const lEnd = staff?.leave_end_date || staff?.leaveEndDate || (typeof window !== 'undefined' ? (localStorage.getItem(`leave_end_date_${staff?.id}`) || localStorage.getItem(`leave_end_date_${staff?.email}`) || localStorage.getItem(`leave_end_date_${staff?.name}`)) : null);
-            const isLongTerm = staff?.status === '長期休暇' &&
-              (!lStart || lStart <= todayStr) &&
-              (!lEnd || todayStr <= lEnd);
+            const lStart = (staff?.leave_start_date || staff?.leaveStartDate || (typeof window !== 'undefined' ? (localStorage.getItem(`leave_start_date_${staff?.id}`) || localStorage.getItem(`leave_start_date_${staff?.email}`) || localStorage.getItem(`leave_start_date_${staff?.name}`)) : null) || '').trim();
+            const lEnd = (staff?.leave_end_date || staff?.leaveEndDate || (typeof window !== 'undefined' ? (localStorage.getItem(`leave_end_date_${staff?.id}`) || localStorage.getItem(`leave_end_date_${staff?.email}`) || localStorage.getItem(`leave_end_date_${staff?.name}`)) : null) || '').trim();
+
+            const hasStartDate = !!lStart;
+            const hasEndDate = !!lEnd;
+
+            let isLongTerm = false;
+            if (staff?.status === '長期休暇') {
+              if (hasStartDate && hasEndDate) {
+                isLongTerm = lStart <= todayStr && todayStr <= lEnd;
+              } else if (hasStartDate) {
+                isLongTerm = lStart <= todayStr;
+              } else if (hasEndDate) {
+                isLongTerm = todayStr <= lEnd;
+              } else {
+                isLongTerm = true;
+              }
+            }
             return (
               <ThemeCard key={staff.id} style={[styles.staffCard, isLongTerm && { opacity: 0.6 }, isInactive && { opacity: 0.45, borderColor: '#ef4444' }]}>
                 <View style={styles.cardHeader}>

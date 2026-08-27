@@ -270,7 +270,9 @@ export const CalendarScreen: React.FC<any> = ({
         if (!staff || !staff.name) return;
         
         const status = staff.status?.trim() || '通常';
-        const isLeavePeriod = (!staff.leave_start_date || staff.leave_start_date <= dateStr) && (!staff.leave_end_date || dateStr <= staff.leave_end_date);
+        const start = (staff.leave_start_date || staff.leaveStartDate || '').trim();
+        const end = (staff.leave_end_date || staff.leaveEndDate || '').trim();
+        const isLeavePeriod = (start && end) ? (start <= dateStr && dateStr <= end) : start ? (start <= dateStr) : end ? (dateStr <= end) : true;
         const isInactive = (status === '長期休暇' && isLeavePeriod) || status === '入職前';
         if (isInactive) return;
 
@@ -1616,7 +1618,9 @@ export const CalendarScreen: React.FC<any> = ({
                 .filter(s => {
                   const mStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
                   const selDateStr = getDateStr(selectedDate);
-                  const isLeavePeriod = (!s.leave_start_date || s.leave_start_date <= selDateStr) && (!s.leave_end_date || selDateStr <= s.leave_end_date);
+                  const start = (s.leave_start_date || s.leaveStartDate || '').trim();
+                  const end = (s.leave_end_date || s.leaveEndDate || '').trim();
+                  const isLeavePeriod = (start && end) ? (start <= selDateStr && selDateStr <= end) : start ? (start <= selDateStr) : end ? (selDateStr <= end) : true;
                   const isLongTerm = (s.status === '長期休暇' && isLeavePeriod) || s.status === '入職前';
                   const isNoHoliday = (getDayType(selectedDate) !== 'weekday') && (s.monthlyNoHoliday?.[mStr] ?? s.noHoliday);
                   // [V61.3] 既に手動データが存在していても、何度でも上書き修正できるように除外フィルターを撤廃

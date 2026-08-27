@@ -89,7 +89,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
     const isStaffOnLeave = (data: any, dStr: string = todayStr) => {
       if (data.status !== '長期休暇') return false;
-      return (!data.leave_start_date || data.leave_start_date <= dStr) && (!data.leave_end_date || dStr <= data.leave_end_date);
+      const start = (data.leave_start_date || data.leaveStartDate || '').trim();
+      const end = (data.leave_end_date || data.leaveEndDate || '').trim();
+      if (start && end) return start <= dStr && dStr <= end;
+      if (start) return start <= dStr;
+      if (end) return dStr <= end;
+      return true;
     };
 
     const isExcluded = (s: any) => {

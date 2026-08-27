@@ -135,8 +135,15 @@ export default async function handler(req: any, res: any) {
           (s.id && authUserMap.get(s.id)) ||
           (s.email && authUserMap.get(s.email.toLowerCase()));
 
+        const lStart = s.leave_start_date || matchingAuth?.user_metadata?.leave_start_date || null;
+        const lEnd = s.leave_end_date || matchingAuth?.user_metadata?.leave_end_date || null;
+
         return {
           ...s,
+          leave_start_date: lStart,
+          leaveStartDate: lStart,
+          leave_end_date: lEnd,
+          leaveEndDate: lEnd,
           auth_user_id: matchingAuth?.id || s.user_id || null,
           has_auth_account: !!matchingAuth,
           banned: !!matchingAuth?.banned_until,

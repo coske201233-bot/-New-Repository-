@@ -289,7 +289,9 @@ export default async function handler(req: any, res: any) {
       .filter((s: any) => {
         const isAssistant = s.profession === '助手' || s.placement === '助手';
         const isVisitingRehab = s.profession === '訪問リハ' || s.placement === '訪問リハ';
-        const isLeavePeriod = (!s.leave_start_date || s.leave_start_date.slice(0, 7) <= monthPrefix) && (!s.leave_end_date || monthPrefix <= s.leave_end_date.slice(0, 7));
+        const start = (s.leave_start_date || s.leaveStartDate || '').slice(0, 7).trim();
+        const end = (s.leave_end_date || s.leaveEndDate || '').slice(0, 7).trim();
+        const isLeavePeriod = (start && end) ? (start <= monthPrefix && monthPrefix <= end) : start ? (start <= monthPrefix) : end ? (monthPrefix <= end) : true;
         const isUnavailable = (s.status === '長期休暇' && isLeavePeriod) || s.status === '入職前';
         const isNoHolidayValue = s.noHoliday ?? s.no_holiday;
         const isMonthlyNoHoliday = s.monthlyNoHoliday?.[monthPrefix] ?? s.monthly_no_holiday?.[monthPrefix];
@@ -519,7 +521,9 @@ export default async function handler(req: any, res: any) {
           .filter((s: any) => {
             const sId = String(s.id);
             const sName = normalize(s.name);
-            const isLeavePeriod = (!s.leave_start_date || s.leave_start_date.slice(0, 7) <= monthPrefix) && (!s.leave_end_date || monthPrefix <= s.leave_end_date.slice(0, 7));
+            const start = (s.leave_start_date || s.leaveStartDate || '').slice(0, 7).trim();
+            const end = (s.leave_end_date || s.leaveEndDate || '').slice(0, 7).trim();
+            const isLeavePeriod = (start && end) ? (start <= monthPrefix && monthPrefix <= end) : start ? (start <= monthPrefix) : end ? (monthPrefix <= end) : true;
             if ((s.status === '長期休暇' && isLeavePeriod) || s.status === '入職前') return false;
             if (staffWorkDays[sId]?.has(dStr) || autoAssigned.some(a => String(a.staffId) === sId && a.date === dStr)) return false;
 

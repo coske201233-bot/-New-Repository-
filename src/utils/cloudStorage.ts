@@ -59,7 +59,24 @@ export const cloudStorage = {
     try {
       const { data, error } = await supabase.from('staff').select('*').order('rotation_order', { ascending: true, nullsFirst: false }).limit(10000);
       if (error) throw error;
-      const result = (data || []).map(s => mapFromSql(s, STAFF_MAP));
+      const result = (data || []).map(s => {
+        const mapped = mapFromSql(s, STAFF_MAP);
+        let lStart = mapped.leave_start_date || mapped.leaveStartDate || s.leave_start_date || s.leaveStartDate || null;
+        let lEnd = mapped.leave_end_date || mapped.leaveEndDate || s.leave_end_date || s.leaveEndDate || null;
+        if (typeof window !== 'undefined') {
+          const lsStart = localStorage.getItem(`leave_start_date_${s.id}`) || localStorage.getItem(`leave_start_date_${s.email}`) || localStorage.getItem(`leave_start_date_${s.name}`);
+          const lsEnd = localStorage.getItem(`leave_end_date_${s.id}`) || localStorage.getItem(`leave_end_date_${s.email}`) || localStorage.getItem(`leave_end_date_${s.name}`);
+          if (lsStart) lStart = lsStart;
+          if (lsEnd) lEnd = lsEnd;
+        }
+        return {
+          ...mapped,
+          leave_start_date: lStart,
+          leaveStartDate: lStart,
+          leave_end_date: lEnd,
+          leaveEndDate: lEnd,
+        };
+      });
       if (typeof window !== 'undefined' && result.length > 0) {
         // Only alert on PC or non-init fetch if we want to confirm connection
         console.log('Fetched staff from cloud:', result.length);
