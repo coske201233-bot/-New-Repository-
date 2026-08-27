@@ -990,57 +990,82 @@ export const CalendarScreen: React.FC<any> = ({
       return;
     }
     if (!selectedShiftToEdit) return;
+
+    // 削除対象の情報をローカル変数に退避
+    const shiftToDelete = selectedShiftToEdit;
+    const staff = shiftToDelete.staff;
+    const cleanStaffId = String(staff?.id || shiftToDelete.staffId || '').trim();
+    const staffName = (staff?.name || shiftToDelete.staffName || '').trim();
+    const dateStr = shiftToDelete.date;
+    const shiftType = shiftToDelete.type || 'シフト';
+    const reqId = shiftToDelete.requestId ? String(shiftToDelete.requestId).trim() : '';
+
+    // モーダルを即座に閉じる
+    setSelectedShiftToEdit(null);
     setIsProcessingShift(true);
 
     try {
-      const staff = selectedShiftToEdit.staff;
-      const cleanStaffId = String(staff?.id || selectedShiftToEdit.staffId).trim();
-      const staffName = staff?.name || selectedShiftToEdit.staffName || 'スタッフ';
-      const dateStr = selectedShiftToEdit.date;
-      const shiftType = selectedShiftToEdit.type || 'シフト';
+      // 1. ローカルステートを即時先行更新 (UI バッジを瞬時に消す)
+      const normTargetName = normalize(staffName);
+      setRequests((prev: any[]) =>
+        (prev || []).filter(r => {
+          if (!r || r.date !== dateStr) return true;
+          const rId = String(r.id || '').trim();
+          const rStaffId = String(r.staff_id || r.staffId || '').trim();
+          const rStaffName = normalize(r.staff_name || r.staffName || '');
 
-      // 1. shifts テーブルから削除
-      await supabase.from('shifts').delete()
-        .eq('staff_id', cleanStaffId)
-        .eq('date', dateStr);
+          const isIdMatch = !!reqId && (rId === reqId);
+          const isStaffIdMatch = !!cleanStaffId && (rStaffId === cleanStaffId);
+          const isStaffNameMatch = !!normTargetName && (rStaffName === normTargetName);
 
-      // 2. requests テーブルから削除
-      if (selectedShiftToEdit.requestId && !String(selectedShiftToEdit.requestId).startsWith('auto-')) {
-        await supabase.from('requests').delete().eq('id', selectedShiftToEdit.requestId);
-      } else {
-        await supabase.from('requests').delete()
-          .eq('staff_id', cleanStaffId)
-          .eq('date', dateStr);
+          return !(isIdMatch || isStaffIdMatch || isStaffNameMatch);
+        })
+      );
+
+      // 2. shifts テーブルからの確実な一括削除 (ID, staff_id, staff_name の全条件で削除)
+      if (cleanStaffId) {
+        await supabase.from('shifts').delete().eq('staff_id', cleanStaffId).eq('date', dateStr);
+      }
+      if (staffName) {
+        await supabase.from('shifts').delete().eq('staff_name', staffName).eq('date', dateStr);
+      }
+      if (reqId) {
+        await supabase.from('shifts').delete().eq('id', reqId);
       }
 
-      // 3. ローカルステート更新
-      setRequests((prev: any[]) =>
-        prev.filter(r => !(
-          (r.id === selectedShiftToEdit.requestId || String(r.staff_id || r.staffId) === cleanStaffId) && r.date === dateStr
-        ))
-      );
+      // 3. requests テーブルからの確実な一括削除 (ID, staff_id, staff_name の全条件で削除)
+      if (reqId && !reqId.startsWith('auto-')) {
+        await supabase.from('requests').delete().eq('id', reqId);
+      }
+      if (cleanStaffId) {
+        await supabase.from('requests').delete().eq('staff_id', cleanStaffId).eq('date', dateStr);
+      }
+      if (staffName) {
+        await supabase.from('requests').delete().eq('staff_name', staffName).eq('date', dateStr);
+      }
 
       // 4. 監査ログ記録
       await recordAuditLog({
         operatorId: profile?.id,
         operatorName: profile?.name || '管理者',
-        targetStaffId: cleanStaffId,
+        targetStaffId: cleanStaffId || undefined,
         targetStaffName: staffName,
         actionType: 'SHIFT_DELETE',
         targetDate: dateStr,
         details: `${staffName}さんの ${dateStr} のシフト（${shiftType}）を削除しました`,
-        beforeData: selectedShiftToEdit,
+        beforeData: shiftToDelete,
         afterData: null,
       });
 
       // 5. 最新データの再取得
-      if (fetchShifts) await fetchShifts();
-      setSelectedShiftToEdit(null);
-      Alert.alert('削除完了', `${staffName}さんのシフト（${dateStr}）を削除しました。`);
+      if (fetchShifts) {
+        await fetchShifts();
+      }
 
     } catch (err: any) {
       console.error('Delete shift error:', err);
       Alert.alert('エラー', 'シフトの削除に失敗しました: ' + (err.message || '不明なエラー'));
+      if (fetchShifts) await fetchShifts();
     } finally {
       setIsProcessingShift(false);
     }
