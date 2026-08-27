@@ -392,5 +392,177 @@ export const calculateMandatoryLeaveStatus = (
   };
 };
 
+export interface AnnualLeaveRateResult {
+  grantedDays: number;       // 付与年休日数 (例: 20)
+  usedDays: number;          // 取得日数 (例: 13.5)
+  usedFullDays: number;      // 年休(全日)の取得回数 (例: 12)
+  usedHourlyHours: number;   // 時間休の取得合計時間 (例: 11.625)
+  usedHourlyDays: number;    // 時間休の日数換算 (例: 1.5)
+  ratePercent: number;       // 取得率 % (例: 67.5)
+  ratePercentStr: string;    // '67.5%' または '0.0%' または '-'
+  displayText: string;       // '年休取得率 67.5% (取得 13.5日 / 付与 20日)'
+  statusColor: string;       // #34d399, #38bdf8, #f59e0b, #f87171
+  isMandatoryMet: boolean;   // 5日必修(5.0日以上)達成済みか
+}
+
+/**
+ * 年休取得率（付与年休に対する消化率 %）および取得日数・付与日数を計算します
+ * 集計対象は「年休（1.0日）」と「時間休（実時間/所定時間 換算）」のみに限定
+ */
+export const calculateAnnualLeaveRate = (
+  staff: { id?: string; name?: string; position?: string; role?: string; email?: string; initial_leave_days?: number; initialLeaveDays?: number } | any,
+  requests: any[],
+  referenceYear: number = new Date().getFullYear(),
+  customInitialDays?: number
+): AnnualLeaveRateResult => {
+  const pos = typeof staff === 'object' ? `${staff?.position || ''} ${staff?.role || ''}` : '';
+  const isFiscalYear = pos.includes('会計年度');
+  const hoursPerDay = isFiscalYear ? FISCAL_YEAR_HOURS_PER_DAY : HOURS_PER_DAY;
+
+  // 付与日数の取得
+  let grantedDays = 0;
+  if (customInitialDays !== undefined && !isNaN(customInitialDays)) {
+    grantedDays = Number(customInitialDays);
+  } else if (staff && typeof staff === 'object') {
+    let savedVal: number | null = null;
+    if (typeof window !== 'undefined') {
+      const s1 = localStorage.getItem(`initial_leave_days_${staff.id}`);
+      const s2 = localStorage.getItem(`initial_leave_days_${staff.email}`);
+      const s3 = localStorage.getItem(`initial_leave_days_${staff.name}`);
+      if (s1 !== null && !isNaN(parseFloat(s1))) savedVal = parseFloat(s1);
+      else if (s2 !== null && !isNaN(parseFloat(s2))) savedVal = parseFloat(s2);
+      else if (s3 !== null && !isNaN(parseFloat(s3))) savedVal = parseFloat(s3);
+    }
+    if (savedVal !== null) {
+      grantedDays = savedVal;
+    } else if (staff.initial_leave_days !== undefined && staff.initial_leave_days !== null && !isNaN(Number(staff.initial_leave_days))) {
+      grantedDays = Number(staff.initial_leave_days);
+    } else if (staff.initialLeaveDays !== undefined && staff.initialLeaveDays !== null && !isNaN(Number(staff.initialLeaveDays))) {
+      grantedDays = Number(staff.initialLeaveDays);
+    } else {
+      grantedDays = 20;
+    }
+  } else {
+    grantedDays = 20;
+  }
+
+  // カレンダー画面と同一の日付別最優先レコード解決 (Day Map)
+  const dayMap = new Map<string, any>();
+
+  const isManualEntry = (rec: any) => {
+    if (!rec) return false;
+    if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
+    if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
+    const idStr = String(rec.id || '');
+    return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
+  };
+
+  const getTime = (i: any) => {
+    const t = i?.updatedAt || i?.updated_at || i?.createdAt || i?.created_at || 0;
+    return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
+  };
+
+  (requests || []).forEach(r => {
+    if (!r || !r.date || r.status === 'rejected' || r.status === 'deleted' || r.status === '却下' || r.status === '削除') return;
+
+    const dateStr = (r.date || '').split('T')[0];
+    if (!dateStr) return;
+    const d = new Date(dateStr.replace(/-/g, '/'));
+    if (d.getFullYear() !== referenceYear) return;
+
+    if (!isStaffMatchRequest(staff, r)) return;
+
+    const dateKey = dateStr;
+    const existing = dayMap.get(dateKey);
+
+    let isBetter = false;
+    if (!existing) {
+      isBetter = true;
+    } else {
+      const isManNew = isManualEntry(r);
+      const wasManOld = isManualEntry(existing);
+
+      if (isManNew && !wasManOld) {
+        isBetter = true;
+      } else if (!isManNew && wasManOld) {
+        isBetter = false;
+      } else if (isManNew && wasManOld) {
+        isBetter = getTime(r) > getTime(existing);
+      } else {
+        const isOffNew = !['出勤', '日勤'].includes(r?.type);
+        const isOffOld = !['出勤', '日勤'].includes(existing?.type);
+        isBetter = isOffNew && !isOffOld;
+      }
+    }
+
+    if (isBetter) {
+      dayMap.set(dateKey, r);
+    }
+  });
+
+  let usedFullDays = 0;
+  let usedHourlyHours = 0;
+
+  dayMap.forEach((r) => {
+    const rawType = (r.type || r.shiftType || '').trim();
+    let type = rawType;
+    if (type === '時間給' || type === '時間給2') type = '時間休';
+
+    // 【1】年休 (1回につき 1.0日)
+    if (['年休', '有給休暇', '有休', '年給', '有給'].includes(type)) {
+      usedFullDays += 1.0;
+    }
+    // 【2】時間休 (取得時間に応じた日数換算)
+    else if (type === '時間休') {
+      const hours = Number(r.hours ?? r.duration ?? r.details?.duration ?? r.details?.hours ?? 0);
+      const validHours = hours > 0 ? hours : 1.0;
+      usedHourlyHours += validHours;
+    }
+    // ※特休、公休、振替休、看護休暇、夏季休暇、午前休、午後休、特休＋時間休等は一切除外
+  });
+
+  const usedHourlyDays = usedHourlyHours / hoursPerDay;
+  const rawUsedDays = usedFullDays + usedHourlyDays;
+  const usedDays = Math.round(rawUsedDays * 10) / 10;
+
+  let ratePercent = 0;
+  let ratePercentStr = '-';
+  if (grantedDays > 0) {
+    ratePercent = Math.round((rawUsedDays / grantedDays) * 1000) / 10;
+    ratePercentStr = `${ratePercent.toFixed(1)}%`;
+  } else {
+    ratePercent = 0;
+    ratePercentStr = '0.0%';
+  }
+
+  const isMandatoryMet = rawUsedDays >= 5.0;
+
+  let statusColor = '#f87171'; // 遅れ (赤/ローズ)
+  if (ratePercent >= 70 || isMandatoryMet) {
+    statusColor = '#34d399'; // グリーン (目標達成・高取得率)
+  } else if (ratePercent >= 40) {
+    statusColor = '#38bdf8'; // スカイブルー (順調)
+  } else if (ratePercent >= 20) {
+    statusColor = '#f59e0b'; // アンバー (やや遅れ)
+  }
+
+  const formattedUsedDays = usedDays % 1 === 0 ? usedDays.toFixed(0) : usedDays.toFixed(1);
+  const formattedGrantedDays = grantedDays % 1 === 0 ? grantedDays.toFixed(0) : grantedDays.toFixed(1);
+  const displayText = `年休取得率 ${ratePercentStr} (取得 ${formattedUsedDays}日 / 付与 ${formattedGrantedDays}日)`;
+
+  return {
+    grantedDays,
+    usedDays,
+    usedFullDays,
+    usedHourlyHours,
+    usedHourlyDays: Math.round(usedHourlyDays * 100) / 100,
+    ratePercent,
+    ratePercentStr,
+    displayText,
+    statusColor,
+    isMandatoryMet
+  };
+};
+
 
 

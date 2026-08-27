@@ -5,7 +5,8 @@ import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING } from '../theme/theme';
 import { 
   ChevronRight, Database, FileOutput, 
-  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle, RefreshCw, History
+  QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle, RefreshCw, History,
+  BarChart2, TrendingUp, ChevronDown, ChevronUp, Award
 } from 'lucide-react-native';
 import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
@@ -15,6 +16,7 @@ import { AuditLogModal } from '../components/AuditLogModal';
 import * as Print from 'expo-print';
 import { generateMonthlyShifts } from '../utils/shiftEngine';
 import { forceAppUpdate } from '../utils/appReloader';
+import { calculateRemainingLeaveHours, formatRemainingLeave, getLeaveHoursPerDay, calculateUsedLeaveHours, calculateMandatoryLeaveStatus, calculateAnnualLeaveRate } from '../utils/leaveUtils';
 
 
 interface AdminScreenProps {
@@ -40,13 +42,14 @@ interface AdminScreenProps {
   patchStaff: (id: string, updates: any) => Promise<any>;
   fetchShifts?: () => Promise<void>;
   onNavigateToStaff?: () => void;
+  shifts?: any[];
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
   currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
-  updateStaffList, patchStaff, fetchShifts, onNavigateToStaff
+  updateStaffList, patchStaff, fetchShifts, onNavigateToStaff, shifts = []
 }) => {
 
   const [editStaff, setEditStaff] = useState<any>(null);
@@ -62,6 +65,202 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   
   const [isAssigning, setIsAssigning] = useState(false);
   const [isUpdatingApp, setIsUpdatingApp] = useState(false);
+
+  // 年休取得率集計モーダル・表示用ステート
+  const [showLeaveStatsModal, setShowLeaveStatsModal] = useState(false);
+  const [leaveStatsSort, setLeaveStatsSort] = useState<'rate_asc' | 'rate_desc' | 'name'>('rate_asc');
+
+  // 全シフト＋リクエストデータ
+  const allCalendarData = React.useMemo(() => {
+    return [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
+  }, [requests, shifts]);
+
+  // スタッフごとの年休取得率集計一覧（管理者閲覧専用）
+  const staffLeaveStatsList = React.useMemo(() => {
+    if (!Array.isArray(staffList)) return [];
+
+    return staffList
+      .filter(s => {
+        if (!s || s.status === '無効' || s.status === '入職前') return false;
+        return true;
+      })
+      .map(s => {
+        // 付与日数の取得 (localStorage または DB値)
+        const getStaffInitDays = () => {
+          const uKey1 = `initial_leave_days_${s?.id}`;
+          const uKey2 = `initial_leave_days_${s?.email}`;
+          const uKey3 = `initial_leave_days_${s?.name}`;
+          if (typeof window !== 'undefined') {
+            const s1 = localStorage.getItem(uKey1);
+            const s2 = localStorage.getItem(uKey2);
+            const s3 = localStorage.getItem(uKey3);
+            if (s1 !== null && !isNaN(parseFloat(s1))) return parseFloat(s1);
+            if (s2 !== null && !isNaN(parseFloat(s2))) return parseFloat(s2);
+            if (s3 !== null && !isNaN(parseFloat(s3))) return parseFloat(s3);
+          }
+          const raw = s?.initial_leave_days ?? s?.initialLeaveDays;
+          return (raw !== undefined && raw !== null && !isNaN(Number(raw))) ? Number(raw) : 0;
+        };
+
+        const staffPos = s?.position || s?.role || '';
+        const grantDays = getStaffInitDays();
+        const hoursPerDay = getLeaveHoursPerDay(staffPos);
+        
+        // 既存の残年休計算
+        const remLeaveHours = calculateRemainingLeaveHours(grantDays, allCalendarData, s, staffPos);
+        const remLeaveDays = Math.round((remLeaveHours / hoursPerDay) * 10) / 10;
+        const formattedRemStr = formatRemainingLeave(remLeaveHours, staffPos);
+
+        // 取得日数（Used Days = 付与日数 - 残年休）
+        const rawUsedDays = Math.max(0, grantDays - (remLeaveHours / hoursPerDay));
+        const usedDays = Math.round(rawUsedDays * 10) / 10;
+
+        // 年休取得率 (%)
+        let ratePercent = 0;
+        let rateStr = '-';
+        if (grantDays > 0) {
+          ratePercent = Math.round((rawUsedDays / grantDays) * 1000) / 10;
+          rateStr = `${ratePercent.toFixed(1)}%`;
+        } else {
+          ratePercent = 0;
+          rateStr = '0.0%';
+        }
+
+        // 5日必修化ステータス
+        const mStatus = calculateMandatoryLeaveStatus(s, allCalendarData, (currentDate || new Date()).getFullYear());
+
+        // 消化状況に応じたカラーリング (70%以上=#34d399, 40%以上=#38bdf8, 20%以上=#f59e0b, 20%未満=#f87171)
+        let statusColor = '#f87171'; // 遅れ/低進捗（ローズ）
+        if (ratePercent >= 70 || mStatus.isCompleted) {
+          statusColor = '#34d399'; // 順調・高消化（グリーン）
+        } else if (ratePercent >= 40) {
+          statusColor = '#38bdf8'; // スカイブルー
+        } else if (ratePercent >= 20) {
+          statusColor = '#f59e0b'; // アンバー
+        }
+
+        const formattedUsedDays = usedDays % 1 === 0 ? usedDays.toFixed(0) : usedDays.toFixed(1);
+        const formattedGrantDays = grantDays % 1 === 0 ? grantDays.toFixed(0) : grantDays.toFixed(1);
+        const formattedRemDays = remLeaveDays % 1 === 0 ? remLeaveDays.toFixed(0) : remLeaveDays.toFixed(1);
+
+        const displayText = `年休取得率: ${rateStr}（取得 ${formattedUsedDays}日 / 付与 ${formattedGrantDays}日・残 ${formattedRemDays}日）`;
+
+        return {
+          staff: s,
+          grantDays,
+          usedDays,
+          remLeaveHours,
+          remLeaveDays,
+          formattedRemStr,
+          ratePercent,
+          rateStr,
+          statusColor,
+          mStatus,
+          displayText,
+        };
+      });
+  }, [staffList, allCalendarData, currentDate]);
+
+  // 年休取得状況集計表のA4印刷ハンドラー
+  const handlePrintLeaveStatsReport = () => {
+    if (Platform.OS !== 'web') return;
+
+    try {
+      const year = (currentDate || new Date()).getFullYear();
+      let rowsHtml = '';
+      
+      const sortedList = [...staffLeaveStatsList].sort((a, b) => {
+        if (leaveStatsSort === 'rate_asc') return a.ratePercent - b.ratePercent;
+        if (leaveStatsSort === 'rate_desc') return b.ratePercent - a.ratePercent;
+        return (a.staff.name || '').localeCompare(b.staff.name || '');
+      });
+
+      sortedList.forEach((item, index) => {
+        const s = item.staff;
+        const statusText = item.mStatus.isCompleted 
+          ? '<span style="color:#16a34a; font-weight:bold;">5日達成済</span>' 
+          : `<span style="color:#dc2626; font-weight:bold;">${item.mStatus.displayText}</span>`;
+
+        const formattedUsed = item.usedDays % 1 === 0 ? item.usedDays.toFixed(0) : item.usedDays.toFixed(1);
+        const formattedGrant = item.grantDays % 1 === 0 ? item.grantDays.toFixed(0) : item.grantDays.toFixed(1);
+        const formattedRem = item.remLeaveDays % 1 === 0 ? item.remLeaveDays.toFixed(0) : item.remLeaveDays.toFixed(1);
+
+        rowsHtml += `
+          <tr>
+            <td>${index + 1}</td>
+            <td style="text-align: left; padding-left: 8px; font-weight: bold;">${s.name}</td>
+            <td>${s.jobType || s.profession || '-'}</td>
+            <td>${s.placement || s.department || '-'}</td>
+            <td style="font-weight: bold;">${formattedGrant}日</td>
+            <td style="font-weight: bold; color: #0284c7;">${formattedUsed}日</td>
+            <td>${formattedRem}日 (${item.formattedRemStr})</td>
+            <td style="font-weight: bold; color: ${item.ratePercent >= 70 ? '#16a34a' : (item.ratePercent >= 40 ? '#0284c7' : '#ea580c')};">${item.rateStr}</td>
+            <td>${statusText}</td>
+          </tr>
+        `;
+      });
+
+      const html = `
+        <html>
+          <head>
+            <title>年休取得率・消化状況集計表（${year}年度）</title>
+            <style>
+              @page { size: A4 portrait; margin: 10mm; }
+              body { font-family: sans-serif; padding: 10px; color: #1e293b; }
+              .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; border-bottom: 2px solid #0284c7; padding-bottom: 6px; }
+              table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1px solid #cbd5e1; }
+              th, td { border: 1px solid #cbd5e1; padding: 6px 4px; text-align: center; font-size: 11px; }
+              th { background-color: #f1f5f9; font-weight: bold; }
+              tr:nth-child(even) { background-color: #f8fafc; }
+              .summary { margin-top: 12px; font-size: 11px; color: #64748b; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <div>
+                <h1 style="margin:0; font-size:18px;">職員 年休取得率・消化状況集計表</h1>
+                <div style="font-size: 12px; color: #64748b; margin-top: 2px;">集計年度: ${year}年度（管理者閲覧専用）</div>
+              </div>
+              <div style="font-size: 11px;">印刷日: ${new Date().toLocaleDateString('ja-JP')}</div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 30px;">No</th>
+                  <th style="width: 100px;">氏名</th>
+                  <th style="width: 60px;">職種</th>
+                  <th style="width: 70px;">所属</th>
+                  <th style="width: 60px;">付与日数</th>
+                  <th style="width: 60px;">取得日数</th>
+                  <th style="width: 100px;">残年休</th>
+                  <th style="width: 75px;">年休取得率</th>
+                  <th style="width: 85px;">5日必修状況</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+            </table>
+            <div class="summary">
+              ※取得日数 = 付与日数 - 残年休（日数換算） / 年休取得率(%) = (取得日数 / 付与日数) × 100
+            </div>
+            <script>window.onload=function(){window.print();};<\/script>
+          </body>
+        </html>
+      `;
+
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
+      } else {
+        Alert.alert('ポップアップ制限', 'ブラウザのポップアップ設定を許可してください。');
+      }
+    } catch (err) {
+      console.error('Print logic error:', err);
+      Alert.alert('エラー', '年休集計表の生成中に問題が発生しました。');
+    }
+  };
  
   // [CRITICAL VERSION 49.0] 自動管理者認証バイパス
   React.useEffect(() => {
@@ -394,6 +593,18 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>📋 レポーティング & ツール</ThemeText>
               
               <ThemeCard style={styles.itemRow}>
+                <View style={[styles.iconCircle, { backgroundColor: 'rgba(52, 211, 153, 0.1)' }]}><BarChart2 size={20} color="#34d399" /></View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <ThemeText bold>年休取得率・消化集計一覧</ThemeText>
+                  <ThemeText variant="caption" color={COLORS.textSecondary}>全職員の付与年休に対する取得率・消化日数・残年休の一覧</ThemeText>
+                </View>
+                <TouchableOpacity style={[styles.inlineBtn, { backgroundColor: 'rgba(52, 211, 153, 0.1)' }]} onPress={() => setShowLeaveStatsModal(true)}>
+                  <ThemeText bold color="#34d399" style={{ marginRight: 4 }}>集計表を開く</ThemeText>
+                  <ChevronRight size={16} color="#34d399" />
+                </TouchableOpacity>
+              </ThemeCard>
+
+              <ThemeCard style={styles.itemRow}>
                 <View style={[styles.iconCircle, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}><UserPlus size={20} color="#38bdf8" /></View>
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <ThemeText bold>スタッフ管理・アカウント設定</ThemeText>
@@ -544,6 +755,67 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </TouchableOpacity>
               </ThemeCard>
 
+              {/* 📊 管理者専用: 全職員の年休取得率一覧（インライン表示） */}
+              <View style={{ marginTop: 24 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <BarChart2 size={20} color="#34d399" />
+                    <ThemeText bold variant="h2">📊 年休取得率 集計一覧 ({(currentDate || new Date()).getFullYear()}年)</ThemeText>
+                  </View>
+                  <TouchableOpacity 
+                    style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(52, 211, 153, 0.15)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }}
+                    onPress={() => setShowLeaveStatsModal(true)}
+                  >
+                    <ThemeText variant="caption" bold color="#34d399">全体集計表・印刷</ThemeText>
+                    <ChevronRight size={14} color="#34d399" style={{ marginLeft: 2 }} />
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={{ gap: 8 }}>
+                  {staffLeaveStatsList.map(item => {
+                    const barWidth = Math.min(100, Math.max(0, item.ratePercent));
+                    return (
+                      <ThemeCard key={`card_${item.staff.id || item.staff.email || item.staff.name}`} style={styles.leaveStaffCard}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                          <View style={{ flex: 1, paddingRight: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                              <ThemeText bold style={{ fontSize: 15 }}>{item.staff.name}</ThemeText>
+                              <View style={{ backgroundColor: 'rgba(255,255,255,0.06)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>{item.staff.jobType || item.staff.profession || '-'}</ThemeText>
+                              </View>
+                              {item.staff.placement ? (
+                                <View style={{ backgroundColor: 'rgba(255,255,255,0.04)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                  <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>{item.staff.placement}</ThemeText>
+                                </View>
+                              ) : null}
+                            </View>
+                            <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 4, fontSize: 11 }}>
+                              {item.displayText}
+                            </ThemeText>
+                          </View>
+                          
+                          <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                            <View style={[styles.rateBadge, { backgroundColor: `${item.statusColor}20`, borderColor: item.statusColor }]}>
+                              <ThemeText bold color={item.statusColor} style={{ fontSize: 12 }}>
+                                {item.rateStr}
+                              </ThemeText>
+                            </View>
+                            <ThemeText bold color={item.mStatus.isCompleted ? '#10b981' : '#f59e0b'} style={{ fontSize: 10 }}>
+                              {item.mStatus.isCompleted ? '5日達成済' : item.mStatus.displayText}
+                            </ThemeText>
+                          </View>
+                        </View>
+
+                        {/* プログレスバー */}
+                        <View style={styles.leaveProgressBarTrack}>
+                          <View style={[styles.leaveProgressBarFill, { width: `${barWidth}%`, backgroundColor: item.statusColor }]} />
+                        </View>
+                      </ThemeCard>
+                    );
+                  })}
+                </View>
+              </View>
+
               <View style={{ marginTop: 24, paddingBottom: 40 }}>
                 <ThemeText bold variant="h2" style={{ marginBottom: 16 }}>📈 {currentMonth + 1}月の必要人数設定</ThemeText>
                 <View style={styles.limitGrid}>
@@ -561,6 +833,97 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}><LogOut size={20} color="#ef4444" /><ThemeText bold color="#ef4444" style={{ marginLeft: 10 }}>アプリからログアウト</ThemeText></TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* 年休取得率 集計表モーダル */}
+      <Modal visible={showLeaveStatsModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.statsModalBox}>
+            <View style={styles.pickerHeader}>
+              <View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <BarChart2 size={22} color="#34d399" />
+                  <ThemeText variant="h2">職員 年休取得率 集計表</ThemeText>
+                </View>
+                <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 2 }}>
+                  {(currentDate || new Date()).getFullYear()}年度（管理者専用・全職員一覧）
+                </ThemeText>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                {Platform.OS === 'web' && (
+                  <TouchableOpacity onPress={handlePrintLeaveStatsReport} style={styles.iconBtn}>
+                    <Printer size={20} color="#34d399" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={() => setShowLeaveStatsModal(false)}>
+                  <X size={24} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* ソートボタン */}
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+              <TouchableOpacity 
+                style={[styles.filterChip, leaveStatsSort === 'rate_asc' && styles.filterChipActive]}
+                onPress={() => setLeaveStatsSort('rate_asc')}
+              >
+                <ThemeText variant="caption" bold={leaveStatsSort === 'rate_asc'} color={leaveStatsSort === 'rate_asc' ? '#34d399' : COLORS.textSecondary}>取得率が低い順</ThemeText>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.filterChip, leaveStatsSort === 'rate_desc' && styles.filterChipActive]}
+                onPress={() => setLeaveStatsSort('rate_desc')}
+              >
+                <ThemeText variant="caption" bold={leaveStatsSort === 'rate_desc'} color={leaveStatsSort === 'rate_desc' ? '#34d399' : COLORS.textSecondary}>取得率が高い順</ThemeText>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.filterChip, leaveStatsSort === 'name' && styles.filterChipActive]}
+                onPress={() => setLeaveStatsSort('name')}
+              >
+                <ThemeText variant="caption" bold={leaveStatsSort === 'name'} color={leaveStatsSort === 'name' ? '#34d399' : COLORS.textSecondary}>氏名順</ThemeText>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+              <View style={{ gap: 8 }}>
+                {[...staffLeaveStatsList].sort((a, b) => {
+                  if (leaveStatsSort === 'rate_asc') return a.ratePercent - b.ratePercent;
+                  if (leaveStatsSort === 'rate_desc') return b.ratePercent - a.ratePercent;
+                  return (a.staff.name || '').localeCompare(b.staff.name || '');
+                }).map(item => {
+                  const barWidth = Math.min(100, Math.max(0, item.ratePercent));
+                  return (
+                    <View key={`modal_${item.staff.id || item.staff.email || item.staff.name}`} style={styles.modalStaffRow}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <ThemeText bold style={{ fontSize: 15 }}>{item.staff.name}</ThemeText>
+                          <ThemeText variant="caption" color={COLORS.textSecondary}>{item.staff.jobType || item.staff.profession || ''} / {item.staff.placement || ''}</ThemeText>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={[styles.rateBadge, { backgroundColor: `${item.statusColor}20`, borderColor: item.statusColor }]}>
+                            <ThemeText bold color={item.statusColor} style={{ fontSize: 11 }}>{item.rateStr}</ThemeText>
+                          </View>
+                        </View>
+                      </View>
+                      
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11 }}>
+                          付与: <ThemeText bold color="white">{item.grantDays}日</ThemeText> | 取得: <ThemeText bold color="#38bdf8">{item.usedDays}日</ThemeText> | 残: <ThemeText bold color="#a855f7">{item.formattedRemStr}</ThemeText>
+                        </ThemeText>
+                        <ThemeText variant="caption" bold color={item.mStatus.isCompleted ? '#10b981' : '#f59e0b'} style={{ fontSize: 11 }}>
+                          {item.mStatus.isCompleted ? '5日達成済' : item.mStatus.displayText}
+                        </ThemeText>
+                      </View>
+
+                      <View style={styles.leaveProgressBarTrack}>
+                        <View style={[styles.leaveProgressBarFill, { width: `${barWidth}%`, backgroundColor: item.statusColor }]} />
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* 操作履歴（監査ログ）モーダル */}
       <AuditLogModal
@@ -609,5 +972,16 @@ const styles = StyleSheet.create({
   pickerContainer: { width: '90%', maxHeight: '70%', backgroundColor: '#0f172a', borderRadius: 24, padding: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', width: '100%' },
   pickerItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.02)', width: '100%' },
-  pickerItemActive: { backgroundColor: 'rgba(56, 189, 248, 0.05)' }
+  pickerItemActive: { backgroundColor: 'rgba(56, 189, 248, 0.05)' },
+
+  // 年休取得率用スタイル
+  leaveStaffCard: { padding: 14, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.04)', width: '100%' },
+  leaveProgressBarTrack: { width: '100%', height: 6, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden', marginTop: 4 },
+  leaveProgressBarFill: { height: '100%', borderRadius: 3 },
+  rateBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
+  statsModalBox: { width: '92%', maxHeight: '85%', backgroundColor: '#0f172a', borderRadius: 24, padding: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  filterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  filterChipActive: { backgroundColor: 'rgba(52, 211, 153, 0.15)', borderColor: '#34d399' },
+  modalStaffRow: { padding: 12, backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.04)' },
+  iconBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' }
 });
