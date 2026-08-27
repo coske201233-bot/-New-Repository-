@@ -114,7 +114,18 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
 
           let leaveStart = item.leave_start_date || item.leaveStartDate || null;
           let leaveEnd = item.leave_end_date || item.leaveEndDate || null;
-          if (typeof window !== 'undefined') {
+          if (item.status !== '長期休暇') {
+            leaveStart = null;
+            leaveEnd = null;
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem(`leave_start_date_${item.id}`);
+              if (item.email) localStorage.removeItem(`leave_start_date_${item.email}`);
+              if (item.name) localStorage.removeItem(`leave_start_date_${item.name}`);
+              localStorage.removeItem(`leave_end_date_${item.id}`);
+              if (item.email) localStorage.removeItem(`leave_end_date_${item.email}`);
+              if (item.name) localStorage.removeItem(`leave_end_date_${item.name}`);
+            }
+          } else if (typeof window !== 'undefined') {
             const lsStart = localStorage.getItem(`leave_start_date_${item.id}`) || localStorage.getItem(`leave_start_date_${item.email}`) || localStorage.getItem(`leave_start_date_${item.name}`);
             const lsEnd = localStorage.getItem(`leave_end_date_${item.id}`) || localStorage.getItem(`leave_end_date_${item.email}`) || localStorage.getItem(`leave_end_date_${item.name}`);
             
@@ -122,7 +133,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
               localStorage.setItem(`leave_start_date_${item.id}`, leaveStart);
               if (item.email) localStorage.setItem(`leave_start_date_${item.email}`, leaveStart);
               if (item.name) localStorage.setItem(`leave_start_date_${item.name}`, leaveStart);
-            } else if (lsStart && item.status === '長期休暇') {
+            } else if (lsStart) {
               leaveStart = lsStart;
             }
 
@@ -130,7 +141,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
               localStorage.setItem(`leave_end_date_${item.id}`, leaveEnd);
               if (item.email) localStorage.setItem(`leave_end_date_${item.email}`, leaveEnd);
               if (item.name) localStorage.setItem(`leave_end_date_${item.name}`, leaveEnd);
-            } else if (lsEnd && item.status === '長期休暇') {
+            } else if (lsEnd) {
               leaveEnd = lsEnd;
             }
           }
@@ -468,6 +479,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           }));
         }
         await fetchStaff();
+        if (props.fetchShifts) {
+          try { await props.fetchShifts(); } catch (e) { console.warn('fetchShifts error:', e); }
+        }
+        if (props.onForceCloudSync) {
+          try { await props.onForceCloudSync(); } catch (e) { console.warn('onForceCloudSync error:', e); }
+        }
         setTimeout(() => { 
           setStatusMsg(''); 
           setIsRegistrationModalVisible(false);

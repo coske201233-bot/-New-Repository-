@@ -326,8 +326,9 @@ export default async function handler(req: any, res: any) {
             return res.status(400).json({ error: 'staffId または userId が必要です。' });
           }
 
-          const finalLeaveStartDate = leave_start_date !== undefined ? leave_start_date : leaveStartDate;
-          const finalLeaveEndDate = leave_end_date !== undefined ? leave_end_date : leaveEndDate;
+          const isLongTerm = status === '長期休暇';
+          const finalLeaveStartDate = isLongTerm ? (leave_start_date !== undefined ? leave_start_date : leaveStartDate) : null;
+          const finalLeaveEndDate = isLongTerm ? (leave_end_date !== undefined ? leave_end_date : leaveEndDate) : null;
 
           // 既存の staff レコードを取得して user_id / email を確認
           const { data: existingStaff } = await supabaseAdmin

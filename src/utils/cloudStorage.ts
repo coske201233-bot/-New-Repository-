@@ -63,7 +63,19 @@ export const cloudStorage = {
         const mapped = mapFromSql(s, STAFF_MAP);
         let lStart = mapped.leave_start_date || mapped.leaveStartDate || s.leave_start_date || s.leaveStartDate || null;
         let lEnd = mapped.leave_end_date || mapped.leaveEndDate || s.leave_end_date || s.leaveEndDate || null;
-        if (typeof window !== 'undefined') {
+        const currentStatus = mapped.status || s.status;
+        if (currentStatus !== '長期休暇') {
+          lStart = null;
+          lEnd = null;
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(`leave_start_date_${s.id}`);
+            if (s.email) localStorage.removeItem(`leave_start_date_${s.email}`);
+            if (s.name) localStorage.removeItem(`leave_start_date_${s.name}`);
+            localStorage.removeItem(`leave_end_date_${s.id}`);
+            if (s.email) localStorage.removeItem(`leave_end_date_${s.email}`);
+            if (s.name) localStorage.removeItem(`leave_end_date_${s.name}`);
+          }
+        } else if (typeof window !== 'undefined') {
           const lsStart = localStorage.getItem(`leave_start_date_${s.id}`) || localStorage.getItem(`leave_start_date_${s.email}`) || localStorage.getItem(`leave_start_date_${s.name}`);
           const lsEnd = localStorage.getItem(`leave_end_date_${s.id}`) || localStorage.getItem(`leave_end_date_${s.email}`) || localStorage.getItem(`leave_end_date_${s.name}`);
           
@@ -71,7 +83,7 @@ export const cloudStorage = {
             localStorage.setItem(`leave_start_date_${s.id}`, lStart);
             if (s.email) localStorage.setItem(`leave_start_date_${s.email}`, lStart);
             if (s.name) localStorage.setItem(`leave_start_date_${s.name}`, lStart);
-          } else if (lsStart && (mapped.status === '長期休暇' || s.status === '長期休暇')) {
+          } else if (lsStart) {
             lStart = lsStart;
           }
 
@@ -79,7 +91,7 @@ export const cloudStorage = {
             localStorage.setItem(`leave_end_date_${s.id}`, lEnd);
             if (s.email) localStorage.setItem(`leave_end_date_${s.email}`, lEnd);
             if (s.name) localStorage.setItem(`leave_end_date_${s.name}`, lEnd);
-          } else if (lsEnd && (mapped.status === '長期休暇' || s.status === '長期休暇')) {
+          } else if (lsEnd) {
             lEnd = lsEnd;
           }
         }
