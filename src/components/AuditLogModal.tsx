@@ -27,8 +27,10 @@ import {
   Clock,
   ChevronDown,
   ChevronUp,
+  ArrowRightLeft,
+  UserCheck,
 } from 'lucide-react-native';
-import { fetchAuditLogs, AuditLogRecord } from '../utils/auditLogger';
+import { fetchAuditLogs, AuditLogRecord, AuditActionType } from '../utils/auditLogger';
 
 interface AuditLogModalProps {
   visible: boolean;
@@ -60,32 +62,70 @@ export const AuditLogModal: React.FC<AuditLogModalProps> = ({ visible, onClose }
     }
   }, [visible, loadLogs]);
 
+  const normalizeStr = (str?: string | null) => {
+    if (!str) return '';
+    return str
+      .toLowerCase()
+      .replace(/[\s\u3000]/g, '')
+      .normalize('NFKC');
+  };
+
+  const getActionBadge = (actionType: string) => {
+    switch (actionType) {
+      case 'SHIFT_UPDATE':
+        return { label: 'シフト変更', color: '#c084fc', bg: 'rgba(192, 132, 252, 0.15)', icon: Calendar };
+      case 'SHIFT_MOVE':
+        return { label: '日付移動', color: '#22d3ee', bg: 'rgba(34, 211, 238, 0.15)', icon: ArrowRightLeft };
+      case 'SHIFT_DELETE':
+        return { label: 'シフト削除', color: '#f87171', bg: 'rgba(248, 113, 113, 0.15)', icon: Trash2 };
+      case 'REQUEST_CREATE':
+        return { label: '申請提出', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)', icon: Clock };
+      case 'REQUEST_APPROVE':
+        return { label: '申請承認', color: '#34d399', bg: 'rgba(52, 211, 153, 0.15)', icon: CheckCircle2 };
+      case 'REQUEST_REJECT':
+        return { label: '申請却下', color: '#fb7185', bg: 'rgba(251, 113, 133, 0.15)', icon: XCircle };
+      case 'REQUEST_DELETE':
+        return { label: '申請削除', color: '#fb923c', bg: 'rgba(251, 146, 60, 0.15)', icon: Trash2 };
+      case 'STAFF_UPDATE':
+        return { label: '職員情報変更', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)', icon: UserCheck };
+      default:
+        return { label: actionType || '操作履歴', color: COLORS.textSecondary, bg: 'rgba(255, 255, 255, 0.1)', icon: History };
+    }
+  };
+
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
-      // 1. タイプフィルター
+      // 1. タイプフィルター（自然な操作順グループ）
       if (filterType !== 'ALL') {
-        if (filterType === 'DELETE' || filterType === 'REQUEST_DELETE' || filterType === 'SHIFT_DELETE') {
-          if (log.action_type !== 'SHIFT_DELETE' && log.action_type !== 'REQUEST_DELETE') {
+        if (filterType === 'REQUEST_GROUP') {
+          if (!['REQUEST_CREATE', 'REQUEST_APPROVE', 'REQUEST_REJECT', 'REQUEST_DELETE'].includes(log.action_type)) {
+            return false;
+          }
+        } else if (filterType === 'DELETE_GROUP') {
+          if (!['SHIFT_DELETE', 'REQUEST_DELETE'].includes(log.action_type)) {
             return false;
           }
         } else if (log.action_type !== filterType) {
           return false;
         }
       }
-      // 2. 検索クエリ
+      // 2. 検索クエリ (正規化照合)
       if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase().trim();
-        const opName = (log.operator_name || '').toLowerCase();
-        const targetName = (log.target_staff_name || '').toLowerCase();
-        const details = (log.details || '').toLowerCase();
-        const targetDate = (log.target_date || '').toLowerCase();
-        const type = (log.action_type || '').toLowerCase();
+        const query = normalizeStr(searchQuery);
+        const opName = normalizeStr(log.operator_name);
+        const targetName = normalizeStr(log.target_staff_name);
+        const details = normalizeStr(log.details);
+        const targetDate = normalizeStr(log.target_date);
+        const type = normalizeStr(log.action_type);
+        const badgeLabel = normalizeStr(getActionBadge(log.action_type).label);
+
         if (
           !opName.includes(query) &&
           !targetName.includes(query) &&
           !details.includes(query) &&
           !targetDate.includes(query) &&
-          !type.includes(query)
+          !type.includes(query) &&
+          !badgeLabel.includes(query)
         ) {
           return false;
         }
@@ -93,25 +133,6 @@ export const AuditLogModal: React.FC<AuditLogModalProps> = ({ visible, onClose }
       return true;
     });
   }, [logs, filterType, searchQuery]);
-
-  const getActionBadge = (actionType: string) => {
-    switch (actionType) {
-      case 'SHIFT_UPDATE':
-        return { label: 'シフト変更', color: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)', icon: Calendar };
-      case 'SHIFT_DELETE':
-        return { label: 'シフト削除', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', icon: Trash2 };
-      case 'REQUEST_CREATE':
-        return { label: '申請提出', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)', icon: Clock };
-      case 'REQUEST_APPROVE':
-        return { label: '申請承認', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)', icon: CheckCircle2 };
-      case 'REQUEST_REJECT':
-        return { label: '申請却下', color: '#f43f5e', bg: 'rgba(244, 63, 94, 0.15)', icon: XCircle };
-      case 'REQUEST_DELETE':
-        return { label: '申請削除', color: '#f97316', bg: 'rgba(249, 115, 22, 0.15)', icon: Trash2 };
-      default:
-        return { label: actionType, color: COLORS.textSecondary, bg: 'rgba(255, 255, 255, 0.1)', icon: History };
-    }
-  };
 
   const formatTimestamp = (dateStr: string) => {
     if (!dateStr) return '';
@@ -133,10 +154,10 @@ export const AuditLogModal: React.FC<AuditLogModalProps> = ({ visible, onClose }
   const filterOptions = [
     { key: 'ALL', label: 'すべて' },
     { key: 'SHIFT_UPDATE', label: 'シフト変更' },
-    { key: 'REQUEST_CREATE', label: '申請提出' },
-    { key: 'REQUEST_APPROVE', label: '承認' },
-    { key: 'REQUEST_REJECT', label: '却下' },
-    { key: 'DELETE', label: '削除' },
+    { key: 'SHIFT_MOVE', label: '日付移動' },
+    { key: 'REQUEST_GROUP', label: '申請関連' },
+    { key: 'DELETE_GROUP', label: '削除' },
+    { key: 'STAFF_UPDATE', label: '職員変更' },
   ];
 
   return (
@@ -242,16 +263,28 @@ export const AuditLogModal: React.FC<AuditLogModalProps> = ({ visible, onClose }
 
                 return (
                   <ThemeCard key={log.id} style={styles.logCard}>
-                    {/* Card Header: Type Badge & Timestamp */}
+                    {/* Card Header: Type Badge, Target Date & Timestamp */}
                     <View style={styles.cardHeader}>
-                      <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-                        <BadgeIcon size={13} color={badge.color} style={{ marginRight: 4 }} />
-                        <ThemeText bold style={{ fontSize: 11, color: badge.color }}>
-                          {badge.label}
-                        </ThemeText>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <View style={[styles.badge, { backgroundColor: badge.bg, borderColor: badge.color + '40', borderWidth: 1 }]}>
+                          <BadgeIcon size={12} color={badge.color} style={{ marginRight: 4 }} />
+                          <ThemeText bold style={{ fontSize: 11, color: badge.color }}>
+                            {badge.label}
+                          </ThemeText>
+                        </View>
+
+                        {log.target_date ? (
+                          <View style={styles.dateTag}>
+                            <Calendar size={11} color="#94a3b8" style={{ marginRight: 3 }} />
+                            <ThemeText style={{ fontSize: 11, color: '#cbd5e1' }}>
+                              {log.target_date}
+                            </ThemeText>
+                          </View>
+                        ) : null}
                       </View>
+
                       <View style={styles.timeRow}>
-                        <Clock size={12} color={COLORS.textSecondary} style={{ marginRight: 4 }} />
+                        <Clock size={11} color={COLORS.textSecondary} style={{ marginRight: 4 }} />
                         <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11 }}>
                           {formatTimestamp(log.created_at)}
                         </ThemeText>
@@ -259,32 +292,25 @@ export const AuditLogModal: React.FC<AuditLogModalProps> = ({ visible, onClose }
                     </View>
 
                     {/* Details Main Text */}
-                    <ThemeText bold style={styles.detailsText}>
-                      {log.details}
-                    </ThemeText>
+                    <View style={styles.detailsContainer}>
+                      <ThemeText bold style={styles.detailsText}>
+                        {log.details}
+                      </ThemeText>
+                    </View>
 
                     {/* Meta info tags */}
                     <View style={styles.metaRow}>
                       <View style={styles.metaItem}>
                         <User size={12} color={COLORS.textSecondary} style={{ marginRight: 4 }} />
                         <ThemeText variant="caption" color={COLORS.textSecondary}>
-                          操作者: <ThemeText variant="caption" bold color={COLORS.text}>{log.operator_name || 'システム'}</ThemeText>
+                          操作者: <ThemeText variant="caption" bold color="#e2e8f0">{log.operator_name || 'システム'}</ThemeText>
                         </ThemeText>
                       </View>
 
                       {log.target_staff_name ? (
                         <View style={styles.metaItem}>
                           <ThemeText variant="caption" color={COLORS.textSecondary}>
-                            対象者: <ThemeText variant="caption" bold color={COLORS.text}>{log.target_staff_name}</ThemeText>
-                          </ThemeText>
-                        </View>
-                      ) : null}
-
-                      {log.target_date ? (
-                        <View style={styles.metaItem}>
-                          <Calendar size={12} color={COLORS.textSecondary} style={{ marginRight: 4 }} />
-                          <ThemeText variant="caption" color={COLORS.textSecondary}>
-                            対象日: <ThemeText variant="caption" bold color={COLORS.text}>{log.target_date}</ThemeText>
+                            対象スタッフ: <ThemeText variant="caption" bold color="#38bdf8">{log.target_staff_name}</ThemeText>
                           </ThemeText>
                         </View>
                       ) : null}
@@ -489,19 +515,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  dateTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  detailsContainer: {
+    marginVertical: 6,
+  },
   detailsText: {
-    fontSize: 14,
+    fontSize: 13.5,
     lineHeight: 20,
-    marginBottom: 8,
-    color: '#f1f5f9',
+    color: '#f8fafc',
+    fontWeight: '600',
   },
   metaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    paddingTop: 6,
+    paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.04)',
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
   },
   metaItem: {
     flexDirection: 'row',

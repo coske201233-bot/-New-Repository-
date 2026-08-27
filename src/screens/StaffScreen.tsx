@@ -478,6 +478,33 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
             return s;
           }));
         }
+        // 監査ログの記録 (STAFF_UPDATE)
+        let logDetails = `${regName.trim()}さんの職員情報を更新しました`;
+        if (regStatus === '長期休暇') {
+          if (leaveStart && leaveEnd) {
+            logDetails = `${regName.trim()}さんのステータスを【長期休暇（${leaveStart} 〜 ${leaveEnd}）】に更新しました`;
+          } else if (leaveStart) {
+            logDetails = `${regName.trim()}さんのステータスを【長期休暇（${leaveStart} 〜）】に更新しました`;
+          } else {
+            logDetails = `${regName.trim()}さんのステータスを【長期休暇】に更新しました`;
+          }
+        } else if (editingStaff?.status && editingStaff.status !== regStatus) {
+          logDetails = `${regName.trim()}さんのステータスを「${editingStaff.status}」から【${regStatus}】に更新しました`;
+        } else {
+          logDetails = `${regName.trim()}さんの職員情報（${regTitle} / ${regJobType} / ${regPlacement}）を更新しました`;
+        }
+
+        await recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          targetStaffId: editingStaff.id,
+          targetStaffName: regName.trim(),
+          actionType: 'STAFF_UPDATE',
+          details: logDetails,
+          beforeData: editingStaff,
+          afterData: { ...editingStaff, ...payload },
+        });
+
         await fetchStaff();
         if (props.fetchShifts) {
           try { await props.fetchShifts(); } catch (e) { console.warn('fetchShifts error:', e); }

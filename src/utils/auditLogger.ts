@@ -1,11 +1,21 @@
 import { supabase } from './supabase';
 
+export type AuditActionType =
+  | 'SHIFT_UPDATE'
+  | 'SHIFT_MOVE'
+  | 'SHIFT_DELETE'
+  | 'REQUEST_CREATE'
+  | 'REQUEST_APPROVE'
+  | 'REQUEST_REJECT'
+  | 'REQUEST_DELETE'
+  | 'STAFF_UPDATE';
+
 export interface AuditLogParams {
   operatorId?: string;
   operatorName?: string;
   targetStaffId?: string;
   targetStaffName?: string;
-  actionType: 'SHIFT_UPDATE' | 'SHIFT_DELETE' | 'REQUEST_CREATE' | 'REQUEST_APPROVE' | 'REQUEST_REJECT' | 'REQUEST_DELETE';
+  actionType: AuditActionType;
   targetDate?: string;
   details: string;
   beforeData?: any;
@@ -18,7 +28,7 @@ export interface AuditLogRecord {
   operator_name: string;
   target_staff_id: string | null;
   target_staff_name: string;
-  action_type: 'SHIFT_UPDATE' | 'SHIFT_DELETE' | 'REQUEST_CREATE' | 'REQUEST_APPROVE' | 'REQUEST_REJECT' | 'REQUEST_DELETE';
+  action_type: AuditActionType;
   target_date: string | null;
   details: string;
   before_data: any | null;

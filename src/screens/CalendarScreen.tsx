@@ -821,15 +821,15 @@ export const CalendarScreen: React.FC<any> = ({
         return [...filtered, newReq];
       });
 
-      // 5. 監査ログの記録
+      // 5. 監査ログの記録 (SHIFT_MOVE)
       await recordAuditLog({
         operatorId: profile?.id,
         operatorName: profile?.name || '管理者',
         targetStaffId: cleanStaffId,
         targetStaffName: staffName,
-        actionType: 'SHIFT_UPDATE',
+        actionType: 'SHIFT_MOVE',
         targetDate: toDateStr,
-        details: `${staffName}さんのシフト（${fromDateStr}「${shiftType}」）を ${toDateStr} へ移動しました`,
+        details: `${staffName}さんのシフトを ${fromDateStr} から ${toDateStr} へ移動しました（${shiftType}${hours ? ` ${hours}h` : ''}）`,
         beforeData: { date: fromDateStr, type: shiftType, hours },
         afterData: newReq,
       });
@@ -965,7 +965,7 @@ export const CalendarScreen: React.FC<any> = ({
         targetStaffName: staffName,
         actionType: 'SHIFT_UPDATE',
         targetDate: dateStr,
-        details: `${staffName}さんのシフト（${dateStr}）を「${selectedShiftToEdit.type || '未設定'}」から「${newType}」に変更しました`,
+        details: `${staffName}さんの ${dateStr} のシフトを「${selectedShiftToEdit.type || '未設定'}」から【${newType}】に変更しました`,
         beforeData: selectedShiftToEdit,
         afterData: updatedReq,
       });
@@ -1028,7 +1028,7 @@ export const CalendarScreen: React.FC<any> = ({
         targetStaffName: staffName,
         actionType: 'SHIFT_DELETE',
         targetDate: dateStr,
-        details: `${staffName}さんのシフト（${dateStr}「${shiftType}」）を削除しました`,
+        details: `${staffName}さんの ${dateStr} のシフト（${shiftType}）を削除しました`,
         beforeData: selectedShiftToEdit,
         afterData: null,
       });
