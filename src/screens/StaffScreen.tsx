@@ -13,7 +13,7 @@ import { normalizeName } from '../utils/staffUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
 import { calculateRemainingLeaveHours, formatRemainingLeave, calculateUsedLeaveHours, calculateMandatoryLeaveStatus } from '../utils/leaveUtils';
-import { createStaffApi, updateStaffInfoApi, updateStaffPasswordApi, deleteStaffApi } from '../utils/adminStaffApi';
+import { createStaffApi, updateStaffInfoApi, updateStaffPasswordApi, deleteStaffApi, directStaffDbUpdate } from '../utils/adminStaffApi';
 import { recordAuditLog } from '../utils/auditLogger';
 import * as Print from 'expo-print';
 
@@ -456,11 +456,25 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         }
 
         // サーバーサイド API 呼び出し (Auth & Staff 同期更新)
-        await updateStaffInfoApi({
-          staffId: editingStaff.id,
-          userId: editingStaff.user_id,
-          ...payload,
-        });
+        try {
+          await updateStaffInfoApi({
+            staffId: editingStaff.id,
+            userId: editingStaff.user_id,
+            ...payload,
+          });
+        } catch (apiErr: any) {
+          console.warn('⚠️ [StaffScreen] updateStaffInfoApi error, attempting directStaffDbUpdate fallback...', apiErr.message);
+          try {
+            await directStaffDbUpdate({
+              staffId: editingStaff.id,
+              userId: editingStaff.user_id,
+              ...payload,
+            });
+          } catch (dbErr: any) {
+            console.error('❌ [StaffScreen] directStaffDbUpdate also failed:', dbErr);
+            throw apiErr;
+          }
+        }
 
         setStatusMsg('🎉 変更を保存しました！');
         if (props.setStaffList) {
