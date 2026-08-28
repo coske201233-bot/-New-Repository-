@@ -28,8 +28,8 @@ export const isHoliday = (date: Date): boolean => {
   const mmdd = `${month}-${day}`;
   const dateStr = `${year}-${mmdd}`;
 
-  // 年末年始の判定 (12/28 - 1/3)
-  const isNewYear = ['12-28', '12-29', '12-30', '12-31', '01-01', '01-02', '01-03'].includes(mmdd);
+  // 年末年始の判定 (12/29 - 1/3)
+  const isNewYear = ['12-29', '12-30', '12-31', '01-01', '01-02', '01-03'].includes(mmdd);
 
   return JAPAN_HOLIDAYS.includes(dateStr) || isNewYear;
 };

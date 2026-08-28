@@ -339,7 +339,7 @@ export const generateMonthlyShifts = async (
             const d = new Date(String(s.date).replace(/-/g, '/'));
             const day = d.getDay();
             const mmdd = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            const isNewYear = ['12-28', '12-29', '12-30', '12-31', '01-01', '01-02', '01-03'].includes(mmdd);
+            const isNewYear = ['12-29', '12-30', '12-31', '01-01', '01-02', '01-03'].includes(mmdd);
             return day === 0 || day === 6 || isNewYear;
           });
 
