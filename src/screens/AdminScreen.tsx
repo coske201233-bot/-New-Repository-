@@ -143,7 +143,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         const formattedGrantDays = grantDays % 1 === 0 ? grantDays.toFixed(0) : grantDays.toFixed(1);
         const formattedRemDays = remLeaveDays % 1 === 0 ? remLeaveDays.toFixed(0) : remLeaveDays.toFixed(1);
 
-        const displayText = `年休取得率: ${rateStr}（取得 ${formattedUsedDays}日 / 付与 ${formattedGrantDays}日・残 ${formattedRemDays}日）`;
+        const displayText = `取得 ${formattedUsedDays}日 / 付与 ${formattedGrantDays}日（残 ${formattedRemDays}日）`;
 
         return {
           staff: s,
