@@ -3,7 +3,7 @@ import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Al
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Plus, Check, LogOut, Edit3, Trash2, Move, Calendar as CalendarIcon, ArrowRight } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Check, LogOut, Edit3, Trash2, Move, Calendar as CalendarIcon, ArrowRight } from 'lucide-react-native';
 import { getDayType, formatDate, getDateStr, normalizeName } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
@@ -1409,15 +1409,6 @@ export const CalendarScreen: React.FC<any> = ({
         <ThemeCard style={styles.detailCard}>
           <View style={styles.detailHeader}>
             <ThemeText variant="h2">{selectedDate.getMonth() + 1}月{selectedDate.getDate()}日の詳細</ThemeText>
-            {isAdmin && (
-              <TouchableOpacity 
-                style={[styles.addStaffBtn, { backgroundColor: COLORS.primary }]}
-                onPress={() => setIsAddStaffModalVisible(true)}
-              >
-                <Plus size={16} color="white" />
-                <ThemeText variant="caption" bold color="white" style={{ marginLeft: 4 }}>シフト追加</ThemeText>
-              </TouchableOpacity>
-            )}
           </View>
           <View style={styles.detailRow}>
             <View style={styles.detailItem}>
