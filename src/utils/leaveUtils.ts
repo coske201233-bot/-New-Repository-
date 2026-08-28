@@ -224,9 +224,9 @@ export const calculateUsedLeaveHours = (
       const h = hours > 0 ? hours : 1.0;
       totalUsedHours += (isNaN(h) ? 0 : h);
     } 
-    // 【3】特休＋時間休 (時間休部分のみを年休から消化)
-    else if (type === '特休＋時間休') {
-      const h = Number(r.details?.hourlyHours ?? r.hourlyHours ?? 0);
+    // 【3】特休＋時間休 / 振替＋時間休 (時間休部分のみを年休から消化)
+    else if (type === '特休＋時間休' || type === '振替＋時間休') {
+      const h = Number(r.details?.hourlyHours ?? r.hourlyHours ?? (type === '振替＋時間休' && r.hours ? Math.max(0, r.hours - 4) : 0));
       totalUsedHours += (isNaN(h) ? 0 : h);
     } 
     // 【4】午前休
@@ -354,9 +354,9 @@ export const calculateMandatoryLeaveStatus = (
     else if (type === '時間休') {
       usedHours += (hours > 0 ? hours : 1.0);
     }
-    // 【3】特休＋時間休 (時間休部分のみ)
-    else if (type === '特休＋時間休') {
-      const h = Number(r.details?.hourlyHours ?? r.hourlyHours ?? 0);
+    // 【3】特休＋時間休 / 振替＋時間休 (時間休部分のみ)
+    else if (type === '特休＋時間休' || type === '振替＋時間休') {
+      const h = Number(r.details?.hourlyHours ?? r.hourlyHours ?? (type === '振替＋時間休' && r.hours ? Math.max(0, r.hours - 4) : 0));
       usedHours += (isNaN(h) ? 0 : h);
     }
     // 【4】午前休
@@ -518,7 +518,12 @@ export const calculateAnnualLeaveRate = (
       const validHours = hours > 0 ? hours : 1.0;
       usedHourlyHours += validHours;
     }
-    // ※特休、公休、振替休、看護休暇、夏季休暇、午前休、午後休、特休＋時間休等は一切除外
+    // 【3】特休＋時間休 / 振替＋時間休 (時間休部分のみを時間単位年休として消化)
+    else if (type === '特休＋時間休' || type === '振替＋時間休') {
+      const h = Number(r.details?.hourlyHours ?? r.hourlyHours ?? (type === '振替＋時間休' && r.hours ? Math.max(0, r.hours - 4) : 0));
+      usedHourlyHours += (isNaN(h) ? 0 : h);
+    }
+    // ※特休、公休、振替休、看護休暇、夏季休暇、午前休、午後休等は除外
   });
 
   const usedHourlyDays = usedHourlyHours / hoursPerDay;

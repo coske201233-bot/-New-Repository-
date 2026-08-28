@@ -177,13 +177,15 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
       newRequest.type === '休日出勤変更' || 
       newRequest.type === '夏季休暇' || 
       newRequest.type === '振替' || 
-      newRequest.type === '振替＋時間休' ||
       newRequest.type === '休日出勤＋公休変更'
     ) {
       duration = isFiscalYear ? 7.5 : 7.75;
     } else if (newRequest.type === '特休＋時間休') {
       duration = specialHours + hourlyHours;
       detailsPayload = { specialHours, hourlyHours };
+    } else if (newRequest.type === '振替＋時間休') {
+      duration = 4.0 + hourlyHours;
+      detailsPayload = { furikaeHours: 4.0, hourlyHours };
     } else if (newRequest.type === '時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '看護休暇' || newRequest.type === '出張') {
       duration = newRequest.hours;
     }
@@ -414,7 +416,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 </View>
               </View>
   
-              {(newRequest.type === '時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '看護休暇' || newRequest.type === '特休＋時間休' || newRequest.type === '出張') && (
+              {(newRequest.type === '時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '看護休暇' || newRequest.type === '特休＋時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '出張') && (
                 <View style={styles.timeSelectionArea}>
                   <ThemeText variant="label" style={{ marginBottom: 12 }}>時間設定 (0.25h単位)</ThemeText>
                   {newRequest.type === '特休＋時間休' ? (
@@ -444,6 +446,50 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                         </View>
                       </View>
                       <ThemeText variant="caption" bold style={{ marginTop: 4 }}>合計時間: {(specialHours + hourlyHours).toFixed(2)}h</ThemeText>
+                    </View>
+                  ) : newRequest.type === '振替＋時間休' ? (
+                    <View style={{ gap: 14 }}>
+                      <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.12)', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+                        <ThemeText variant="caption" color={COLORS.primary} bold>
+                          ※ 振替4時間 ＋ 時間休 {hourlyHours.toFixed(2)}時間（合計休暇: {(4.0 + hourlyHours).toFixed(2)}h）
+                        </ThemeText>
+                        <ThemeText variant="caption" style={{ color: COLORS.textSecondary, fontSize: 11, marginTop: 2 }}>
+                          ※ 時間休の {hourlyHours.toFixed(2)}時間 分が年休（有給）から消化されます
+                        </ThemeText>
+                      </View>
+
+                      <View>
+                        <ThemeText variant="caption" style={{ marginBottom: 8 }}>時間休の時間数を選択</ThemeText>
+                        
+                        {/* プリセットクイックボタン */}
+                        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                          {[1.0, 2.0, 3.0, 3.5, 3.75].map((preset) => (
+                            <TouchableOpacity
+                              key={preset}
+                              style={[
+                                { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: COLORS.border, backgroundColor: 'rgba(255,255,255,0.05)' },
+                                hourlyHours === preset && { backgroundColor: COLORS.primary, borderColor: COLORS.primary }
+                              ]}
+                              onPress={() => setHourlyHours(preset)}
+                            >
+                              <ThemeText variant="caption" bold={hourlyHours === preset} color={hourlyHours === preset ? 'white' : COLORS.text}>
+                                {preset}h
+                              </ThemeText>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+
+                        {/* ステッパー */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                          <TouchableOpacity onPress={() => setHourlyHours(prev => Math.max(0.25, prev - 0.25))} style={styles.stepperBtn}>
+                            <ThemeText bold color="white">-</ThemeText>
+                          </TouchableOpacity>
+                          <ThemeText variant="h2" color={COLORS.primary}>{hourlyHours.toFixed(2)}h</ThemeText>
+                          <TouchableOpacity onPress={() => setHourlyHours(prev => Math.min(8.0, prev + 0.25))} style={styles.stepperBtn}>
+                            <ThemeText bold color="white">+</ThemeText>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
                     </View>
                   ) : (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>

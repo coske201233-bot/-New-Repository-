@@ -613,12 +613,16 @@ export const CalendarScreen: React.FC<any> = ({
         is_manual: true,
         hours: selectedType === '特休＋時間休'
           ? (adminSpecialHours + adminHourlyHours)
-          : (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤', '出張', '休日時間外'].includes(selectedType))
-            ? hourlyDuration
-            : null,
+          : selectedType === '振替＋時間休'
+            ? (4.0 + adminHourlyHours)
+            : (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤', '出張', '休日時間外'].includes(selectedType))
+              ? hourlyDuration
+              : null,
         details: selectedType === '特休＋時間休'
           ? { note: '手動割当', specialHours: adminSpecialHours, hourlyHours: adminHourlyHours, isManual: true }
-          : { note: '手動割当', isManual: true },
+          : selectedType === '振替＋時間休'
+            ? { note: '手動割当', furikaeHours: 4.0, hourlyHours: adminHourlyHours, isManual: true }
+            : { note: '手動割当', isManual: true },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(), // [V61.0] 優先度判定のためにupdatedAtを付与
       };
@@ -861,7 +865,7 @@ export const CalendarScreen: React.FC<any> = ({
     setNewEditType(item.type || '出勤');
     setNewEditHours(item.hours ?? item.details?.duration ?? 1.0);
     setNewEditSpecialHours(item.details?.specialHours ?? 1.0);
-    setNewEditHourlyHours(item.details?.hourlyHours ?? 1.0);
+    setNewEditHourlyHours(item.details?.hourlyHours ?? (item.type === '振替＋時間休' && item.hours ? Math.max(0.25, item.hours - 4.0) : 1.0));
     setTargetMoveDate(dateStr);
     
     // 対象シフトの年月で移動先選択カレンダーを初期化
@@ -901,6 +905,9 @@ export const CalendarScreen: React.FC<any> = ({
       if (newType === '特休＋時間休') {
         calcHours = newEditSpecialHours + newEditHourlyHours;
         details = { note: '管理画面よりクイック変更', specialHours: newEditSpecialHours, hourlyHours: newEditHourlyHours, isManual: true };
+      } else if (newType === '振替＋時間休') {
+        calcHours = 4.0 + newEditHourlyHours;
+        details = { note: '管理画面よりクイック変更', furikaeHours: 4.0, hourlyHours: newEditHourlyHours, isManual: true };
       } else if (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤', '出張', '休日時間外'].includes(newType)) {
         calcHours = newEditHours;
         details = { note: '管理画面よりクイック変更', duration: newEditHours, isManual: true };
@@ -1478,7 +1485,9 @@ export const CalendarScreen: React.FC<any> = ({
                           ? ` 半日振替`
                           : (item.type || '') === '特休＋時間休'
                             ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
-                            : (item.type || '').includes('振替')
+                            : (item.type || '') === '振替＋時間休'
+                              ? ` 振替4h＋時間休${item.details?.hourlyHours ?? (item.hours ? Math.max(0, item.hours - 4) : 0)}h`
+                              : (item.type || '').includes('振替')
                               ? ` 振＋時`
                               : (item.type || '').includes('特')
                                 ? ` 特休${dur}h`
@@ -1696,7 +1705,7 @@ export const CalendarScreen: React.FC<any> = ({
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-              {['出勤', '時間休', '時間外', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇', '特休＋時間休', '出張', '休日時間外', '空欄'].map(t => (
+              {['出勤', '時間休', '時間外', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇', '特休＋時間休', '振替＋時間休', '出張', '休日時間外', '空欄'].map(t => (
                 <TouchableOpacity 
                   key={t}
                   style={[
@@ -1710,7 +1719,7 @@ export const CalendarScreen: React.FC<any> = ({
               ))}
             </View>
 
-            {(selectedType === '時間休' || selectedType === '特休' || selectedType === '特休＋時間休' || selectedType === '出張' || selectedType === '休日時間外') && (
+            {(selectedType === '時間休' || selectedType === '特休' || selectedType === '特休＋時間休' || selectedType === '振替＋時間休' || selectedType === '出張' || selectedType === '休日時間外') && (
               <View style={{ marginBottom: 20 }}>
                 <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
                 {selectedType === '特休＋時間休' ? (
@@ -1740,6 +1749,47 @@ export const CalendarScreen: React.FC<any> = ({
                       </View>
                     </View>
                     <ThemeText variant="caption" bold style={{ marginTop: 4 }}>合計時間: {(adminSpecialHours + adminHourlyHours).toFixed(2)}h</ThemeText>
+                  </View>
+                ) : selectedType === '振替＋時間休' ? (
+                  <View style={{ gap: 12 }}>
+                    <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.12)', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+                      <ThemeText variant="caption" color={COLORS.primary} bold>
+                        ※ 振替4時間 ＋ 時間休 {adminHourlyHours.toFixed(2)}時間（合計: {(4.0 + adminHourlyHours).toFixed(2)}h）
+                      </ThemeText>
+                      <ThemeText variant="caption" style={{ color: COLORS.textSecondary, fontSize: 11, marginTop: 2 }}>
+                        ※ 時間休 {adminHourlyHours.toFixed(2)}h が年休から消化されます
+                      </ThemeText>
+                    </View>
+
+                    <View>
+                      <ThemeText variant="caption" style={{ marginBottom: 6 }}>時間休の時間数を選択</ThemeText>
+                      <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+                        {[1.0, 2.0, 3.0, 3.5, 3.75].map((preset) => (
+                          <TouchableOpacity
+                            key={preset}
+                            style={[
+                              { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: COLORS.border, backgroundColor: 'rgba(255,255,255,0.05)' },
+                              adminHourlyHours === preset && { backgroundColor: COLORS.primary, borderColor: COLORS.primary }
+                            ]}
+                            onPress={() => setAdminHourlyHours(preset)}
+                          >
+                            <ThemeText variant="caption" bold={adminHourlyHours === preset} color={adminHourlyHours === preset ? 'white' : COLORS.text}>
+                              {preset}h
+                            </ThemeText>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                        <TouchableOpacity onPress={() => setAdminHourlyHours(Math.max(0.25, adminHourlyHours - 0.25))} style={styles.addStaffBtn}>
+                          <ThemeText bold>-</ThemeText>
+                        </TouchableOpacity>
+                        <ThemeText variant="h2" color={COLORS.primary}>{adminHourlyHours.toFixed(2)}h</ThemeText>
+                        <TouchableOpacity onPress={() => setAdminHourlyHours(Math.min(8.0, adminHourlyHours + 0.25))} style={styles.addStaffBtn}>
+                          <ThemeText bold>+</ThemeText>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
                   </View>
                 ) : (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
@@ -1821,7 +1871,7 @@ export const CalendarScreen: React.FC<any> = ({
               <View style={{ marginTop: 16 }}>
                 <ThemeText variant="label" style={{ marginBottom: 10 }}>変更後の種別を選択</ThemeText>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                  {['出勤', '年休', '公休', '特休', '時間休', '午前振替', '午後振替', '夏季休暇', '特休＋時間休', '出張', '休日時間外', '看護休暇'].map(t => (
+                  {['出勤', '年休', '公休', '特休', '時間休', '午前振替', '午後振替', '夏季休暇', '特休＋時間休', '振替＋時間休', '出張', '休日時間外', '看護休暇'].map(t => (
                     <TouchableOpacity 
                       key={t}
                       style={[
@@ -1836,7 +1886,7 @@ export const CalendarScreen: React.FC<any> = ({
                 </View>
 
                 {/* 時間設定 */}
-                {(newEditType === '時間休' || newEditType === '特休' || newEditType === '特休＋時間休' || newEditType === '出張' || newEditType === '休日時間外') && (
+                {(newEditType === '時間休' || newEditType === '特休' || newEditType === '特休＋時間休' || newEditType === '振替＋時間休' || newEditType === '出張' || newEditType === '休日時間外') && (
                   <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12 }}>
                     <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
                     {newEditType === '特休＋時間休' ? (
@@ -1852,6 +1902,45 @@ export const CalendarScreen: React.FC<any> = ({
                               <ThemeText bold>+</ThemeText>
                             </TouchableOpacity>
                           </View>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <ThemeText variant="caption">時間休:</ThemeText>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                            <TouchableOpacity onPress={() => setNewEditHourlyHours(Math.max(0.25, newEditHourlyHours - 0.25))} style={styles.addStaffBtn}>
+                              <ThemeText bold>-</ThemeText>
+                            </TouchableOpacity>
+                            <ThemeText bold color={COLORS.primary}>{newEditHourlyHours.toFixed(2)}h</ThemeText>
+                            <TouchableOpacity onPress={() => setNewEditHourlyHours(Math.min(8.0, newEditHourlyHours + 0.25))} style={styles.addStaffBtn}>
+                              <ThemeText bold>+</ThemeText>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </View>
+                    ) : newEditType === '振替＋時間休' ? (
+                      <View style={{ gap: 10 }}>
+                        <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.12)', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+                          <ThemeText variant="caption" color={COLORS.primary} bold>
+                            ※ 振替4時間 ＋ 時間休 {newEditHourlyHours.toFixed(2)}時間（合計: {(4.0 + newEditHourlyHours).toFixed(2)}h）
+                          </ThemeText>
+                          <ThemeText variant="caption" style={{ color: COLORS.textSecondary, fontSize: 11, marginTop: 2 }}>
+                            ※ 時間休 {newEditHourlyHours.toFixed(2)}h が年休から消化されます
+                          </ThemeText>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                          {[1.0, 2.0, 3.0, 3.5, 3.75].map((preset) => (
+                            <TouchableOpacity
+                              key={preset}
+                              style={[
+                                { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: COLORS.border, backgroundColor: 'rgba(255,255,255,0.05)' },
+                                newEditHourlyHours === preset && { backgroundColor: COLORS.primary, borderColor: COLORS.primary }
+                              ]}
+                              onPress={() => setNewEditHourlyHours(preset)}
+                            >
+                              <ThemeText variant="caption" bold={newEditHourlyHours === preset} color={newEditHourlyHours === preset ? 'white' : COLORS.text}>
+                                {preset}h
+                              </ThemeText>
+                            </TouchableOpacity>
+                          ))}
                         </View>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                           <ThemeText variant="caption">時間休:</ThemeText>

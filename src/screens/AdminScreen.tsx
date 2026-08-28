@@ -440,6 +440,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               const spHrs = req?.details?.specialHours ?? 0;
               const hrHrs = req?.details?.hourlyHours ?? 0;
               label = `特${spHrs}時${hrHrs}`;
+            } else if (type === '振替＋時間休') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              const hrHrs = req?.details?.hourlyHours ?? (req?.hours ? Math.max(0, req.hours - 4) : 0);
+              label = `振4時${hrHrs}`;
             } else if (type === '夏季休暇') {
               cellStyle = 'background-color: #fefce8; color: #ca8a04;';
               label = '夏';

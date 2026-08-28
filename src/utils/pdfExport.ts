@@ -15,7 +15,7 @@ export const exportShiftToPDF = async (staffName: string, requests: any[], curre
     return `${y}-${m}-${d}`;
   };
 
-  const leaveTypes = ['年休', '有給休暇', '時間休', '看護休暇', '振替', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '公休', '午前振替', '午後振替', '特休＋時間休'];
+  const leaveTypes = ['年休', '有給休暇', '時間休', '看護休暇', '振替', '夏季休暇', '午前休', '午後休', '特休', '休暇', '欠勤', '長期休暇', '全休', '公休', '午前振替', '午後振替', '特休＋時間休', '振替＋時間休', '1日振替', '半日振替'];
 
   let rowsHtml = '';
   for (let d = 1; d <= daysInMonth; d++) {
@@ -49,6 +49,9 @@ export const exportShiftToPDF = async (staffName: string, requests: any[], curre
        const sp = req.details?.specialHours ?? 0;
        const hr = req.details?.hourlyHours ?? 0;
        statusText = `特休${sp}h＋時間休${hr}h`;
+     } else if (req && req.type === '振替＋時間休') {
+       const hr = req.details?.hourlyHours ?? (req.hours ? Math.max(0, req.hours - 4) : 0);
+       statusText = `振替4h＋時間休${hr}h`;
      }
      let statusClass = isWork ? 'status-work' : 'status-off';
      if (statusText.includes('振替') || statusText.includes('時間休')) statusClass = 'status-transfer';

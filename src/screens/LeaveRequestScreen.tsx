@@ -15,7 +15,7 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
   const [comment, setComment] = useState('');
 
   const types = ['年休', '時間休', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張', '休日時間外'];
-  const needsHours = ['時間休', '特休', '特休＋時間休', '出張', '休日時間外'].includes(type);
+  const needsHours = ['時間休', '特休', '特休＋時間休', '振替＋時間休', '出張', '休日時間外'].includes(type);
 
   const adjustHours = (delta: number) => {
     setHours(prev => Math.max(0.25, Math.min(24, prev + delta)));
@@ -37,10 +37,18 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
       date: startDate,
       endDate: endDate,
       type: type,
-      hours: type === '特休＋時間休' ? (specialHours + hourlyHours) : (needsHours ? hours : null),
+      hours: type === '特休＋時間休'
+        ? (specialHours + hourlyHours)
+        : type === '振替＋時間休'
+          ? (4.0 + hourlyHours)
+          : (needsHours ? hours : null),
       comment: comment,
       status: 'pending',
-      details: type === '特休＋時間休' ? { specialHours, hourlyHours } : null,
+      details: type === '特休＋時間休'
+        ? { specialHours, hourlyHours }
+        : type === '振替＋時間休'
+          ? { furikaeHours: 4.0, hourlyHours }
+          : null,
       createdAt: new Date().toISOString()
     };
 
@@ -103,6 +111,31 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
                   </View>
                 </View>
                 <ThemeText variant="caption" bold style={{ marginTop: 4 }}>合計時間: {(specialHours + hourlyHours).toFixed(2)} h</ThemeText>
+              </View>
+            ) : type === '振替＋時間休' ? (
+              <View style={{ gap: 12 }}>
+                <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.12)', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+                  <ThemeText variant="caption" color={COLORS.primary} bold>
+                    ※ 振替4時間 ＋ 時間休 {hourlyHours.toFixed(2)}時間（合計: {(4.0 + hourlyHours).toFixed(2)}h）
+                  </ThemeText>
+                  <ThemeText variant="caption" style={{ color: COLORS.textSecondary, fontSize: 11, marginTop: 2 }}>
+                    ※ 時間休 {hourlyHours.toFixed(2)}h が年休から消化されます
+                  </ThemeText>
+                </View>
+                <View>
+                  <ThemeText variant="caption" style={{ marginBottom: 6 }}>時間休の時間数</ThemeText>
+                  <View style={styles.hourControl}>
+                    <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHourlyHours(-0.25)}>
+                      <ThemeText color="white" bold style={{ fontSize: 20 }}>-</ThemeText>
+                    </TouchableOpacity>
+                    <View style={styles.hourDisplay}>
+                      <ThemeText bold style={{ fontSize: 18 }}>{hourlyHours.toFixed(2)} h</ThemeText>
+                    </View>
+                    <TouchableOpacity style={styles.stepBtn} onPress={() => adjustHourlyHours(0.25)}>
+                      <ThemeText color="white" bold style={{ fontSize: 20 }}>+</ThemeText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
             ) : (
               <View style={styles.hourControl}>
