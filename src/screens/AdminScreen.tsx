@@ -593,18 +593,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               <ThemeText bold style={{ color: COLORS.textSecondary, marginBottom: 12, marginTop: 12 }}>📋 レポーティング & ツール</ThemeText>
               
               <ThemeCard style={styles.itemRow}>
-                <View style={[styles.iconCircle, { backgroundColor: 'rgba(52, 211, 153, 0.1)' }]}><BarChart2 size={20} color="#34d399" /></View>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <ThemeText bold>年休取得率・消化集計一覧</ThemeText>
-                  <ThemeText variant="caption" color={COLORS.textSecondary}>全職員の付与年休に対する取得率・消化日数・残年休の一覧</ThemeText>
-                </View>
-                <TouchableOpacity style={[styles.inlineBtn, { backgroundColor: 'rgba(52, 211, 153, 0.1)' }]} onPress={() => setShowLeaveStatsModal(true)}>
-                  <ThemeText bold color="#34d399" style={{ marginRight: 4 }}>集計表を開く</ThemeText>
-                  <ChevronRight size={16} color="#34d399" />
-                </TouchableOpacity>
-              </ThemeCard>
-
-              <ThemeCard style={styles.itemRow}>
                 <View style={[styles.iconCircle, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}><UserPlus size={20} color="#38bdf8" /></View>
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <ThemeText bold>スタッフ管理・アカウント設定</ThemeText>
