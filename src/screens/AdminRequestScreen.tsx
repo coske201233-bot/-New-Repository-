@@ -192,6 +192,10 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
                     <ThemeText variant="caption" bold style={{ color: COLORS.accent, marginLeft: 8 }}>
                       振替:{item.details?.furikaeHours ?? 4}h + 時間休:{item.details?.hourlyHours ?? (item.hours ? Math.max(0, item.hours - 4) : 0)}h (計:{item.hours}h)
                     </ThemeText>
+                  ) : item.type === '振替4' ? (
+                    <ThemeText variant="caption" bold style={{ color: COLORS.accent, marginLeft: 8 }}>
+                      振替:4h (実働3.75h)
+                    </ThemeText>
                   ) : (
                     (item.details?.duration || item.hours) ? (
                       <ThemeText variant="caption" bold style={{ color: COLORS.accent, marginLeft: 8 }}>

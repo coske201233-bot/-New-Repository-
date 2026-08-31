@@ -318,7 +318,7 @@ export const CalendarScreen: React.FC<any> = ({
         const isOffType = (t: string) => {
           if (!t) return false;
           // [V54.6] 研修も「出勤人数（分母）」に含めない休みとして扱う
-          if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '振替＋時間休', '振替4'].includes(t)) return true;
+          if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '1日振替'].includes(t)) return true;
           return false;
         };
 
@@ -449,8 +449,8 @@ export const CalendarScreen: React.FC<any> = ({
                    item.details?.duration ?? 
                    item.details?.hours ?? 0;
     
-    // 振替タイプ（半日振替を除く）であれば、無条件で1日休み（最大制限値）とみなす
-    if (isTransferType && item.type !== '半日振替') {
+    // 振替タイプ（半日振替・振替4・振替＋時間休を除く）であれば、無条件で1日休み（最大制限値）とみなす
+    if (isTransferType && item.type !== '半日振替' && item.type !== '振替4' && item.type !== '振4' && item.type !== '振替＋時間休') {
       duration = limit;
     }
 
@@ -1207,8 +1207,8 @@ export const CalendarScreen: React.FC<any> = ({
           const limit = isAs ? 7.5 : 7.75;
 
           let duration = item.hours ?? item.partialLeaveHours ?? item.leaveHours ?? item.details?.partialLeaveHours ?? item.details?.duration ?? item.details?.hours ?? 0;
-          // 振替タイプ（半日振替・振替4を除く）であれば、無条件で1日休み（最大制限値）とみなす
-          if (isTransferType && item.type !== '半日振替' && item.type !== '振替4' && item.type !== '振4') {
+          // 振替タイプ（半日振替・振替4・振替＋時間休を除く）であれば、無条件で1日休み（最大制限値）とみなす
+          if (isTransferType && item.type !== '半日振替' && item.type !== '振替4' && item.type !== '振4' && item.type !== '振替＋時間休') {
             duration = limit;
           }
 
@@ -1489,11 +1489,11 @@ export const CalendarScreen: React.FC<any> = ({
                         dur = 0;
                       }
 
-                      if (dur > 0) {
+                      if (dur > 0 || (item.type || '') === '振替4' || (item.type || '') === '振4') {
                         const text = (item.type || '') === '半日振替'
                           ? ` 半日振替`
                           : ((item.type || '') === '振替4' || (item.type || '') === '振4')
-                            ? ` 振4`
+                            ? ` 振4 (3.75h)`
                             : (item.type || '') === '特休＋時間休'
                               ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
                               : (item.type || '') === '振替＋時間休'
