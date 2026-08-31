@@ -8,7 +8,7 @@ import {
   Check, X, Clock, MapPin, Briefcase, Settings, Shield, Printer, Plus, Pencil, LogOut,
   UserPlus, Key, Trash2, Eye, EyeOff, Lock, AlertTriangle, UserX, UserCheck, ShieldAlert
 } from 'lucide-react-native';
-import { getMonthInfo, getDayType, isHoliday, getDateStr } from '../utils/dateUtils';
+import { getMonthInfo, getDayType, isHoliday, getDateStr, normalizeDateStr } from '../utils/dateUtils';
 import { normalizeName } from '../utils/staffUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
@@ -712,7 +712,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     allData.forEach(r => {
       if (!r || !r.date || r.status === 'deleted') return;
       
-      const dateKey = String(r.date).substring(0, 10);
+      const dateKey = normalizeDateStr(r.date);
       if (!map.has(dateKey)) map.set(dateKey, new Map<string, any>());
       const dayMap = map.get(dateKey)!;
       
@@ -951,29 +951,42 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       let rowsHtml = '';
       monthInfo.forEach((d: MonthDay) => {
         if (d.empty) return;
-        const dayMap = requestMap.get(d.dateStr);
+        const dateKey = normalizeDateStr(d.dateStr);
+        const dayMap = requestMap.get(dateKey);
         
         const rId = sId ? dayMap?.get(sId) : null;
         const rName = sName ? dayMap?.get(sName) : null;
         const rEmail = emailPrefix ? dayMap?.get(emailPrefix) : null;
         const potentialReqs = [rId, rName, rEmail].filter(Boolean);
-        const r = potentialReqs.find(rec => !['出勤', '日勤'].includes(rec.type)) || potentialReqs[0];
+        const r = potentialReqs[0] || null;
         
         let type = '';
-        if (r) {
-          type = r.type;
+        const dDate = new Date(d.dateStr.replace(/-/g, '/'));
+        const dtype = getDayType(dDate);
+        const isNoHoliday = (dtype !== 'weekday') && (selectedStaff.monthlyNoHoliday?.[currentMonthKey] ?? selectedStaff.noHoliday);
+
+        if (r && r.type) {
+          type = String(r.type).trim();
         } else {
-          const dDate = new Date(d.dateStr);
-          const dtype = getDayType(dDate);
-          const isNoHoliday = (dtype !== 'weekday') && (selectedStaff.monthlyNoHoliday?.[currentMonthKey] ?? selectedStaff.noHoliday);
-          type = (dtype === 'weekday') ? '出勤' : '公休';
+          type = (dtype === 'weekday' || isNoHoliday) ? '出勤' : '公休';
         }
 
         const h = r ? getReqHours(r) : 0;
-        const shiftDisplay = (HOUR_SELECTOR_TYPES.includes(type)) ? `${type}(${h}h)` : ((type === '日勤' || type === '出勤') ? '出勤' : type);
+        let shiftDisplay = type;
+        if (type === '出勤' || type === '日勤') {
+          shiftDisplay = '出勤';
+        } else if (type === '特休＋時間休') {
+          const spHrs = r?.details?.specialHours ?? 0;
+          const hrHrs = r?.details?.hourlyHours ?? 0;
+          shiftDisplay = `特休${spHrs}h＋時間休${hrHrs}h`;
+        } else if (type === '振替＋時間休') {
+          const hrHrs = r?.details?.hourlyHours ?? (r?.hours ? Math.max(0, r.hours - 4) : 0);
+          shiftDisplay = `振替4h＋時間休${hrHrs}h`;
+        } else if (HOUR_SELECTOR_TYPES.includes(type) && h > 0) {
+          shiftDisplay = `${type}(${h}h)`;
+        }
         
-        const dDate = new Date(d.dateStr);
-        const dayIdx = dDate.getDay();
+        const dayIdx = isNaN(dDate.getTime()) ? 0 : dDate.getDay();
         const style = (d.isH || dayIdx === 0) ? 'color: #ef4444; background-color: #fef2f2;' : (dayIdx === 6 ? 'color: #3b82f6; background-color: #eff6ff;' : '');
         
         rowsHtml += `

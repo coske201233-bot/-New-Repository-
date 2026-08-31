@@ -65,13 +65,37 @@ export const getMonthDayCounts = (year: number, month: number) => {
   return counts;
 };
 /**
+ * 日付文字列やDateオブジェクトを「YYYY-MM-DD」形式に正規化します。
+ * スラッシュ区切り (YYYY/MM/DD)、1桁月日 (YYYY-M-D)、ISO形式 (YYYY-MM-DDTHH:mm:ss...) を統一。
+ */
+export const normalizeDateStr = (dateInput?: string | Date | null): string => {
+  if (!dateInput) return '';
+  if (dateInput instanceof Date) {
+    if (isNaN(dateInput.getTime())) return '';
+    const y = dateInput.getFullYear();
+    const m = String(dateInput.getMonth() + 1).padStart(2, '0');
+    const d = String(dateInput.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(dateInput).trim();
+  if (!str) return '';
+  const datePart = str.split('T')[0].split(' ')[0];
+  const normalizedSep = datePart.replace(/\//g, '-');
+  const parts = normalizedSep.split('-');
+  if (parts.length === 3) {
+    const y = parts[0].padStart(4, '0');
+    const m = parts[1].padStart(2, '0');
+    const d = parts[2].padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return normalizedSep;
+};
+
+/**
  * 日付を「YYYY-MM-DD」形式の文字列（タイムゾーン不問）に変換します
  */
 export const getDateStr = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return normalizeDateStr(date);
 };
 
 /**

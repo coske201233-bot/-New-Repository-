@@ -8,7 +8,7 @@ import {
   QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle, RefreshCw, History,
   BarChart2, TrendingUp, ChevronDown, ChevronUp, Award
 } from 'lucide-react-native';
-import { getMonthInfo, normalizeName, formatDate, getDayType } from '../utils/dateUtils';
+import { getMonthInfo, normalizeName, formatDate, getDayType, normalizeDateStr } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
 import { recordAuditLog } from '../utils/auditLogger';
@@ -365,7 +365,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       let headerHtml = '<th style="width: 80px;">氏名</th><th style="width: 40px;">職種</th>';
       monthInfoArr.forEach((d: any) => {
         if (!d.empty) {
-          const dDate = new Date(d.dateStr);
+          const dDate = new Date(d.dateStr.replace(/-/g, '/'));
           const dayIdx = isNaN(dDate.getTime()) ? 0 : dDate.getDay();
           const style = (d.isH || dayIdx === 0) ? 'color: #ef4444; background-color: #fef2f2;' : (dayIdx === 6 ? 'color: #3b82f6; background-color: #eff6ff;' : '');
           headerHtml += `<th style="${style}">${d.day}<br/><small>${dayNames[dayIdx]}</small></th>`;
@@ -382,39 +382,82 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         if ((s.status === '長期休暇' && isLeavePeriod) || s.status === '入職前') return false;
         return true;
       });
+
+      // requests と shifts を統合した全データプール
+      const allDataPool = [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
+
       listToPrint.forEach(s => {
         let row = `<tr><td style="text-align: left; padding-left: 5px; font-weight: bold;">${s.name}</td><td>${s.jobType || s.profession || ''}</td>`;
         monthInfoArr.forEach((d: any) => {
           if (!d.empty) {
-            const staffId = s.id;
+            const staffId = String(s.id || '').trim();
             const staffNameNormalized = normalizeName(s.name);
-            
-            // 照合ロジックを強化 (V74.3)
-            const req = requests.find((r: any) => {
-              if (!r || r.date !== d.dateStr || r.status === 'deleted') return false;
-              
-              // 1. UUIDで直接照合
-              const rStaffId = r.staff_id || r.staffId || r.user_id || r.userId;
-              if (rStaffId && rStaffId === staffId) return true;
-              
-              // 2. ID文字列からの抽出照合
-              const extractedId = r.id?.includes('-') ? r.id.split('-').slice(1, 6).join('-') : null;
-              if (extractedId && extractedId === staffId) return true;
-              
-              // 3. 名前による最終照合 (IDが取れない場合の救済)
+            const targetDateStr = normalizeDateStr(d.dateStr);
+
+            // 対象スタッフ・対象日のレコードを抽出（削除・却下は除外）
+            const matchedRecords = allDataPool.filter((r: any) => {
+              if (!r || !r.date) return false;
+              if (r.status === 'deleted' || r.status === '削除' || r.status === 'rejected' || r.status === '却下') return false;
+              if (normalizeDateStr(r.date) !== targetDateStr) return false;
+
+              // 1. UUID / staff_id / user_id による直接照合
+              const rStaffId = String(r.staff_id || r.staffId || r.user_id || r.userId || '').trim();
+              if (staffId && rStaffId && rStaffId === staffId) return true;
+
+              // 2. ID文字列からのUUID抽出照合 (例: m-UUID-DATE-...)
+              const extractedId = r.id && typeof r.id === 'string' && r.id.includes('-') 
+                ? (r.id.split('-').length >= 6 ? r.id.split('-').slice(1, 6).join('-') : null) 
+                : null;
+              if (staffId && extractedId && extractedId === staffId) return true;
+
+              // 3. 名前による照合
               const rName = normalizeName(r.staff_name || r.staffName || '');
               if (rName && rName === staffNameNormalized) return true;
-              
+
               return false;
             });
+
+            // 優先度判定ヘルパー
+            const isManualEntry = (rec: any) => {
+              if (!rec) return false;
+              if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
+              if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
+              const idStr = String(rec.id || '');
+              return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
+            };
+
+            const isApprovedEntry = (rec: any) => {
+              if (!rec) return false;
+              return rec.status === 'approved' || rec.status === '承認' || isManualEntry(rec);
+            };
+
+            const getRecTime = (rec: any) => {
+              const t = rec.updatedAt || (rec.details && rec.details.updatedAt) || rec.updated_at || rec.createdAt || rec.created_at || 0;
+              return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
+            };
+
+            matchedRecords.sort((a, b) => {
+              const aMan = isManualEntry(a);
+              const bMan = isManualEntry(b);
+              if (aMan !== bMan) return aMan ? -1 : 1;
+
+              const aApp = isApprovedEntry(a);
+              const bApp = isApprovedEntry(b);
+              if (aApp !== bApp) return aApp ? -1 : 1;
+
+              return getRecTime(b) - getRecTime(a);
+            });
+
+            const req = matchedRecords[0] || null;
+
             let type = '';
-            if (req) {
-              type = req.type;
+            const dDate = new Date(d.dateStr.replace(/-/g, '/'));
+            const dtype = getDayType(dDate);
+
+            if (req && req.type) {
+              type = String(req.type).trim();
             } else {
-              const dDate = new Date(d.dateStr);
-              const dtype = getDayType(dDate);
-              // 平日はデフォルト「出勤」、土日祝はデフォルト「公休」
-              // 自動生成などで「出勤」データがある場合のみ、reqによって上書きされる
+              // データ未設定の日：平日はデフォルト「出勤」、土日祝はデフォルト「公休」
               type = (dtype === 'weekday') ? '出勤' : '公休';
             }
 
@@ -428,7 +471,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             } else if (type === '公休') {
               cellStyle = 'background-color: #fef2f2; color: #dc2626;';
               label = '公';
-            } else if (type === '年休' || type === '有給休暇') {
+            } else if (type === '年休' || type === '有給休暇' || type === '年給' || type === '有給') {
               cellStyle = 'background-color: #f0fdf4; color: #16a34a; font-weight: bold;';
               label = '年';
             } else if (type === '特休') {
@@ -451,6 +494,24 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               cellStyle = 'background-color: #f0fdf4; color: #16a34a;';
               const hrs = req?.hours ? `${req.hours}` : '';
               label = `時${hrs}`;
+            } else if (type === '午前休' || type === '前休') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              label = '前休';
+            } else if (type === '午後休' || type === '後休') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              label = '後休';
+            } else if (type === '1日振替' || type === '半日振替' || type === '振替' || type === '振休') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              label = '振';
+            } else if (type === '看護休暇') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              label = '看';
+            } else if (type === '研修') {
+              cellStyle = 'background-color: #f5f3ff; color: #7c3aed; font-weight: bold;';
+              label = '研';
+            } else if (type === '出張') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              label = '張';
             } else if (type === '欠勤') {
               cellStyle = 'background-color: #fff7ed; color: #ea580c;';
               label = '欠';
@@ -471,9 +532,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           <span><span style="display:inline-block;width:14px;height:14px;background:#ffffff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>出 = 出勤</span>
           <span><span style="display:inline-block;width:14px;height:14px;background:#fef2f2;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>公 = 公休</span>
           <span><span style="display:inline-block;width:14px;height:14px;background:#f0fdf4;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>年 = 年休</span>
-          <span><span style="display:inline-block;width:14px;height:14px;background:#eff6ff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>特 = 特休(時間数)</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#eff6ff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>特 = 特休</span>
           <span><span style="display:inline-block;width:14px;height:14px;background:#fefce8;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>夏 = 夏季休暇</span>
-          <span><span style="display:inline-block;width:14px;height:14px;background:#f0fdf4;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>時 = 時間休(時間数)</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#f0fdf4;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>時 = 時間休</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#eff6ff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>振 = 振替</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#eff6ff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>前休/後休 = 午前休/午後休</span>
+          <span><span style="display:inline-block;width:14px;height:14px;background:#eff6ff;border:1px solid #94a3b8;vertical-align:middle;margin-right:3px;"></span>特○時○ / 振4時○ = 複合休</span>
         </div>
       `;
 
