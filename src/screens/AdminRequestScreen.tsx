@@ -181,8 +181,8 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
 
               <View style={styles.cardBody}>
                 <View style={styles.typeRow}>
-                  <View style={[styles.typeBadge, { backgroundColor: item.type === '時間外出勤' ? 'rgba(249, 115, 22, 0.1)' : 'rgba(56, 189, 248, 0.1)' }]}>
-                    <ThemeText variant="caption" bold color={item.type === '時間外出勤' ? '#f97316' : '#38bdf8'}>{item.type}</ThemeText>
+                  <View style={[styles.typeBadge, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
+                    <ThemeText variant="caption" bold color="#38bdf8">{item.type}</ThemeText>
                   </View>
                   {item.type === '特休＋時間休' ? (
                     <ThemeText variant="caption" bold style={{ color: COLORS.accent, marginLeft: 8 }}>

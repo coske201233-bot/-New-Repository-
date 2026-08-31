@@ -620,7 +620,7 @@ export const CalendarScreen: React.FC<any> = ({
             ? (4.0 + adminHourlyHours)
             : selectedType === '振替4'
               ? 4.0
-              : (['時間休', '時間給', '特休', '時間外', '時間外出勤', '出張'].includes(selectedType))
+              : (['時間休', '時間給', '特休', '出張'].includes(selectedType))
                 ? hourlyDuration
                 : null,
         details: selectedType === '特休＋時間休'
@@ -1045,7 +1045,7 @@ export const CalendarScreen: React.FC<any> = ({
       } else if (newType === '振替4') {
         calcHours = 4.0;
         details = { note: '振替4時間', furikaeHours: 4.0, isManual: true };
-      } else if (['時間休', '時間給', '特休', '時間外', '時間外出勤', '出張'].includes(newType)) {
+      } else if (['時間休', '時間給', '特休', '出張'].includes(newType)) {
         calcHours = newEditHours;
         details = { note: '管理画面よりクイック変更', duration: newEditHours, isManual: true };
       }
@@ -1847,7 +1847,7 @@ export const CalendarScreen: React.FC<any> = ({
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-              {['出勤', '時間休', '時間外', '公休', '特休', '年休', '振替4', '特休＋時間休', '振替＋時間休', '出張', '空欄'].map(t => (
+              {['出勤', '時間休', '公休', '特休', '年休', '振替4', '特休＋時間休', '振替＋時間休', '出張', '空欄'].map(t => (
                 <TouchableOpacity 
                   key={t}
                   style={[

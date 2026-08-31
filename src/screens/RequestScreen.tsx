@@ -287,8 +287,8 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
               .map((item) => (
               <ThemeCard key={item.id} style={styles.requestCard}>
                 <View style={styles.cardHeader}>
-                  <View style={[styles.typeBadge, { backgroundColor: item.type === '時間外出勤' ? 'rgba(249, 115, 22, 0.1)' : 'rgba(56, 189, 248, 0.1)' }]}>
-                    <ThemeText variant="caption" bold color={item.type === '時間外出勤' ? '#f97316' : '#38bdf8'}>{item.type}</ThemeText>
+                  <View style={[styles.typeBadge, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
+                    <ThemeText variant="caption" bold color="#38bdf8">{item.type}</ThemeText>
                   </View>
                   <View style={[
                     styles.statusBadge, 
