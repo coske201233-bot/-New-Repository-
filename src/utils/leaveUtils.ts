@@ -523,7 +523,7 @@ export const calculateAnnualLeaveRate = (
       const h = Number(r.details?.hourlyHours ?? r.hourlyHours ?? (type === '振替＋時間休' && r.hours ? Math.max(0, r.hours - 4) : 0));
       usedHourlyHours += (isNaN(h) ? 0 : h);
     }
-    // ※特休、公休、振替休、看護休暇、夏季休暇、午前休、午後休等は除外
+    // ※特休、公休、振替休、振替4、夏季休暇、午前休、午後休等は除外
   });
 
   const usedHourlyDays = usedHourlyHours / hoursPerDay;

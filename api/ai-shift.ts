@@ -17,7 +17,7 @@ const normalize = (name: string) => {
 };
 
 const isWorking = (t: string) => {
-  const workingTerms = ['出勤', '日勤', '勤務', '通常', '公休', '午前休', '午後休', '午前振替', '午後振替', '時間休', '特休', '看護休暇'];
+  const workingTerms = ['出勤', '日勤', '勤務', '通常', '公休', '午前休', '午後休', '振替4', '時間休', '特休'];
   return workingTerms.some(term => t.includes(term));
 };
 

@@ -107,6 +107,9 @@ export const exportShiftToPDF = async (
         const hr = req.details?.hourlyHours ?? (req.hours ? Math.max(0, req.hours - 4) : 0);
         statusText = `振替4h＋時間休${hr}h`;
         statusClass = 'status-transfer';
+      } else if (rawType === '振替4' || rawType === '振4') {
+        statusText = '振4';
+        statusClass = 'status-transfer';
       } else if (rawType === '特休') {
         const hrs = req.hours ? `${req.hours}h` : '';
         statusText = `特休${hrs}`;
@@ -124,9 +127,6 @@ export const exportShiftToPDF = async (
       } else if (rawType === '1日振替' || rawType === '半日振替' || rawType === '振替' || rawType === '振休') {
         statusText = rawType;
         statusClass = 'status-transfer';
-      } else if (rawType === '看護休暇') {
-        statusText = '看護休暇';
-        statusClass = 'status-special';
       } else if (rawType === '研修') {
         statusText = '研修';
         statusClass = 'status-special';

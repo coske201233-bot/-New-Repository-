@@ -659,8 +659,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const handlePermanentDeleteStaff = () => handleDeleteStaff(true);
 
   // Constants
-  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '特休', '年休', '特休＋時間休', '出張', '休日時間外', '空欄'];
-  const HOUR_SELECTOR_TYPES = ['時間休', '特休', '特休＋時間休', '振替＋時間休', '出張', '休日時間外'];
+  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '振替4', '特休', '年休', '特休＋時間休', '出張', '空欄'];
+  const HOUR_SELECTOR_TYPES = ['時間休', '特休', '特休＋時間休', '振替＋時間休', '出張'];
 
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
   
@@ -691,6 +691,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     // Default values by type (fallback)
     if (r.type === '1日振替') return 7.75;
     if (r.type === '半日振替') return 3.75;
+    if (r.type === '振替4') return 4.0;
     if (isFullDayLeaveType) return 7.75;
     if (rType === '午前休') return 4.0;
     if (rType === '午後休') return 3.75;
@@ -814,12 +815,16 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           ? (specialHours + hourlyHours)
           : type === '振替＋時間休'
             ? (4.0 + hourlyHours)
-            : (HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : null),
+            : type === '振替4'
+              ? 4.0
+              : (HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : null),
         details: type === '特休＋時間休'
           ? { note: '管理画面より更新', specialHours, hourlyHours, isManual: true }
           : type === '振替＋時間休'
             ? { note: '管理画面より更新', furikaeHours: 4.0, hourlyHours, isManual: true }
-            : { note: '管理画面より更新', isManual: true },
+            : type === '振替4'
+              ? { note: '振替4時間', furikaeHours: 4.0, isManual: true }
+              : { note: '管理画面より更新', isManual: true },
         status: 'approved',
         createdAt: now,
         updatedAt: now, 
@@ -1081,6 +1086,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                   displayLabel = '振(全)'; labelColor = '#ef4444';
                 } else if (rType === '半日振替') {
                   displayLabel = '振(半)'; labelColor = '#ef4444';
+                } else if (rType === '振替4' || rType === '振4') {
+                  displayLabel = '振4'; labelColor = '#ef4444';
                 } else if (rType === '特休＋時間休') {
                   const sp = req.details?.specialHours ?? 0;
                   const hr = req.details?.hourlyHours ?? 0;
@@ -1090,9 +1097,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                 } else if (rType === '振替＋時間休') {
                   const hr = req.details?.hourlyHours ?? (req.hours ? Math.max(0, req.hours - 4) : 0);
                   displayLabel = hr > 0 ? `振+時${hr}` : '振＋時'; labelColor = '#ef4444';
-                } else if (rType === '休日時間外') {
-                  displayLabel = `休外(${h}h)`; labelColor = '#38bdf8';
-                } else if (['時間休', '時間給', '特休', '午前休', '午後休', '看護休暇'].includes(rType)) {
+                } else if (['時間休', '時間給', '特休', '午前休', '午後休'].includes(rType)) {
                   displayLabel = `${rType.charAt(0)}(${h}h)`; labelColor = '#ef4444';
                 } else {
                   displayLabel = rType.slice(0, 2);
@@ -1196,7 +1201,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           }
 
           // 休暇時間としてカウントする種別を限定
-          const holidayTypes = ['年休', '有給休暇', '夏季休暇', '特休', '時間休', '時間給', '午前休', '午後休', '看護休暇', '年給', '有給', '特休＋時間休'];
+          const holidayTypes = ['年休', '有給休暇', '夏季休暇', '特休', '時間休', '時間給', '午前休', '午後休', '年給', '有給', '特休＋時間休'];
           if (holidayTypes.includes(rType)) {
             leaveHours += h;
           }

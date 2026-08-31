@@ -139,6 +139,8 @@ export const getNormalizedShiftMatrix = (
       } else if (type === '振替＋時間休') {
         const hr = req?.details?.hourlyHours ?? (req?.hours ? Math.max(0, req.hours - 4) : 0);
         label = `振4時${hr}`;
+      } else if (type === '振替4' || type === '振4') {
+        label = '振4';
       } else if (type === '夏季休暇') {
         label = '夏';
       } else if (type === '時間休' || type === '時間給') {
@@ -149,8 +151,6 @@ export const getNormalizedShiftMatrix = (
         label = '後休';
       } else if (type === '1日振替' || type === '半日振替' || type === '振替' || type === '振休') {
         label = '振';
-      } else if (type === '看護休暇') {
-        label = '看';
       } else if (type === '研修') {
         label = '研';
       } else if (type === '出張') {

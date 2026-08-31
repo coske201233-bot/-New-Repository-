@@ -201,7 +201,7 @@ export const CalendarScreen: React.FC<any> = ({
         return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
       };
 
-      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修', '出張', '振替＋時間休', '全休', '年給', '有給', '1日振替', '半日振替', '午前休', '午後休'].includes(t);
+      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '出張', '振替＋時間休', '振替4', '全休', '年給', '有給', '1日振替', '半日振替', '午前休', '午後休'].includes(t);
 
       const getTime = (i: any) => {
         const t = i.updatedAt || i.updated_at || i.createdAt || i.created_at || 0;
@@ -318,7 +318,7 @@ export const CalendarScreen: React.FC<any> = ({
         const isOffType = (t: string) => {
           if (!t) return false;
           // [V54.6] 研修も「出勤人数（分母）」に含めない休みとして扱う
-          if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '看護休暇', '研修', '振替＋時間休'].includes(t)) return true;
+          if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '振替＋時間休', '振替4'].includes(t)) return true;
           return false;
         };
 
@@ -336,6 +336,7 @@ export const CalendarScreen: React.FC<any> = ({
 
           const rType = (r.type || '').trim();
           if (rType === '振替＋時間休' || rType === '1日振替') return isAssistant ? 7.5 : 7.75;
+          if (rType === '振替4') return 4.0;
           const isFullDayLeaveType = ['公休', '年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給', '1日振替', '出張', '振替＋時間休'].includes(rType);
           
           const h = r.hours ?? r.partialLeaveHours ?? r.leaveHours ?? r.details?.partialLeaveHours ?? r.details?.duration ?? r.details?.hours;
@@ -615,14 +616,18 @@ export const CalendarScreen: React.FC<any> = ({
           ? (adminSpecialHours + adminHourlyHours)
           : selectedType === '振替＋時間休'
             ? (4.0 + adminHourlyHours)
-            : (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤', '出張', '休日時間外'].includes(selectedType))
-              ? hourlyDuration
-              : null,
+            : selectedType === '振替4'
+              ? 4.0
+              : (['時間休', '時間給', '特休', '時間外', '時間外出勤', '出張'].includes(selectedType))
+                ? hourlyDuration
+                : null,
         details: selectedType === '特休＋時間休'
           ? { note: '手動割当', specialHours: adminSpecialHours, hourlyHours: adminHourlyHours, isManual: true }
           : selectedType === '振替＋時間休'
             ? { note: '手動割当', furikaeHours: 4.0, hourlyHours: adminHourlyHours, isManual: true }
-            : { note: '手動割当', isManual: true },
+            : selectedType === '振替4'
+              ? { note: '振替4時間', furikaeHours: 4.0, isManual: true }
+              : { note: '手動割当', isManual: true },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(), // [V61.0] 優先度判定のためにupdatedAtを付与
       };
@@ -908,7 +913,10 @@ export const CalendarScreen: React.FC<any> = ({
       } else if (newType === '振替＋時間休') {
         calcHours = 4.0 + newEditHourlyHours;
         details = { note: '管理画面よりクイック変更', furikaeHours: 4.0, hourlyHours: newEditHourlyHours, isManual: true };
-      } else if (['時間休', '時間給', '特休', '看護休暇', '時間外', '時間外出勤', '出張', '休日時間外'].includes(newType)) {
+      } else if (newType === '振替4') {
+        calcHours = 4.0;
+        details = { note: '振替4時間', furikaeHours: 4.0, isManual: true };
+      } else if (['時間休', '時間給', '特休', '時間外', '時間外出勤', '出張'].includes(newType)) {
         calcHours = newEditHours;
         details = { note: '管理画面よりクイック変更', duration: newEditHours, isManual: true };
       }
@@ -1150,10 +1158,11 @@ export const CalendarScreen: React.FC<any> = ({
           let label = '';
           if (isException || type === '振替＋時間休') {
             label = ' 振＋時';
+          } else if (type === '振替4' || type === '振4') {
+            label = ' 振4';
           } else {
             if (type === '時間休' || type === '時間給') label = `(${duration}h)`;
             else if (type === '出張') label = `出(${duration}h)`;
-            else if (type === '休日時間外') label = `休外(${duration}h)`;
             else if (type === '特休＋時間休') {
               const sp = item.details?.specialHours ?? 0;
               const hr = item.details?.hourlyHours ?? 0;
@@ -1198,8 +1207,8 @@ export const CalendarScreen: React.FC<any> = ({
           const limit = isAs ? 7.5 : 7.75;
 
           let duration = item.hours ?? item.partialLeaveHours ?? item.leaveHours ?? item.details?.partialLeaveHours ?? item.details?.duration ?? item.details?.hours ?? 0;
-          // 振替タイプ（半日振替を除く）であれば、無条件で1日休み（最大制限値）とみなす
-          if (isTransferType && item.type !== '半日振替') {
+          // 振替タイプ（半日振替・振替4を除く）であれば、無条件で1日休み（最大制限値）とみなす
+          if (isTransferType && item.type !== '半日振替' && item.type !== '振替4' && item.type !== '振4') {
             duration = limit;
           }
 
@@ -1483,18 +1492,18 @@ export const CalendarScreen: React.FC<any> = ({
                       if (dur > 0) {
                         const text = (item.type || '') === '半日振替'
                           ? ` 半日振替`
-                          : (item.type || '') === '特休＋時間休'
-                            ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
-                            : (item.type || '') === '振替＋時間休'
-                              ? ` 振替4h＋時間休${item.details?.hourlyHours ?? (item.hours ? Math.max(0, item.hours - 4) : 0)}h`
-                              : (item.type || '').includes('振替')
-                              ? ` 振＋時`
-                              : (item.type || '').includes('特')
-                                ? ` 特休${dur}h`
-                                : (item.type || '') === '出張'
-                                  ? ` 出張${dur}h`
-                                  : (item.type || '') === '休日時間外'
-                                    ? ` 休日時間外${dur}h`
+                          : ((item.type || '') === '振替4' || (item.type || '') === '振4')
+                            ? ` 振4`
+                            : (item.type || '') === '特休＋時間休'
+                              ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
+                              : (item.type || '') === '振替＋時間休'
+                                ? ` 振替4h＋時間休${item.details?.hourlyHours ?? (item.hours ? Math.max(0, item.hours - 4) : 0)}h`
+                                : (item.type || '').includes('振替')
+                                ? ` 振＋時`
+                                : (item.type || '').includes('特')
+                                  ? ` 特休${dur}h`
+                                  : (item.type || '') === '出張'
+                                    ? ` 出張${dur}h`
                                     : ` 時間休${dur}h`;
                         return (
                           <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
@@ -1574,6 +1583,10 @@ export const CalendarScreen: React.FC<any> = ({
                      {(isException || item.type === '振替＋時間休') ? (
                        <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
                          {' 振＋時'}
+                       </ThemeText>
+                     ) : (item.type === '振替4' || item.type === '振4') ? (
+                       <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
+                         {' 振4'}
                        </ThemeText>
                      ) : (
                       <ThemeText 
@@ -1705,7 +1718,7 @@ export const CalendarScreen: React.FC<any> = ({
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-              {['出勤', '時間休', '時間外', '午前振替', '午後振替', '公休', '特休', '年休', '看護休暇', '特休＋時間休', '振替＋時間休', '出張', '休日時間外', '空欄'].map(t => (
+              {['出勤', '時間休', '時間外', '公休', '特休', '年休', '振替4', '特休＋時間休', '振替＋時間休', '出張', '空欄'].map(t => (
                 <TouchableOpacity 
                   key={t}
                   style={[
@@ -1719,7 +1732,7 @@ export const CalendarScreen: React.FC<any> = ({
               ))}
             </View>
 
-            {(selectedType === '時間休' || selectedType === '特休' || selectedType === '特休＋時間休' || selectedType === '振替＋時間休' || selectedType === '出張' || selectedType === '休日時間外') && (
+            {(selectedType === '時間休' || selectedType === '特休' || selectedType === '特休＋時間休' || selectedType === '振替＋時間休' || selectedType === '出張') && (
               <View style={{ marginBottom: 20 }}>
                 <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
                 {selectedType === '特休＋時間休' ? (
@@ -1871,7 +1884,7 @@ export const CalendarScreen: React.FC<any> = ({
               <View style={{ marginTop: 16 }}>
                 <ThemeText variant="label" style={{ marginBottom: 10 }}>変更後の種別を選択</ThemeText>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                  {['出勤', '年休', '公休', '特休', '時間休', '午前振替', '午後振替', '夏季休暇', '特休＋時間休', '振替＋時間休', '出張', '休日時間外', '看護休暇'].map(t => (
+                  {['出勤', '年休', '公休', '特休', '時間休', '振替4', '夏季休暇', '特休＋時間休', '振替＋時間休', '出張'].map(t => (
                     <TouchableOpacity 
                       key={t}
                       style={[
@@ -1886,7 +1899,7 @@ export const CalendarScreen: React.FC<any> = ({
                 </View>
 
                 {/* 時間設定 */}
-                {(newEditType === '時間休' || newEditType === '特休' || newEditType === '特休＋時間休' || newEditType === '振替＋時間休' || newEditType === '出張' || newEditType === '休日時間外') && (
+                {(newEditType === '時間休' || newEditType === '特休' || newEditType === '特休＋時間休' || newEditType === '振替＋時間休' || newEditType === '出張') && (
                   <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12 }}>
                     <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
                     {newEditType === '特休＋時間休' ? (

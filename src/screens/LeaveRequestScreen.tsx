@@ -14,8 +14,8 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
   const [hourlyHours, setHourlyHours] = useState(1.0);
   const [comment, setComment] = useState('');
 
-  const types = ['年休', '時間休', '1日振替', '半日振替', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張', '休日時間外'];
-  const needsHours = ['時間休', '特休', '特休＋時間休', '振替＋時間休', '出張', '休日時間外'].includes(type);
+  const types = ['年休', '時間休', '1日振替', '半日振替', '振替4', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張'];
+  const needsHours = ['時間休', '特休', '特休＋時間休', '振替＋時間休', '出張'].includes(type);
 
   const adjustHours = (delta: number) => {
     setHours(prev => Math.max(0.25, Math.min(24, prev + delta)));
@@ -41,14 +41,18 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
         ? (specialHours + hourlyHours)
         : type === '振替＋時間休'
           ? (4.0 + hourlyHours)
-          : (needsHours ? hours : null),
+          : type === '振替4'
+            ? 4.0
+            : (needsHours ? hours : null),
       comment: comment,
       status: 'pending',
       details: type === '特休＋時間休'
         ? { specialHours, hourlyHours }
         : type === '振替＋時間休'
           ? { furikaeHours: 4.0, hourlyHours }
-          : null,
+          : type === '振替4'
+            ? { furikaeHours: 4.0, note: '振替4時間' }
+            : null,
       createdAt: new Date().toISOString()
     };
 

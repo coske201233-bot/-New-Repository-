@@ -487,6 +487,9 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
               const hrHrs = req?.details?.hourlyHours ?? (req?.hours ? Math.max(0, req.hours - 4) : 0);
               label = `振4時${hrHrs}`;
+            } else if (type === '振替4' || type === '振4') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              label = '振4';
             } else if (type === '夏季休暇') {
               cellStyle = 'background-color: #fefce8; color: #ca8a04;';
               label = '夏';
@@ -503,9 +506,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             } else if (type === '1日振替' || type === '半日振替' || type === '振替' || type === '振休') {
               cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
               label = '振';
-            } else if (type === '看護休暇') {
-              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
-              label = '看';
             } else if (type === '研修') {
               cellStyle = 'background-color: #f5f3ff; color: #7c3aed; font-weight: bold;';
               label = '研';
