@@ -3,7 +3,7 @@ import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Modal, Al
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Check, LogOut, Edit3, Trash2, Move, Calendar as CalendarIcon, ArrowRight } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Check, LogOut, Edit3, Trash2, Move, Copy, Calendar as CalendarIcon, ArrowRight } from 'lucide-react-native';
 import { getDayType, formatDate, getDateStr, normalizeName } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
@@ -81,13 +81,15 @@ export const CalendarScreen: React.FC<any> = ({
 
   // --- クイック編集・アクションモーダル用 State ---
   const [selectedShiftToEdit, setSelectedShiftToEdit] = useState<any | null>(null);
-  const [editActionTab, setEditActionTab] = useState<'type' | 'move' | 'delete'>('type');
+  const [editActionTab, setEditActionTab] = useState<'type' | 'move' | 'copy' | 'delete'>('type');
   const [newEditType, setNewEditType] = useState<string>('出勤');
   const [newEditHours, setNewEditHours] = useState<number>(1.0);
   const [newEditSpecialHours, setNewEditSpecialHours] = useState<number>(1.0);
   const [newEditHourlyHours, setNewEditHourlyHours] = useState<number>(1.0);
   const [targetMoveDate, setTargetMoveDate] = useState<string>('');
   const [moveTargetMonth, setMoveTargetMonth] = useState<Date>(currentDate);
+  const [targetCopyDate, setTargetCopyDate] = useState<string>('');
+  const [copyTargetMonth, setCopyTargetMonth] = useState<Date>(currentDate);
   const [isProcessingShift, setIsProcessingShift] = useState<boolean>(false);
 
   const currentMonthKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}`;
@@ -858,6 +860,126 @@ export const CalendarScreen: React.FC<any> = ({
     }
   };
 
+  // --- 1-2. シフト複製処理 ---
+  const handleCopyShift = async (item: any, targetDateStr: string) => {
+    if (!isAdmin) {
+      Alert.alert('権限エラー', 'シフトの複製は管理者のみ可能です。');
+      return;
+    }
+    console.log('📋 [handleCopyShift] Initiating copy:', { item, targetDateStr });
+    if (!item || !targetDateStr) {
+      console.log('⚠️ [handleCopyShift] Skipped: invalid params.');
+      return;
+    }
+    setIsProcessingShift(true);
+
+    try {
+      const staff = staffList.find(s => s.id === item.staff?.id || s.id === item.staffId || normalizeName(s.name) === normalizeName(item.staff?.name || item.staffName || item.name));
+      if (!staff || !staff.id) {
+        console.error('❌ [handleCopyShift] Staff not found for:', item);
+        Alert.alert('エラー', '対象スタッフの情報を特定できませんでした。');
+        return;
+      }
+      const cleanStaffId = String(staff.id).trim();
+      const staffName = staff.name;
+      const shiftType = item.type || '出勤';
+      const hours = item.hours ?? item.details?.duration ?? item.details?.hours ?? null;
+      const details = item.details || { note: '管理画面より複製' };
+
+      // 1. 複製先の日付へ新規シフト/リクエストを upsert
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+      const newReq = {
+        id: newId,
+        staff_id: cleanStaffId,
+        staff_name: staffName,
+        date: targetDateStr,
+        type: shiftType,
+        status: 'approved',
+        is_manual: true,
+        hours: hours,
+        details: { ...details, isManual: true, copiedFrom: item.date },
+        created_at: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      console.log(`[handleCopyShift] Upserting to shifts on ${targetDateStr}:`, newReq);
+
+      const { error: sErr } = await supabase.from('shifts').upsert({
+        id: newId,
+        staff_id: cleanStaffId,
+        staff_name: staffName,
+        date: targetDateStr,
+        type: shiftType,
+        status: 'approved',
+        is_manual: true,
+        hours: hours,
+        details: newReq.details,
+      });
+      if (sErr) throw sErr;
+
+      const { error: rErr } = await supabase.from('requests').upsert({
+        id: newId,
+        staff_id: cleanStaffId,
+        staff_name: staffName,
+        date: targetDateStr,
+        type: shiftType,
+        status: 'approved',
+        reason: '管理画面より複製',
+        hours: hours,
+        details: newReq.details,
+        is_manual: true,
+      });
+      if (rErr) console.warn('Requests sync warning:', rErr.message);
+
+      // 2. ローカルステートの更新 (元のシフトは保持し、複製先の同スタッフデータを更新/追加)
+      const normStaffName = normalizeName(staffName);
+      setRequests((prev: any[]) => {
+        const filtered = (prev || []).filter(r => {
+          if (!r) return false;
+          const rDate = normalizeDate(r.date);
+          if (rDate !== targetDateStr) return true;
+
+          const rStaffId = String(r.staff_id || r.staffId || '').trim();
+          const rStaffName = normalizeName(r.staff_name || r.staffName || r.name || '');
+
+          const isMatchStaffId = cleanStaffId && rStaffId === cleanStaffId;
+          const isMatchName = normStaffName && rStaffName === normStaffName;
+
+          return !(isMatchStaffId || isMatchName);
+        });
+        return [...filtered, newReq];
+      });
+
+      // 3. 監査ログの記録
+      await recordAuditLog({
+        operatorId: profile?.id,
+        operatorName: profile?.name || '管理者',
+        targetStaffId: cleanStaffId,
+        targetStaffName: staffName,
+        actionType: 'SHIFT_UPDATE',
+        targetDate: targetDateStr,
+        details: `${staffName}さんのシフト（${item.date}の${shiftType}${hours ? ` ${hours}h` : ''}）を ${targetDateStr} へ複製しました`,
+        afterData: newReq,
+      });
+
+      console.log(`✅ [handleCopyShift] Successfully copied shift to ${targetDateStr}.`);
+
+      // 4. 最新データの再取得と同期
+      if (fetchShifts) await fetchShifts();
+      setSelectedShiftToEdit(null);
+
+      const parts = targetDateStr.split('-');
+      const dateDisplay = parts.length === 3 ? `${parseInt(parts[1], 10)}月${parseInt(parts[2], 10)}日` : targetDateStr;
+      Alert.alert('複製完了', `${dateDisplay}へシフトを複製しました。`);
+
+    } catch (err: any) {
+      console.error('❌ [handleCopyShift] Error during copy:', err);
+      Alert.alert('エラー', 'シフトの複製に失敗しました: ' + (err.message || '不明なエラー'));
+    } finally {
+      setIsProcessingShift(false);
+    }
+  };
+
   // --- 2. クイック編集モーダルを開く ---
   const openQuickEditModal = (item: any, dateStr: string) => {
     if (!isAdmin) return;
@@ -872,17 +994,24 @@ export const CalendarScreen: React.FC<any> = ({
     setNewEditSpecialHours(item.details?.specialHours ?? 1.0);
     setNewEditHourlyHours(item.details?.hourlyHours ?? (item.type === '振替＋時間休' && item.hours ? Math.max(0.25, item.hours - 4.0) : 1.0));
     setTargetMoveDate(dateStr);
+    setTargetCopyDate(dateStr);
     
-    // 対象シフトの年月で移動先選択カレンダーを初期化
+    // 対象シフトの年月で移動先・複製先選択カレンダーを初期化
     if (dateStr) {
       const parts = dateStr.split('-');
       if (parts.length >= 2) {
-        setMoveTargetMonth(new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1));
+        const initMonth = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+        setMoveTargetMonth(initMonth);
+        setCopyTargetMonth(initMonth);
       } else {
-        setMoveTargetMonth(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+        const initMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+        setMoveTargetMonth(initMonth);
+        setCopyTargetMonth(initMonth);
       }
     } else {
-      setMoveTargetMonth(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+      const initMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      setMoveTargetMonth(initMonth);
+      setCopyTargetMonth(initMonth);
     }
 
     setEditActionTab('type');
@@ -1852,8 +1981,8 @@ export const CalendarScreen: React.FC<any> = ({
                 style={[styles.tabItem, editActionTab === 'type' && styles.tabItemActive]}
                 onPress={() => setEditActionTab('type')}
               >
-                <Edit3 size={16} color={editActionTab === 'type' ? 'white' : COLORS.textSecondary} />
-                <ThemeText variant="caption" bold={editActionTab === 'type'} color={editActionTab === 'type' ? 'white' : COLORS.textSecondary} style={{ marginLeft: 6 }}>
+                <Edit3 size={15} color={editActionTab === 'type' ? 'white' : COLORS.textSecondary} />
+                <ThemeText variant="caption" bold={editActionTab === 'type'} color={editActionTab === 'type' ? 'white' : COLORS.textSecondary} style={{ marginLeft: 4, fontSize: 11 }} numberOfLines={1}>
                   種別変更
                 </ThemeText>
               </TouchableOpacity>
@@ -1862,9 +1991,19 @@ export const CalendarScreen: React.FC<any> = ({
                 style={[styles.tabItem, editActionTab === 'move' && styles.tabItemActive]}
                 onPress={() => setEditActionTab('move')}
               >
-                <Move size={16} color={editActionTab === 'move' ? 'white' : COLORS.textSecondary} />
-                <ThemeText variant="caption" bold={editActionTab === 'move'} color={editActionTab === 'move' ? 'white' : COLORS.textSecondary} style={{ marginLeft: 6 }}>
+                <Move size={15} color={editActionTab === 'move' ? 'white' : COLORS.textSecondary} />
+                <ThemeText variant="caption" bold={editActionTab === 'move'} color={editActionTab === 'move' ? 'white' : COLORS.textSecondary} style={{ marginLeft: 4, fontSize: 11 }} numberOfLines={1}>
                   別日へ移動
+                </ThemeText>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.tabItem, editActionTab === 'copy' && styles.tabItemActive]}
+                onPress={() => setEditActionTab('copy')}
+              >
+                <Copy size={15} color={editActionTab === 'copy' ? 'white' : COLORS.textSecondary} />
+                <ThemeText variant="caption" bold={editActionTab === 'copy'} color={editActionTab === 'copy' ? 'white' : COLORS.textSecondary} style={{ marginLeft: 4, fontSize: 11 }} numberOfLines={1}>
+                  別日へ複製
                 </ThemeText>
               </TouchableOpacity>
 
@@ -1872,8 +2011,8 @@ export const CalendarScreen: React.FC<any> = ({
                 style={[styles.tabItem, editActionTab === 'delete' && styles.tabItemDeleteActive]}
                 onPress={() => setEditActionTab('delete')}
               >
-                <Trash2 size={16} color={editActionTab === 'delete' ? 'white' : '#ef4444'} />
-                <ThemeText variant="caption" bold={editActionTab === 'delete'} color={editActionTab === 'delete' ? 'white' : '#ef4444'} style={{ marginLeft: 6 }}>
+                <Trash2 size={15} color={editActionTab === 'delete' ? 'white' : '#ef4444'} />
+                <ThemeText variant="caption" bold={editActionTab === 'delete'} color={editActionTab === 'delete' ? 'white' : '#ef4444'} style={{ marginLeft: 4, fontSize: 11 }} numberOfLines={1}>
                   削除
                 </ThemeText>
               </TouchableOpacity>
@@ -2090,7 +2229,98 @@ export const CalendarScreen: React.FC<any> = ({
               </View>
             )}
 
-            {/* TAB 3: 削除 */}
+            {/* TAB: 日付複製 */}
+            {editActionTab === 'copy' && (
+              <View style={{ marginTop: 16 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <ThemeText variant="label">複製先の日付を選択</ThemeText>
+
+                  {/* 月切り替えコントロール */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 10, paddingHorizontal: 4, paddingVertical: 2 }}>
+                    <TouchableOpacity 
+                      style={{ padding: 6 }} 
+                      onPress={() => {
+                        const newM = new Date(copyTargetMonth.getFullYear(), copyTargetMonth.getMonth() - 1, 1);
+                        setCopyTargetMonth(newM);
+                      }}
+                    >
+                      <ChevronLeft size={16} color={COLORS.text} />
+                    </TouchableOpacity>
+
+                    <ThemeText variant="caption" bold style={{ paddingHorizontal: 8 }}>
+                      {copyTargetMonth.getFullYear()}年 {copyTargetMonth.getMonth() + 1}月
+                    </ThemeText>
+
+                    <TouchableOpacity 
+                      style={{ padding: 6 }} 
+                      onPress={() => {
+                        const newM = new Date(copyTargetMonth.getFullYear(), copyTargetMonth.getMonth() + 1, 1);
+                        setCopyTargetMonth(newM);
+                      }}
+                    >
+                      <ChevronRight size={16} color={COLORS.text} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                
+                <ScrollView style={{ maxHeight: 200, marginBottom: 16 }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {(() => {
+                      const targetYear = copyTargetMonth.getFullYear();
+                      const targetMonth = copyTargetMonth.getMonth();
+                      const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+
+                      return Array.from({ length: daysInTargetMonth }, (_, idx) => {
+                        const dayNum = idx + 1;
+                        const dateStr = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                        const isCurrent = selectedShiftToEdit?.date === dateStr;
+                        const isTarget = targetCopyDate === dateStr;
+                        const tempDate = new Date(targetYear, targetMonth, dayNum);
+                        const dType = getDayType(tempDate);
+
+                        return (
+                          <TouchableOpacity
+                            key={dayNum}
+                            style={[
+                              styles.moveDateChip,
+                              isTarget && styles.moveDateChipActive,
+                            ]}
+                            onPress={() => setTargetCopyDate(dateStr)}
+                          >
+                            <ThemeText 
+                              variant="caption" 
+                              bold={isTarget}
+                              color={isTarget ? 'white' : (dType === 'sun' || dType === 'holiday' ? '#ef4444' : dType === 'sat' ? '#3b82f6' : COLORS.text)}
+                            >
+                              {dayNum}日{isCurrent ? '(元の日)' : ''}
+                            </ThemeText>
+                          </TouchableOpacity>
+                        );
+                      });
+                    })()}
+                  </View>
+                </ScrollView>
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity style={[styles.modalButton, styles.modalCancelButton]} onPress={() => setSelectedShiftToEdit(null)}>
+                    <ThemeText>キャンセル</ThemeText>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.modalSubmitButton]} 
+                    onPress={() => handleCopyShift(selectedShiftToEdit, targetCopyDate)}
+                    disabled={isProcessingShift || !targetCopyDate}
+                  >
+                    {isProcessingShift ? <ActivityIndicator color="white" /> : (
+                      <ThemeText bold color="white">
+                        {targetCopyDate ? `${parseInt(targetCopyDate.split('-')[1], 10)}月${parseInt(targetCopyDate.split('-')[2], 10)}日へ複製` : 'この日付へ複製'}
+                      </ThemeText>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* TAB: 削除 */}
             {editActionTab === 'delete' && (
               <View style={{ marginTop: 16 }}>
                 <View style={{ padding: 16, backgroundColor: 'rgba(239, 68, 68, 0.08)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)', marginBottom: 20 }}>
@@ -2184,8 +2414,8 @@ const styles = StyleSheet.create({
   modalSubmitButton: { backgroundColor: COLORS.primary },
   smallActionBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: 'rgba(239, 68, 68, 0.05)', zIndex: 10 },
   finishBtn: { backgroundColor: COLORS.primary, height: 54, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4, zIndex: 20, width: '100%' },
-  tabBar: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 4, marginBottom: 12 },
-  tabItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8 },
+  tabBar: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 3, marginBottom: 12, gap: 2 },
+  tabItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 2, borderRadius: 8 },
   tabItemActive: { backgroundColor: COLORS.primary },
   tabItemDeleteActive: { backgroundColor: 'rgba(239, 68, 68, 0.2)', borderWidth: 1, borderColor: '#ef4444' },
   typeChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, backgroundColor: 'rgba(255,255,255,0.04)' },
