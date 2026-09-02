@@ -203,7 +203,7 @@ export const CalendarScreen: React.FC<any> = ({
         return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
       };
 
-      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '出張', '振替＋時間休', '振替4', '全休', '年給', '有給', '1日振替', '半日振替', '午前休', '午後休'].includes(t);
+      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '出張', '振替＋時間休', '振替4', '全休', '年給', '有給', '午前休', '午後休'].includes(t);
 
       const getTime = (i: any) => {
         const t = i.updatedAt || i.updated_at || i.createdAt || i.created_at || 0;
@@ -320,7 +320,7 @@ export const CalendarScreen: React.FC<any> = ({
         const isOffType = (t: string) => {
           if (!t) return false;
           // [V54.6] 研修も「出勤人数（分母）」に含めない休みとして扱う
-          if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '1日振替'].includes(t)) return true;
+          if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修'].includes(t)) return true;
           return false;
         };
 
@@ -337,9 +337,9 @@ export const CalendarScreen: React.FC<any> = ({
           }
 
           const rType = (r.type || '').trim();
-          if (rType === '振替＋時間休' || rType === '1日振替') return isAssistant ? 7.5 : 7.75;
+          if (rType === '振替＋時間休') return isAssistant ? 7.5 : 7.75;
           if (rType === '振替4') return 4.0;
-          const isFullDayLeaveType = ['公休', '年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給', '1日振替', '出張', '振替＋時間休'].includes(rType);
+          const isFullDayLeaveType = ['公休', '年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給', '出張', '振替＋時間休'].includes(rType);
           
           const h = r.hours ?? r.partialLeaveHours ?? r.leaveHours ?? r.details?.partialLeaveHours ?? r.details?.duration ?? r.details?.hours;
           const parsedH = parseFloat(String(h));
@@ -349,8 +349,6 @@ export const CalendarScreen: React.FC<any> = ({
             return parsedH;
           }
           
-          if (r.type === '1日振替') return isAssistant ? 7.5 : 7.75;
-          if (r.type === '半日振替') return 3.75;
           if (isFullDayLeaveType) return isAssistant ? 7.5 : 7.75;
           if (rType === '午前休') return 4.0;
           if (rType === '午後休') return 3.75;
@@ -451,8 +449,8 @@ export const CalendarScreen: React.FC<any> = ({
                    item.details?.duration ?? 
                    item.details?.hours ?? 0;
     
-    // 振替タイプ（半日振替・振替4・振替＋時間休を除く）であれば、無条件で1日休み（最大制限値）とみなす
-    if (isTransferType && item.type !== '半日振替' && item.type !== '振替4' && item.type !== '振4' && item.type !== '振替＋時間休') {
+    // 振替タイプ（振替4・振替＋時間休を除く）であれば、無条件で1日休み（最大制限値）とみなす
+    if (isTransferType && item.type !== '振替4' && item.type !== '振4' && item.type !== '振替＋時間休') {
       duration = limit;
     }
 
@@ -1336,8 +1334,8 @@ export const CalendarScreen: React.FC<any> = ({
           const limit = isAs ? 7.5 : 7.75;
 
           let duration = item.hours ?? item.partialLeaveHours ?? item.leaveHours ?? item.details?.partialLeaveHours ?? item.details?.duration ?? item.details?.hours ?? 0;
-          // 振替タイプ（半日振替・振替4・振替＋時間休を除く）であれば、無条件で1日休み（最大制限値）とみなす
-          if (isTransferType && item.type !== '半日振替' && item.type !== '振替4' && item.type !== '振4' && item.type !== '振替＋時間休') {
+          // 振替タイプ（振替4・振替＋時間休を除く）であれば、無条件で1日休み（最大制限値）とみなす
+          if (isTransferType && item.type !== '振替4' && item.type !== '振4' && item.type !== '振替＋時間休') {
             duration = limit;
           }
 
@@ -1619,21 +1617,19 @@ export const CalendarScreen: React.FC<any> = ({
                       }
 
                       if (dur > 0 || (item.type || '') === '振替4' || (item.type || '') === '振4') {
-                        const text = (item.type || '') === '半日振替'
-                          ? ` 半日振替`
-                          : ((item.type || '') === '振替4' || (item.type || '') === '振4')
-                            ? ` 振4`
-                            : (item.type || '') === '特休＋時間休'
-                              ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
-                              : (item.type || '') === '振替＋時間休'
-                                ? ` 振替4h＋時間休${item.details?.hourlyHours ?? (item.hours ? Math.max(0, item.hours - 4) : 0)}h`
-                                : (item.type || '').includes('振替')
-                                ? ` 振＋時`
-                                : (item.type || '').includes('特')
-                                  ? ` 特休${dur}h`
-                                  : (item.type || '') === '出張'
-                                    ? ` 出張${dur}h`
-                                    : ` 時間休${dur}h`;
+                        const text = ((item.type || '') === '振替4' || (item.type || '') === '振4')
+                          ? ` 振4`
+                          : (item.type || '') === '特休＋時間休'
+                            ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
+                            : (item.type || '') === '振替＋時間休'
+                              ? ` 振替4h＋時間休${item.details?.hourlyHours ?? (item.hours ? Math.max(0, item.hours - 4) : 0)}h`
+                              : (item.type || '').includes('振替')
+                              ? ` 振＋時`
+                              : (item.type || '').includes('特')
+                                ? ` 特休${dur}h`
+                                : (item.type || '') === '出張'
+                                  ? ` 出張${dur}h`
+                                  : ` 時間休${dur}h`;
                         return (
                           <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
                             {text}

@@ -195,11 +195,10 @@ export const cloudStorage = {
       const rawDuration = r.hours ?? d.hours ?? d.duration;
       if (rawDuration !== undefined && rawDuration !== null && rawDuration !== '') {
         const parsed = parseFloat(String(rawDuration));
-        mapped.hours = isNaN(parsed) ? (mapped.type === '半日振替' ? 3.75 : 0) : parsed;
+        mapped.hours = isNaN(parsed) ? 0 : parsed;
       } else {
         // デフォルト値のフォールバック
-        if (mapped.type === '半日振替') mapped.hours = 3.75;
-        else if (mapped.type === '振替4') mapped.hours = 4.0;
+        if (mapped.type === '振替4') mapped.hours = 4.0;
         else if (['時間休', '特休', '振替＋時間休', '特休＋時間休'].includes(mapped.type)) mapped.hours = 1.0;
         else mapped.hours = 0;
       }

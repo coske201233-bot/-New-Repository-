@@ -659,7 +659,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const handlePermanentDeleteStaff = () => handleDeleteStaff(true);
 
   // Constants
-  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '1日振替', '半日振替', '振替4', '特休', '年休', '特休＋時間休', '出張', '空欄'];
+  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '振替4', '特休', '年休', '特休＋時間休', '出張', '空欄'];
   const HOUR_SELECTOR_TYPES = ['時間休', '特休', '特休＋時間休', '振替＋時間休', '出張'];
 
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
@@ -681,7 +681,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     
     // [V76.0] ユーザー指示: 0時間として記録されている場合でも、特定の休暇タイプなら7.75時間をデフォルトとする
     const rType = (r.type || '').trim();
-    const isFullDayLeaveType = ['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給', '1日振替'].includes(rType);
+    const isFullDayLeaveType = ['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給'].includes(rType);
     
     if (h !== undefined && h !== null && h !== '' && !isNaN(parsedH)) {
       if (parsedH === 0 && isFullDayLeaveType) return 7.75;
@@ -689,8 +689,6 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     }
     
     // Default values by type (fallback)
-    if (r.type === '1日振替') return 7.75;
-    if (r.type === '半日振替') return 3.75;
     if (r.type === '振替4') return 4.0;
     if (isFullDayLeaveType) return 7.75;
     if (rType === '午前休') return 4.0;
@@ -1082,10 +1080,6 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                   displayLabel = '夏季'; labelColor = '#ef4444';
                 } else if (['年休', '有給休暇', '年給', '有給'].includes(rType)) {
                   displayLabel = '年休'; labelColor = '#ef4444';
-                } else if (rType === '1日振替') {
-                  displayLabel = '振(全)'; labelColor = '#ef4444';
-                } else if (rType === '半日振替') {
-                  displayLabel = '振(半)'; labelColor = '#ef4444';
                 } else if (rType === '振替4' || rType === '振4') {
                   displayLabel = '振4'; labelColor = '#ef4444';
                 } else if (rType === '特休＋時間休') {
@@ -1184,7 +1178,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           const rType = (req.type || '').trim();
 
           // 【特休・時間休対応】1日所定労働時間(7.75h/7.5h)に達しない短時間・一部休暇（一部特休等）は出勤日としてカウント
-          if (h > 0 && h < hoursPerDay && !['公休', '1日振替'].includes(rType) && !rType.includes('全休')) {
+          if (h > 0 && h < hoursPerDay && rType !== '公休' && !rType.includes('全休')) {
             const isHW = req.isHolidayWork || req.details?.isHolidayWork || (getDayType(date) !== 'weekday');
             if (!isHW) workDays++; else holidayWorkDays++;
           }

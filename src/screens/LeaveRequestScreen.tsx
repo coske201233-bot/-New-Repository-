@@ -14,7 +14,7 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
   const [hourlyHours, setHourlyHours] = useState(1.0);
   const [comment, setComment] = useState('');
 
-  const types = ['年休', '時間休', '1日振替', '半日振替', '振替4', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張'];
+  const types = ['年休', '時間休', '振替4', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張'];
   const needsHours = ['時間休', '特休', '特休＋時間休', '振替＋時間休', '出張'].includes(type);
 
   const adjustHours = (delta: number) => {

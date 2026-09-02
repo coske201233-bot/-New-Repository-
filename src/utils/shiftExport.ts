@@ -149,7 +149,7 @@ export const getNormalizedShiftMatrix = (
         label = '前休';
       } else if (type === '午後休' || type === '後休') {
         label = '後休';
-      } else if (type === '1日振替' || type === '半日振替' || type === '振替' || type === '振休') {
+      } else if (type === '振替' || type === '振休') {
         label = '振';
       } else if (type === '研修') {
         label = '研';

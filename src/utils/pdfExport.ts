@@ -124,7 +124,7 @@ export const exportShiftToPDF = async (
       } else if (rawType === '夏季休暇') {
         statusText = '夏季休暇';
         statusClass = 'status-summer';
-      } else if (rawType === '1日振替' || rawType === '半日振替' || rawType === '振替' || rawType === '振休') {
+      } else if (rawType === '振替' || rawType === '振休') {
         statusText = rawType;
         statusClass = 'status-transfer';
       } else if (rawType === '研修') {
