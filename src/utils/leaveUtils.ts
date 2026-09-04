@@ -707,20 +707,48 @@ export function calculateStaffMonthlyNonWorkingHours(
 
   const daysInMonth = new Date(year, month, 0).getDate();
 
-  const isManualEntry = (rec: any) => {
+  // 無効・却下・削除・キャンセル済みレコード判定ヘルパー
+  const isInvalidRecord = (r: any): boolean => {
+    if (!r) return true;
+    const st = String(r.status || '').trim().toLowerCase();
+    const detailSt = String(r.details?.status || '').trim().toLowerCase();
+    const invalidList = [
+      'deleted', '削除',
+      'rejected', '却下',
+      'canceled', 'cancelled', 'キャンセル', '取り消し', '申請取消'
+    ];
+    if (invalidList.includes(st) || invalidList.includes(detailSt)) return true;
+    return false;
+  };
+
+  // 真実のソースである requests テーブル等から無効化された ID を抽出
+  const rejectedOrDeletedIds = new Set(
+    allCalendarData
+      .filter(isInvalidRecord)
+      .map(r => String(r.id || ''))
+      .filter(Boolean)
+  );
+
+  const isManualEntry = (rec: any): boolean => {
     if (!rec) return false;
     if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
     if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
     const idStr = String(rec.id || '');
-    return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
+    return idStr.startsWith('m-') || idStr.startsWith('req-');
   };
 
-  const getTime = (i: any) => {
+  const getTime = (i: any): number => {
     const t = i?.updatedAt || i?.updated_at || i?.createdAt || i?.created_at || 0;
     return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
   };
 
   let itemCount = 0;
+  const staffName = staff.name || '';
+  const isTargetStaffLog = staffName.includes('TI') || staffName.includes('Ti') || staffName.includes('ti') || String(staff.id || '').includes('TI');
+
+  if (isTargetStaffLog) {
+    console.log(`[NonWorkingHours Audit Start] Staff: ${staffName} (${year}年${month}月)`);
+  }
 
   for (let d = 1; d <= daysInMonth; d++) {
     const dStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -728,206 +756,159 @@ export function calculateStaffMonthlyNonWorkingHours(
     const dDate = new Date(year, month - 1, d);
     const dayType = getDayType(dDate); // 'weekday' | 'sat' | 'sun' | 'holiday'
 
-    // 対象スタッフ・該当日のレコードを抽出（削除・却下は除外）
+    // 対象スタッフ・該当日の有効レコードを抽出（削除・却下・キャンセルは完全除外）
     const dayRecords = allCalendarData.filter(r => {
       if (!r || !r.date) return false;
-      if (r.status === 'deleted' || r.status === '削除' || r.status === 'rejected' || r.status === '却下') return false;
+      if (isInvalidRecord(r)) return false;
+      const rId = String(r.id || '');
+      const reqId = String(r.requestId || r.request_id || '');
+      if (rId && rejectedOrDeletedIds.has(rId)) return false;
+      if (reqId && rejectedOrDeletedIds.has(reqId)) return false;
       if (normalizeDateStr(r.date) !== targetDateStr) return false;
       return isStaffMatchRequest(staff, r);
     });
 
     if (dayRecords.length === 0) continue;
 
-    // 手動入力が存在する場合は自動入力を除外
-    const manualRecords = dayRecords.filter(isManualEntry);
-    const activeRecords = manualRecords.length > 0 ? manualRecords : dayRecords;
+    // 【StaffScreen.tsx と完全一致する日別最優先確定シフト解決エンジン】
+    // 手動入力は自動入力を上書き、手動同士は更新日時が新しい方を優先
+    let resolvedShift: any = null;
 
-    // 最新更新順にソート（手動優先 ＋ 更新日時降順）
-    activeRecords.sort((a, b) => {
-      const aMan = isManualEntry(a);
-      const bMan = isManualEntry(b);
-      if (aMan !== bMan) return aMan ? -1 : 1;
-      return getTime(b) - getTime(a);
-    });
+    for (const r of dayRecords) {
+      if (!resolvedShift) {
+        resolvedShift = r;
+        continue;
+      }
 
-    // 1レコードごとの集計処理
-    const processRecord = (r: any) => {
-      const rawType = String(r.type || r.shiftType || '').trim();
-      let counted = false;
+      const isManNew = isManualEntry(r);
+      const wasManOld = isManualEntry(resolvedShift);
 
-      // 1. 年休 (通常: 7.75h, 会計年度: 7.5h)
-      if (['年休', '有給休暇', '有休', '年給', '有給'].includes(rawType)) {
-        breakdown.annualLeaveHours += fullDayHours;
+      let isBetter = false;
+      if (isManNew && !wasManOld) {
+        isBetter = true; // 手動は常に自動を上書き
+      } else if (!isManNew && wasManOld) {
+        isBetter = false; // 自動は手動を上書きできない
+      } else if (isManNew && wasManOld) {
+        // 共に手動の場合は更新日時が新しい方を優先
+        isBetter = getTime(r) > getTime(resolvedShift);
+      } else {
+        // 共に自動の場合は休み（出勤・日勤以外）を優先
+        const isOffNew = !['出勤', '日勤'].includes(r?.type || r?.shiftType);
+        const isOffOld = !['出勤', '日勤'].includes(resolvedShift?.type || resolvedShift?.shiftType);
+        isBetter = isOffNew && !isOffOld;
+      }
+
+      if (isBetter) {
+        resolvedShift = r;
+      }
+    }
+
+    if (!resolvedShift) continue;
+
+    const rawType = String(resolvedShift.type || resolvedShift.shiftType || '').trim();
+    let addedHours = 0;
+    let counted = false;
+
+    // 1. 出勤・日勤・公休（週休）・休日出勤は勤務を要しない時間には加算しない (0h)
+    if (['出勤', '日勤', '公休', '休日出勤'].includes(rawType)) {
+      addedHours = 0;
+    }
+    // 2. 年休 (通常: 7.75h, 会計年度: 7.5h)
+    else if (['年休', '有給休暇', '有休', '年給', '有給'].includes(rawType)) {
+      addedHours = fullDayHours;
+      breakdown.annualLeaveHours += fullDayHours;
+      counted = true;
+    }
+    // 3. 特休 (登録時間。終日の場合は 常勤: 7.75h / 会計年度: 7.5h)
+    else if (rawType === '特休') {
+      const rawH = resolvedShift.details?.specialHours ?? resolvedShift.specialHours ?? resolvedShift.details?.duration ?? resolvedShift.hours ?? resolvedShift.duration ?? resolvedShift.details?.hours;
+      const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? parseFloat(String(rawH)) : null;
+      let h = fullDayHours;
+      if (parsedH !== null && !isNaN(parsedH) && parsedH > 0 && parsedH < fullDayHours) {
+        h = parsedH;
+      }
+      addedHours = h;
+      breakdown.specialLeaveHours += h;
+      counted = true;
+    }
+    // 4. 時間休 (登録時間: カレンダー表示と完全一致するパース関数を使用)
+    else if (['時間休', '時間給', '時間給2'].includes(rawType)) {
+      const h = parseHourlyLeaveHours(resolvedShift);
+      if (h > 0) {
+        addedHours = h;
+        breakdown.hourlyLeaveHours += h;
         counted = true;
       }
-      // 2. 特休 (登録時間。終日の場合は 常勤: 7.75h / 会計年度: 7.5h)
-      else if (rawType === '特休') {
-        const rawH = r.details?.specialHours ?? r.specialHours ?? r.details?.duration ?? r.hours ?? r.duration ?? r.details?.hours;
+    }
+    // 5. 夏季休暇 (通常: 7.75h, 会計年度: 0h)
+    else if (['夏季休暇', '夏期休暇', '夏休'].includes(rawType)) {
+      if (!isFiscal) {
+        addedHours = HOURS_PER_DAY; // 7.75h
+        breakdown.summerLeaveHours += HOURS_PER_DAY;
+        counted = true;
+      }
+    }
+    // 6. 振替4 (4.0h)
+    else if (['振替4', '振4'].includes(rawType)) {
+      addedHours = 4.0;
+      breakdown.furikae4Hours += 4.0;
+      counted = true;
+    }
+    // 7. 振替＋時間休 (4.0h ＋ 登録された時間休の時間数)
+    else if (rawType === '振替＋時間休') {
+      const hrHours = Number(resolvedShift.details?.hourlyHours ?? resolvedShift.hourlyHours ?? (resolvedShift.hours && resolvedShift.hours > 4 ? resolvedShift.hours - 4 : 0));
+      const validHr = (!isNaN(hrHours) && hrHours > 0) ? hrHours : 0;
+      addedHours = 4.0 + validHr;
+      breakdown.furikaeHourlyHours += addedHours;
+      counted = true;
+    }
+    // 8. 特休＋時間休 (特休時間数 ＋ 時間休時間数)
+    else if (rawType === '特休＋時間休') {
+      const spHours = Number(resolvedShift.details?.specialHours ?? resolvedShift.specialHours ?? 0);
+      const hrHours = Number(resolvedShift.details?.hourlyHours ?? resolvedShift.hourlyHours ?? 0);
+      let h = 0;
+      if (!isNaN(spHours) && !isNaN(hrHours) && (spHours > 0 || hrHours > 0)) {
+        h = spHours + hrHours;
+      } else if (resolvedShift.hours && !isNaN(Number(resolvedShift.hours)) && Number(resolvedShift.hours) > 0) {
+        h = Number(resolvedShift.hours);
+      } else {
+        h = fullDayHours;
+      }
+      addedHours = h;
+      breakdown.specialHourlyHours += h;
+      counted = true;
+    }
+    // 9. 平日の出張 (土日祝は除外。平日の出張のみ登録時間、終日は 常勤: 7.75h / 会計年度: 7.5h)
+    else if (rawType === '出張') {
+      if (dayType === 'weekday') {
+        const rawH = resolvedShift.details?.duration ?? resolvedShift.hours ?? resolvedShift.duration ?? resolvedShift.details?.hours;
         const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? parseFloat(String(rawH)) : null;
         let h = fullDayHours;
         if (parsedH !== null && !isNaN(parsedH) && parsedH > 0 && parsedH < fullDayHours) {
           h = parsedH;
         }
-        breakdown.specialLeaveHours += h;
+        addedHours = h;
+        breakdown.weekdayTripHours += h;
         counted = true;
       }
-      // 3. 時間休 (登録時間: カレンダー表示と完全一致するプロパティ優先順位で取得)
-      else if (['時間休', '時間給', '時間給2'].includes(rawType)) {
-        const h = parseHourlyLeaveHours(r);
-        if (h > 0) {
-          breakdown.hourlyLeaveHours += h;
-          counted = true;
-        }
-      }
-      // 4. 夏季休暇 (通常: 7.75h, 会計年度: 0h)
-      else if (['夏季休暇', '夏期休暇', '夏休'].includes(rawType)) {
-        if (!isFiscal) {
-          breakdown.summerLeaveHours += HOURS_PER_DAY; // 7.75h
-          counted = true;
-        }
-        // 会計年度職員には夏季休暇がないため加算対象外 (0h)
-      }
-      // 5. 振替4 (4.0h)
-      else if (['振替4', '振4'].includes(rawType)) {
-        breakdown.furikae4Hours += 4.0;
-        counted = true;
-      }
-      // 6. 振替＋時間休 (4.0h ＋ 登録された時間休の時間数)
-      else if (rawType === '振替＋時間休') {
-        const hrHours = Number(r.details?.hourlyHours ?? r.hourlyHours ?? (r.hours && r.hours > 4 ? r.hours - 4 : 0));
-        const validHr = (!isNaN(hrHours) && hrHours > 0) ? hrHours : 0;
-        breakdown.furikaeHourlyHours += (4.0 + validHr);
-        counted = true;
-      }
-      // 7. 特休＋時間休 (特休時間数 ＋ 時間休時間数)
-      else if (rawType === '特休＋時間休') {
-        const spHours = Number(r.details?.specialHours ?? r.specialHours ?? 0);
-        const hrHours = Number(r.details?.hourlyHours ?? r.hourlyHours ?? 0);
-        let h = 0;
-        if (!isNaN(spHours) && !isNaN(hrHours) && (spHours > 0 || hrHours > 0)) {
-          h = spHours + hrHours;
-        } else if (r.hours && !isNaN(Number(r.hours)) && Number(r.hours) > 0) {
-          h = Number(r.hours);
-        } else {
-          h = fullDayHours;
-        }
-        breakdown.specialHourlyHours += h;
-        counted = true;
-      }
-      // 8. 平日の出張 (土日祝は除外。平日の出張のみ登録時間、終日は 常勤: 7.75h / 会計年度: 7.5h)
-      else if (rawType === '出張') {
-        if (dayType === 'weekday') {
-          const rawH = r.details?.duration ?? r.hours ?? r.duration ?? r.details?.hours;
-          const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? parseFloat(String(rawH)) : null;
-          let h = fullDayHours;
-          if (parsedH !== null && !isNaN(parsedH) && parsedH > 0 && parsedH < fullDayHours) {
-            h = parsedH;
-          }
-          breakdown.weekdayTripHours += h;
-          counted = true;
-        }
-      }
+    }
+    // 10. 午前休 / 午後休 (半休対応)
+    else if (rawType === '午前休') {
+      addedHours = 4.0;
+      breakdown.hourlyLeaveHours += 4.0;
+      counted = true;
+    }
+    else if (rawType === '午後休') {
+      const h = isFiscal ? 3.5 : 3.75;
+      addedHours = h;
+      breakdown.hourlyLeaveHours += h;
+      counted = true;
+    }
 
-      if (counted) itemCount++;
-    };
+    if (counted) itemCount++;
 
-    // 主要休暇種別（全日休または複合休）の判定
-    const isMajorLeaveType = (r: any): boolean => {
-      const t = String(r?.type || r?.shiftType || '').trim();
-      return [
-        '年休', '有給休暇', '有休', '年給', '有給',
-        '特休',
-        '夏季休暇', '夏期休暇', '夏休',
-        '振替4', '振4',
-        '振替＋時間休',
-        '特休＋時間休',
-        '出張'
-      ].includes(t);
-    };
-
-    // 主要休暇レコードがあるか検索
-    const majorLeaveRecords = activeRecords.filter(isMajorLeaveType);
-
-    if (majorLeaveRecords.length > 0) {
-      // 主要休暇が存在する場合は最優先の1件を採用して集計
-      processRecord(majorLeaveRecords[0]);
-    } else {
-      // 主要休暇がない場合、時間休レコード群を抽出して重複排除（Deduplication）を実施
-      const hourlyRecords = activeRecords.filter(r => {
-        const t = String(r?.type || r?.shiftType || '').trim();
-        return ['時間休', '時間給', '時間給2'].includes(t);
-      });
-
-      if (hourlyRecords.length > 0) {
-        // 時間休の時間数取得ヘルパー（共通パース関数を利用）
-        const getHourlyHours = (r: any): number => parseHourlyLeaveHours(r);
-
-        // 時間休の時間帯取得ヘルパー
-        const getHourlySlot = (r: any): string => {
-          return String(
-            r.timeSlot || r.time_slot || r.time ||
-            r.startTime || r.start_time ||
-            r.details?.timeSlot || r.details?.time || r.details?.startTime || ''
-          ).trim();
-        };
-
-        // レコード間のID関連性チェック（shiftsとrequestsの同期重複検出）
-        const isSameOrLinkedShift = (a: any, b: any): boolean => {
-          const aId = String(a?.id || '').trim();
-          const bId = String(b?.id || '').trim();
-          if (aId && bId && aId === bId) return true;
-
-          const aReqId = String(a?.requestId || a?.request_id || a?.sourceId || a?.source_id || '').trim();
-          const bReqId = String(b?.requestId || b?.request_id || b?.sourceId || b?.source_id || '').trim();
-
-          if (aReqId && bId && aReqId === bId) return true;
-          if (bReqId && aId && bReqId === aId) return true;
-          if (aReqId && bReqId && aReqId === bReqId) return true;
-
-          // IDの包含一致（shifts側のIDにrequests側のUUIDが含まれる場合等）
-          if (aId && bId && aId.length >= 8 && bId.length >= 8) {
-            if (aId.includes(bId) || bId.includes(aId)) return true;
-          }
-          if (aReqId && aReqId.length >= 8 && bId.includes(aReqId)) return true;
-          if (bReqId && bReqId.length >= 8 && aId.includes(bReqId)) return true;
-
-          return false;
-        };
-
-        // 重複排除ロジック
-        const uniqueHourlyList: any[] = [];
-
-        for (const r of hourlyRecords) {
-          const rHours = getHourlyHours(r);
-          if (rHours <= 0) continue; // 有効な時間休時間が取得できないゴミレコードはスキップ
-
-          const rSlot = getHourlySlot(r);
-
-          const isDuplicate = uniqueHourlyList.some(u => {
-            // 1. IDやリクエストIDの関連一致
-            if (isSameOrLinkedShift(r, u)) return true;
-
-            // 2. 内容による重複判定（同じ時間数 かつ 時間帯が同一または未指定）
-            const uHours = getHourlyHours(u);
-            const uSlot = getHourlySlot(u);
-
-            if (Math.abs(rHours - uHours) < 0.001) {
-              if (!rSlot || !uSlot || rSlot === uSlot) {
-                return true;
-              }
-            }
-
-            return false;
-          });
-
-          if (!isDuplicate) {
-            uniqueHourlyList.push(r);
-          }
-        }
-
-        // 重複排除された各ユニーク時間休レコードのみを加算
-        uniqueHourlyList.forEach(r => processRecord(r));
-      }
+    if (isTargetStaffLog && (addedHours > 0 || ['出勤', '日勤'].includes(rawType))) {
+      console.log(`[NonWorkingHours Audit] ${staffName} ${targetDateStr}: type="${rawType}", added=${addedHours}h, isManual=${isManualEntry(resolvedShift)}, id="${resolvedShift.id || ''}"`);
     }
   }
 
