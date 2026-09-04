@@ -707,11 +707,11 @@ export function calculateStaffMonthlyNonWorkingHours(
 
     if (dayRecords.length === 0) continue;
 
-    // 手動入力優先
+    // 手動入力が存在する場合は自動入力を除外
     const manualRecords = dayRecords.filter(isManualEntry);
     const activeRecords = manualRecords.length > 0 ? manualRecords : dayRecords;
 
-    // 最新更新順にソート
+    // 最新更新順にソート（手動優先 ＋ 更新日時降順）
     activeRecords.sort((a, b) => {
       const aMan = isManualEntry(a);
       const bMan = isManualEntry(b);
@@ -800,25 +800,105 @@ export function calculateStaffMonthlyNonWorkingHours(
       if (counted) itemCount++;
     };
 
-    const firstRec = activeRecords[0];
-    const firstType = String(firstRec.type || firstRec.shiftType || '').trim();
+    // 主要休暇種別（全日休または複合休）の判定
+    const isMajorLeaveType = (r: any): boolean => {
+      const t = String(r?.type || r?.shiftType || '').trim();
+      return [
+        '年休', '有給休暇', '有休', '年給', '有給',
+        '特休',
+        '夏季休暇', '夏期休暇', '夏休',
+        '振替4', '振4',
+        '振替＋時間休',
+        '特休＋時間休',
+        '出張'
+      ].includes(t);
+    };
 
-    // 時間休単体以外は、日の最優先レコードを採用
-    if (!['時間休', '時間給', '時間給2'].includes(firstType)) {
-      processRecord(firstRec);
+    // 主要休暇レコードがあるか検索
+    const majorLeaveRecords = activeRecords.filter(isMajorLeaveType);
+
+    if (majorLeaveRecords.length > 0) {
+      // 主要休暇が存在する場合は最優先の1件を採用して集計
+      processRecord(majorLeaveRecords[0]);
     } else {
-      // 時間休の場合は、その日に複数時間休がある可能性を考慮して集計（重複IDは除外）
-      const seenIds = new Set<string>();
-      activeRecords.forEach(r => {
-        const t = String(r.type || r.shiftType || '').trim();
-        const rId = String(r.id || '');
-        if (['時間休', '時間給', '時間給2'].includes(t)) {
-          if (!rId || !seenIds.has(rId)) {
-            if (rId) seenIds.add(rId);
-            processRecord(r);
+      // 主要休暇がない場合、時間休レコード群を抽出して重複排除（Deduplication）を実施
+      const hourlyRecords = activeRecords.filter(r => {
+        const t = String(r?.type || r?.shiftType || '').trim();
+        return ['時間休', '時間給', '時間給2'].includes(t);
+      });
+
+      if (hourlyRecords.length > 0) {
+        // 時間休の時間数取得ヘルパー
+        const getHourlyHours = (r: any): number => {
+          const rawH = r.hours ?? r.duration ?? r.partialLeaveHours ?? r.leaveHours ?? r.details?.duration ?? r.details?.hours ?? r.details?.partialLeaveHours;
+          const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? Number(rawH) : null;
+          return (parsedH !== null && !isNaN(parsedH) && parsedH > 0) ? parsedH : 1.0;
+        };
+
+        // 時間休の時間帯取得ヘルパー
+        const getHourlySlot = (r: any): string => {
+          return String(
+            r.timeSlot || r.time_slot || r.time ||
+            r.startTime || r.start_time ||
+            r.details?.timeSlot || r.details?.time || r.details?.startTime || ''
+          ).trim();
+        };
+
+        // レコード間のID関連性チェック（shiftsとrequestsの同期重複検出）
+        const isSameOrLinkedShift = (a: any, b: any): boolean => {
+          const aId = String(a?.id || '').trim();
+          const bId = String(b?.id || '').trim();
+          if (aId && bId && aId === bId) return true;
+
+          const aReqId = String(a?.requestId || a?.request_id || a?.sourceId || a?.source_id || '').trim();
+          const bReqId = String(b?.requestId || b?.request_id || b?.sourceId || b?.source_id || '').trim();
+
+          if (aReqId && bId && aReqId === bId) return true;
+          if (bReqId && aId && bReqId === aId) return true;
+          if (aReqId && bReqId && aReqId === bReqId) return true;
+
+          // IDの包含一致（shifts側のIDにrequests側のUUIDが含まれる場合等）
+          if (aId && bId && aId.length >= 8 && bId.length >= 8) {
+            if (aId.includes(bId) || bId.includes(aId)) return true;
+          }
+          if (aReqId && aReqId.length >= 8 && bId.includes(aReqId)) return true;
+          if (bReqId && bReqId.length >= 8 && aId.includes(bReqId)) return true;
+
+          return false;
+        };
+
+        // 重複排除ロジック
+        const uniqueHourlyList: any[] = [];
+
+        for (const r of hourlyRecords) {
+          const rHours = getHourlyHours(r);
+          const rSlot = getHourlySlot(r);
+
+          const isDuplicate = uniqueHourlyList.some(u => {
+            // 1. IDやリクエストIDの関連一致
+            if (isSameOrLinkedShift(r, u)) return true;
+
+            // 2. 内容による重複判定（同じ時間数 かつ 時間帯が同一または未指定）
+            const uHours = getHourlyHours(u);
+            const uSlot = getHourlySlot(u);
+
+            if (Math.abs(rHours - uHours) < 0.001) {
+              if (!rSlot || !uSlot || rSlot === uSlot) {
+                return true;
+              }
+            }
+
+            return false;
+          });
+
+          if (!isDuplicate) {
+            uniqueHourlyList.push(r);
           }
         }
-      });
+
+        // 重複排除された各ユニーク時間休レコードのみを加算
+        uniqueHourlyList.forEach(r => processRecord(r));
+      }
     }
   }
 
