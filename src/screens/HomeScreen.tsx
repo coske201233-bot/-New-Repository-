@@ -205,7 +205,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       const allShifts = [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
       const shift = allShifts.find(r => (r.staffName || r.staff_name)?.trim() === sT && r.date === todayStr && r.status === 'approved');
       
-      return !!shift && (shift.type === '出勤' || shift.type === '日勤');
+      return !!shift && (shift.type === '出勤' || shift.type === '日勤' || shift.type === '特別出勤');
     };
 
     const hospitalAttending = safeStaff.filter(s => {

@@ -659,7 +659,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const handlePermanentDeleteStaff = () => handleDeleteStaff(true);
 
   // Constants
-  const SHIFT_TYPES = ['出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '振替4', '特休', '年休', '特休＋時間休', '出張', '空欄'];
+  const SHIFT_TYPES = ['出勤', '特別出勤', '公休', '夏季休暇', '時間休', '振替＋時間休', '振替4', '特休', '年休', '特休＋時間休', '出張', '空欄'];
   const HOUR_SELECTOR_TYPES = ['時間休', '特休', '特休＋時間休', '振替＋時間休', '出張'];
 
   const monthInfo = useMemo(() => (getMonthInfo(activeDate.getFullYear(), activeDate.getMonth()) || []) as MonthDay[], [activeDate]);
@@ -1065,7 +1065,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
               const rName = sName ? dayMap?.get(sName) : null;
               const rEmail = emailPrefix ? dayMap?.get(emailPrefix) : null;
               const potentialReqs = [rId, rName, rEmail].filter(Boolean);
-              const req = potentialReqs.find(r => !['出勤', '日勤'].includes(r.type)) || potentialReqs[0];
+              const req = potentialReqs.find(r => !['出勤', '日勤', '特別出勤'].includes(r.type)) || potentialReqs[0];
               
               let displayLabel = '';
               let labelColor = 'white';
@@ -1074,6 +1074,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                 const rType = (req.type || '').trim();
                 if (['出勤', '日勤'].includes(rType)) {
                   displayLabel = '出勤'; labelColor = '#38bdf8';
+                } else if (rType === '特別出勤') {
+                  displayLabel = '特出'; labelColor = '#38bdf8';
                 } else if (rType === '公休') {
                   displayLabel = '公休'; labelColor = '#ef4444';
                 } else if (rType === '夏季休暇') {

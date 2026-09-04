@@ -197,8 +197,8 @@ export const calculateUsedLeaveHours = (
       } else if (isManNew && wasManOld) {
         isBetter = getTime(r) > getTime(existing);
       } else {
-        const isOffNew = !['出勤', '日勤'].includes(r?.type);
-        const isOffOld = !['出勤', '日勤'].includes(existing?.type);
+        const isOffNew = !['出勤', '日勤', '特別出勤'].includes(r?.type);
+        const isOffOld = !['出勤', '日勤', '特別出勤'].includes(existing?.type);
         isBetter = isOffNew && !isOffOld;
       }
     }
@@ -328,8 +328,8 @@ export const calculateMandatoryLeaveStatus = (
       } else if (isManNew && wasManOld) {
         isBetter = getTime(r) > getTime(existing);
       } else {
-        const isOffNew = !['出勤', '日勤'].includes(r?.type);
-        const isOffOld = !['出勤', '日勤'].includes(existing?.type);
+        const isOffNew = !['出勤', '日勤', '特別出勤'].includes(r?.type);
+        const isOffOld = !['出勤', '日勤', '特別出勤'].includes(existing?.type);
         isBetter = isOffNew && !isOffOld;
       }
     }
@@ -491,8 +491,8 @@ export const calculateAnnualLeaveRate = (
       } else if (isManNew && wasManOld) {
         isBetter = getTime(r) > getTime(existing);
       } else {
-        const isOffNew = !['出勤', '日勤'].includes(r?.type);
-        const isOffOld = !['出勤', '日勤'].includes(existing?.type);
+        const isOffNew = !['出勤', '日勤', '特別出勤'].includes(r?.type);
+        const isOffOld = !['出勤', '日勤', '特別出勤'].includes(existing?.type);
         isBetter = isOffNew && !isOffOld;
       }
     }
@@ -792,9 +792,9 @@ export function calculateStaffMonthlyNonWorkingHours(
         // 共に手動の場合は更新日時が新しい方を優先
         isBetter = getTime(r) > getTime(resolvedShift);
       } else {
-        // 共に自動の場合は休み（出勤・日勤以外）を優先
-        const isOffNew = !['出勤', '日勤'].includes(r?.type || r?.shiftType);
-        const isOffOld = !['出勤', '日勤'].includes(resolvedShift?.type || resolvedShift?.shiftType);
+        // 共に自動の場合は休み（出勤・日勤・特別出勤以外）を優先
+        const isOffNew = !['出勤', '日勤', '特別出勤'].includes(r?.type || r?.shiftType);
+        const isOffOld = !['出勤', '日勤', '特別出勤'].includes(resolvedShift?.type || resolvedShift?.shiftType);
         isBetter = isOffNew && !isOffOld;
       }
 
@@ -809,8 +809,8 @@ export function calculateStaffMonthlyNonWorkingHours(
     let addedHours = 0;
     let counted = false;
 
-    // 1. 出勤・日勤・公休（週休）・休日出勤は勤務を要しない時間には加算しない (0h)
-    if (['出勤', '日勤', '公休', '休日出勤'].includes(rawType)) {
+    // 1. 出勤・日勤・特別出勤・公休（週休）・休日出勤は勤務を要しない時間には加算しない (0h)
+    if (['出勤', '日勤', '特別出勤', '公休', '休日出勤'].includes(rawType)) {
       addedHours = 0;
     }
     // 2. 年休 (通常: 7.75h, 会計年度: 7.5h)
@@ -1161,8 +1161,8 @@ export function calculateStaffDailyNonWorkingHours(
     } else if (isManNew && wasManOld) {
       isBetter = getTime(r) > getTime(resolvedShift);
     } else {
-      const isOffNew = !['出勤', '日勤'].includes(r?.type || r?.shiftType);
-      const isOffOld = !['出勤', '日勤'].includes(resolvedShift?.type || resolvedShift?.shiftType);
+      const isOffNew = !['出勤', '日勤', '特別出勤'].includes(r?.type || r?.shiftType);
+      const isOffOld = !['出勤', '日勤', '特別出勤'].includes(resolvedShift?.type || resolvedShift?.shiftType);
       isBetter = isOffNew && !isOffOld;
     }
 
@@ -1178,8 +1178,8 @@ export function calculateStaffDailyNonWorkingHours(
   const rawType = String(resolvedShift.type || resolvedShift.shiftType || '').trim();
   let addedHours = 0;
 
-  // 1. 出勤・日勤・公休（週休）・休日出勤は勤務を要しない時間には加算しない (0h)
-  if (['出勤', '日勤', '公休', '休日出勤'].includes(rawType)) {
+  // 1. 出勤・日勤・特別出勤・公休（週休）・休日出勤は勤務を要しない時間には加算しない (0h)
+  if (['出勤', '日勤', '特別出勤', '公休', '休日出勤'].includes(rawType)) {
     addedHours = 0;
   }
   // 2. 年休 (通常: 7.75h, 会計年度: 7.5h)

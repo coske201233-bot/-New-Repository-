@@ -126,6 +126,8 @@ export const getNormalizedShiftMatrix = (
 
       if (type === '出勤' || type === '日勤') {
         label = '出';
+      } else if (type === '特別出勤') {
+        label = '特出';
       } else if (type === '公休') {
         label = '公';
       } else if (type === '年休' || type === '有給休暇' || type === '年給' || type === '有給') {

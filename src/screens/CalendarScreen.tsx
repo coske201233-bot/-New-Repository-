@@ -303,7 +303,7 @@ export const CalendarScreen: React.FC<any> = ({
         // 稼働としてカウントする種別の定義
         const isWorkType = (t: string) => {
           if (!t) return false;
-          if (t === '出勤' || t === '日勤') return true; 
+          if (t === '出勤' || t === '日勤' || t === '特別出勤') return true; 
           // 🚨 【最終解決】「時」が含まれていても、承認済み(approved)または申請中(pending)でなければカウントしない
           if (t.includes('時')) {
             if (!singleReq) return false;
@@ -1287,6 +1287,8 @@ export const CalendarScreen: React.FC<any> = ({
             label = ' 振＋時';
           } else if (type === '振替4' || type === '振4') {
             label = ' 振4';
+          } else if (type === '特別出勤') {
+            label = ' (特出)';
           } else {
             if (type === '時間休' || type === '時間給') label = `(${duration}h)`;
             else if (type === '出張') label = `出(${duration}h)`;
@@ -1616,8 +1618,10 @@ export const CalendarScreen: React.FC<any> = ({
                         dur = 0;
                       }
 
-                      if (dur > 0 || (item.type || '') === '振替4' || (item.type || '') === '振4') {
-                        const text = ((item.type || '') === '振替4' || (item.type || '') === '振4')
+                      if (dur > 0 || (item.type || '') === '振替4' || (item.type || '') === '振4' || (item.type || '') === '特別出勤') {
+                        const text = (item.type || '') === '特別出勤'
+                          ? ` 特別出勤`
+                          : ((item.type || '') === '振替4' || (item.type || '') === '振4')
                           ? ` 振4`
                           : (item.type || '') === '特休＋時間休'
                             ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
@@ -1843,7 +1847,7 @@ export const CalendarScreen: React.FC<any> = ({
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-              {['出勤', '時間休', '公休', '特休', '年休', '振替4', '特休＋時間休', '振替＋時間休', '出張', '空欄'].map(t => (
+              {['出勤', '特別出勤', '時間休', '公休', '特休', '年休', '振替4', '特休＋時間休', '振替＋時間休', '出張', '空欄'].map(t => (
                 <TouchableOpacity 
                   key={t}
                   style={[
@@ -2019,7 +2023,7 @@ export const CalendarScreen: React.FC<any> = ({
               <View style={{ marginTop: 16 }}>
                 <ThemeText variant="label" style={{ marginBottom: 10 }}>変更後の種別を選択</ThemeText>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                  {['出勤', '年休', '公休', '特休', '時間休', '振替4', '夏季休暇', '特休＋時間休', '振替＋時間休', '出張'].map(t => (
+                  {['出勤', '特別出勤', '年休', '公休', '特休', '時間休', '振替4', '夏季休暇', '特休＋時間休', '振替＋時間休', '出張'].map(t => (
                     <TouchableOpacity 
                       key={t}
                       style={[

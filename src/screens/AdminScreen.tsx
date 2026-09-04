@@ -878,6 +878,9 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             if (type === '出勤' || type === '日勤') {
               cellStyle = 'background-color: #ffffff; color: #1e293b; font-weight: bold;';
               label = '出';
+            } else if (type === '特別出勤') {
+              cellStyle = 'background-color: #ffffff; color: #1e293b; font-weight: bold;';
+              label = '特出';
             } else if (type === '公休') {
               cellStyle = 'background-color: #fef2f2; color: #dc2626;';
               label = '公';
