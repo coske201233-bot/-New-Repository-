@@ -1304,11 +1304,6 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                         <MapPin size={12} color={COLORS.textSecondary} />
                         <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginLeft: 4 }}>{staff?.placement || staff?.department || ''}</ThemeText>
                       </View>
-                      {staff?.email ? (
-                        <ThemeText variant="caption" color="rgba(255,255,255,0.4)" style={{ fontSize: 10 }}>
-                          {staff.email}
-                        </ThemeText>
-                      ) : null}
                     </View>
                   </TouchableOpacity>
                   {userRole === 'admin' && (
