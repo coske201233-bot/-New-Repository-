@@ -6,7 +6,7 @@ import { COLORS, SPACING } from '../theme/theme';
 import { 
   ChevronRight, ChevronLeft, Database, FileOutput, 
   QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle, RefreshCw, History,
-  BarChart2, TrendingUp, ChevronDown, ChevronUp, Award
+  BarChart2, TrendingUp, ChevronDown, ChevronUp, Award, Layers, Calendar
 } from 'lucide-react-native';
 import { getMonthInfo, normalizeName, formatDate, getDayType, normalizeDateStr } from '../utils/dateUtils';
 import { cloudStorage } from '../utils/cloudStorage';
@@ -25,8 +25,12 @@ import {
   calculateAnnualLeaveRate,
   calculateAllStaffMonthlyNonWorkingHours,
   calculateStaffMonthlyNonWorkingHours,
+  calculateWeeklyFloorNonWorkingHours,
+  getWeekdayWeeksForMonth,
+  getStaffFloorAllocation,
   formatNonWorkingHours,
-  isAccountingYearStaff
+  isAccountingYearStaff,
+  WeeklyFloorSummaryResult
 } from '../utils/leaveUtils';
 
 
@@ -88,6 +92,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const [nonWorkingHoursSort, setNonWorkingHoursSort] = useState<'hours_desc' | 'hours_asc' | 'name'>('hours_desc');
   const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
   const [showOnlyWithHours, setShowOnlyWithHours] = useState(false);
+
+  // 🏢 週別（平日5日間）フロア別「勤務を要しない時間」集計用ステート
+  const [selectedWeeklyYear, setSelectedWeeklyYear] = useState<number>((currentDate || new Date()).getFullYear());
+  const [selectedWeeklyMonth, setSelectedWeeklyMonth] = useState<number>((currentDate || new Date()).getMonth() + 1);
+  const [selectedWeekIndex, setSelectedWeekIndex] = useState<number>(1);
+  const [expandedWeeklyStaffId, setExpandedWeeklyStaffId] = useState<string | null>(null);
 
   // 全シフト＋リクエストデータ
   const allCalendarData = React.useMemo(() => {
@@ -247,6 +257,196 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       return (a.staff.name || '').localeCompare(b.staff.name || '');
     });
   }, [staffNonWorkingHoursList, showOnlyWithHours, nonWorkingHoursSort]);
+
+  // 🏢 週別（平日5日間）フロア別「勤務を要しない時間」集計リスト
+  const weeklyFloorSummaryList = React.useMemo<WeeklyFloorSummaryResult[]>(() => {
+    try {
+      if (typeof calculateWeeklyFloorNonWorkingHours === 'function') {
+        return calculateWeeklyFloorNonWorkingHours(
+          staffList,
+          allCalendarData,
+          selectedWeeklyYear,
+          selectedWeeklyMonth
+        );
+      }
+    } catch (err) {
+      console.error('[AdminScreen] calculateWeeklyFloorNonWorkingHours error:', err);
+    }
+    return [];
+  }, [staffList, allCalendarData, selectedWeeklyYear, selectedWeeklyMonth]);
+
+  // 🏢 月間フロア合計
+  const monthlyFloorTotals = React.useMemo(() => {
+    const list = Array.isArray(weeklyFloorSummaryList) ? weeklyFloorSummaryList : [];
+    const f2Total = list.reduce((sum, w) => sum + (Number(w.floor2Total) || 0), 0);
+    const f4Total = list.reduce((sum, w) => sum + (Number(w.floor4Total) || 0), 0);
+    const roundedF2 = Math.round(f2Total * 100) / 100;
+    const roundedF4 = Math.round(f4Total * 100) / 100;
+    const overallTotal = Math.round((roundedF2 + roundedF4) * 100) / 100;
+
+    return {
+      floor2Total: roundedF2,
+      floor4Total: roundedF4,
+      overallTotal,
+      floor2TotalStr: safeFormatHours(roundedF2),
+      floor4TotalStr: safeFormatHours(roundedF4),
+      overallTotalStr: safeFormatHours(overallTotal),
+    };
+  }, [weeklyFloorSummaryList]);
+
+  // 🏢 現在フォーカスされている週
+  const currentWeek = React.useMemo(() => {
+    if (!Array.isArray(weeklyFloorSummaryList) || weeklyFloorSummaryList.length === 0) return null;
+    const found = weeklyFloorSummaryList.find(w => w.weekIndex === selectedWeekIndex);
+    return found || weeklyFloorSummaryList[0];
+  }, [weeklyFloorSummaryList, selectedWeekIndex]);
+
+  // 週別集計用: 月送りハンドラー
+  const handlePrevWeeklyMonth = () => {
+    if (selectedWeeklyMonth === 1) {
+      setSelectedWeeklyYear(prev => prev - 1);
+      setSelectedWeeklyMonth(12);
+    } else {
+      setSelectedWeeklyMonth(prev => prev - 1);
+    }
+    setSelectedWeekIndex(1);
+  };
+
+  const handleNextWeeklyMonth = () => {
+    if (selectedWeeklyMonth === 12) {
+      setSelectedWeeklyYear(prev => prev + 1);
+      setSelectedWeeklyMonth(1);
+    } else {
+      setSelectedWeeklyMonth(prev => prev + 1);
+    }
+    setSelectedWeekIndex(1);
+  };
+
+  // 週別集計用: 週送りハンドラー
+  const handlePrevWeek = () => {
+    if (selectedWeekIndex > 1) {
+      setSelectedWeekIndex(prev => prev - 1);
+    } else {
+      // 前月の最終週へ
+      if (selectedWeeklyMonth === 1) {
+        const prevY = selectedWeeklyYear - 1;
+        const prevM = 12;
+        setSelectedWeeklyYear(prevY);
+        setSelectedWeeklyMonth(prevM);
+        const prevWeeks = calculateWeeklyFloorNonWorkingHours(staffList, allCalendarData, prevY, prevM);
+        setSelectedWeekIndex(prevWeeks.length || 1);
+      } else {
+        const prevM = selectedWeeklyMonth - 1;
+        setSelectedWeeklyMonth(prevM);
+        const prevWeeks = calculateWeeklyFloorNonWorkingHours(staffList, allCalendarData, selectedWeeklyYear, prevM);
+        setSelectedWeekIndex(prevWeeks.length || 1);
+      }
+    }
+  };
+
+  const handleNextWeek = () => {
+    const totalWeeks = weeklyFloorSummaryList.length;
+    if (selectedWeekIndex < totalWeeks) {
+      setSelectedWeekIndex(prev => prev + 1);
+    } else {
+      // 翌月の第1週へ
+      if (selectedWeeklyMonth === 12) {
+        setSelectedWeeklyYear(prev => prev + 1);
+        setSelectedWeeklyMonth(1);
+      } else {
+        setSelectedWeeklyMonth(prev => prev + 1);
+      }
+      setSelectedWeekIndex(1);
+    }
+  };
+
+  // 🏢 週別フロア別集計表のA4印刷ハンドラー
+  const handlePrintWeeklyFloorReport = async () => {
+    try {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>週別フロア別 勤務を要しない時間 集計表（${selectedWeeklyYear}年${selectedWeeklyMonth}月）</title>
+          <style>
+            body { font-family: sans-serif; padding: 24px; color: #1e293b; }
+            h1 { font-size: 18px; margin-bottom: 6px; text-align: center; color: #0f172a; }
+            .subtitle { font-size: 12px; color: #64748b; text-align: center; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 12px; }
+            th, td { border: 1px solid #cbd5e1; padding: 9px 12px; text-align: center; }
+            th { background-color: #f8fafc; font-weight: bold; color: #334155; }
+            .f2-col { color: #0284c7; font-weight: bold; }
+            .f4-col { color: #d97706; font-weight: bold; }
+            .tot-col { color: #059669; font-weight: bold; font-size: 13px; }
+            .total-row { background-color: #f1f5f9; font-weight: bold; }
+            .rules-box { font-size: 11px; color: #475569; margin-top: 15px; border-top: 1px dashed #cbd5e1; padding-top: 12px; line-height: 1.6; }
+            .rules-box b { color: #1e293b; }
+          </style>
+        </head>
+        <body>
+          <h1>【週別・フロア別】勤務を要しない時間 集計表</h1>
+          <div class="subtitle">対象年月: ${selectedWeeklyYear}年 ${selectedWeeklyMonth}月（平日5日間ベース・月またぎ対応）</div>
+          <table>
+            <thead>
+              <tr>
+                <th>対象週</th>
+                <th>2F 合計時間</th>
+                <th>4F 合計時間</th>
+                <th>週全体合計時間</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${weeklyFloorSummaryList.map(w => `
+                <tr>
+                  <td style="text-align: left; padding-left: 14px;"><b>第${w.weekIndex}週</b> (${w.label})</td>
+                  <td class="f2-col">${w.floor2TotalStr}</td>
+                  <td class="f4-col">${w.floor4TotalStr}</td>
+                  <td class="tot-col">${w.weekTotalStr}</td>
+                </tr>
+              `).join('')}
+              <tr class="total-row">
+                <td style="text-align: left; padding-left: 14px;"><b>月間合計</b></td>
+                <td class="f2-col">${monthlyFloorTotals.floor2TotalStr}</td>
+                <td class="f4-col">${monthlyFloorTotals.floor4TotalStr}</td>
+                <td class="tot-col">${monthlyFloorTotals.overallTotalStr}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="rules-box">
+            <b>【集計および按分ルール】</b><br/>
+            ・対象期間: 月曜日〜金曜日の平日5日間に発生した勤務を要しない時間（年休、特休、時間休、夏季休暇、振替4、振替＋時間休、特休＋時間休、平日の出張）。<br/>
+            ・除外基準: 役職・職種・所属等に「事務」が含まれるスタッフのみ除外（管理職は2F/4F/フォロー該当の場合は集計対象）。<br/>
+            ・フロア按分比率:<br/>
+            　- SC（包括）: 全て「2F」へ加算（2F: 1.0）<br/>
+            　- SA: 「2F」に 0.5、「4F」に 0.5 で半分ずつ按分<br/>
+            　- フォロー: 「2F」に 0.5、「4F」に 0.5 で半分ずつ按分<br/>
+            　- 2F所属スタッフ: 全て「2F」へ加算（2F: 1.0）<br/>
+            　- 4F所属スタッフ: 全て「4F」へ加算（4F: 1.0）<br/>
+            ・週の定義: 月またぎの週も月曜〜金曜の5日間の合算として1つの週枠で表示。
+          </div>
+        </body>
+        </html>
+      `;
+      if (Platform.OS === 'web') {
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.focus();
+          setTimeout(() => {
+            printWindow.print();
+          }, 300);
+        }
+      } else {
+        await Print.printAsync({ html });
+      }
+    } catch (e) {
+      console.error('週別フロア別集計表の印刷に失敗しました:', e);
+      Alert.alert('エラー', '印刷処理の開始に失敗しました。');
+    }
+  };
 
   // 前月・翌月移動
   const handlePrevExemptMonth = () => {
@@ -1021,6 +1221,248 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </TouchableOpacity>
               </ThemeCard>
 
+              {/* 🏢 管理者専用: 週別（平日5日間）フロア別「勤務を要しない時間」集計セクション */}
+              <View style={{ marginTop: 24 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Layers size={20} color="#38bdf8" />
+                    <ThemeText bold variant="h2">🏢 週別・フロア別 集計</ThemeText>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    {Platform.OS === 'web' && (
+                      <TouchableOpacity 
+                        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.12)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}
+                        onPress={handlePrintWeeklyFloorReport}
+                      >
+                        <Printer size={14} color="#38bdf8" />
+                        <ThemeText variant="caption" bold color="#38bdf8" style={{ marginLeft: 4 }}>A4印刷</ThemeText>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+
+                {/* 月送りナビゲーション ＆ 月間フロア合計カード */}
+                <ThemeCard style={styles.weeklySummaryCard}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <TouchableOpacity onPress={handlePrevWeeklyMonth} style={styles.monthNavBtn}>
+                      <ChevronLeft size={18} color="#38bdf8" />
+                      <ThemeText variant="caption" bold color="#38bdf8">前月</ThemeText>
+                    </TouchableOpacity>
+                    <View style={{ alignItems: 'center' }}>
+                      <ThemeText bold variant="h2" color="#38bdf8">{selectedWeeklyYear}年 {selectedWeeklyMonth}月</ThemeText>
+                      <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11, marginTop: 2 }}>週別（平日5日間）フロア按分集計</ThemeText>
+                    </View>
+                    <TouchableOpacity onPress={handleNextWeeklyMonth} style={styles.monthNavBtn}>
+                      <ThemeText variant="caption" bold color="#38bdf8">翌月</ThemeText>
+                      <ChevronRight size={18} color="#38bdf8" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* 月間フロア合計3項目 */}
+                  <View style={styles.exemptSummaryGrid}>
+                    <View style={[styles.exemptSummaryCell, { borderRightWidth: 1, borderRightColor: 'rgba(255, 255, 255, 0.06)' }]}>
+                      <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 11 }}>2F スタッフ月合計</ThemeText>
+                      <ThemeText bold style={{ fontSize: 17, color: '#38bdf8', marginTop: 3 }}>{monthlyFloorTotals.floor2TotalStr}</ThemeText>
+                    </View>
+                    <View style={[styles.exemptSummaryCell, { borderRightWidth: 1, borderRightColor: 'rgba(255, 255, 255, 0.06)' }]}>
+                      <ThemeText variant="caption" color="#f59e0b" style={{ fontSize: 11 }}>4F スタッフ月合計</ThemeText>
+                      <ThemeText bold style={{ fontSize: 17, color: '#f59e0b', marginTop: 3 }}>{monthlyFloorTotals.floor4TotalStr}</ThemeText>
+                    </View>
+                    <View style={styles.exemptSummaryCell}>
+                      <ThemeText variant="caption" color="#34d399" style={{ fontSize: 11 }}>月間全合計</ThemeText>
+                      <ThemeText bold style={{ fontSize: 17, color: '#34d399', marginTop: 3 }}>{monthlyFloorTotals.overallTotalStr}</ThemeText>
+                    </View>
+                  </View>
+                </ThemeCard>
+
+                {/* 週送りナビゲーション＆フォーカス週カード */}
+                {currentWeek && (
+                  <ThemeCard style={styles.currentWeekCard}>
+                    {/* 週送りヘッダー */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <TouchableOpacity onPress={handlePrevWeek} style={styles.weekNavBtn}>
+                        <ChevronLeft size={16} color="#38bdf8" />
+                        <ThemeText variant="caption" bold color="#38bdf8">前週</ThemeText>
+                      </TouchableOpacity>
+
+                      <View style={{ alignItems: 'center' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.15)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                            <ThemeText variant="caption" bold color="#38bdf8">第{currentWeek.weekIndex}週</ThemeText>
+                          </View>
+                          <ThemeText bold style={{ fontSize: 15, color: 'white' }}>{currentWeek.label}</ThemeText>
+                        </View>
+                        <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10, marginTop: 2 }}>
+                          ({currentWeek.startDateStr} 〜 {currentWeek.endDateStr})
+                        </ThemeText>
+                      </View>
+
+                      <TouchableOpacity onPress={handleNextWeek} style={styles.weekNavBtn}>
+                        <ThemeText variant="caption" bold color="#38bdf8">翌週</ThemeText>
+                        <ChevronRight size={16} color="#38bdf8" />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* 選択週の集計3項目（2F / 4F / 週全体合計） */}
+                    <View style={styles.weekHoursRow}>
+                      <View style={[styles.weekHourBox, { borderColor: 'rgba(56, 189, 248, 0.3)', backgroundColor: 'rgba(56, 189, 248, 0.08)' }]}>
+                        <ThemeText variant="caption" bold color="#38bdf8" style={{ fontSize: 11 }}>2F 合計時間</ThemeText>
+                        <ThemeText bold style={{ fontSize: 19, color: '#38bdf8', marginTop: 4 }}>{currentWeek.floor2TotalStr}</ThemeText>
+                      </View>
+
+                      <View style={[styles.weekHourBox, { borderColor: 'rgba(245, 158, 11, 0.3)', backgroundColor: 'rgba(245, 158, 11, 0.08)' }]}>
+                        <ThemeText variant="caption" bold color="#f59e0b" style={{ fontSize: 11 }}>4F 合計時間</ThemeText>
+                        <ThemeText bold style={{ fontSize: 19, color: '#f59e0b', marginTop: 4 }}>{currentWeek.floor4TotalStr}</ThemeText>
+                      </View>
+
+                      <View style={[styles.weekHourBox, { borderColor: 'rgba(52, 211, 153, 0.3)', backgroundColor: 'rgba(52, 211, 153, 0.08)' }]}>
+                        <ThemeText variant="caption" bold color="#34d399" style={{ fontSize: 11 }}>週全体合計時間</ThemeText>
+                        <ThemeText bold style={{ fontSize: 19, color: '#34d399', marginTop: 4 }}>{currentWeek.weekTotalStr}</ThemeText>
+                      </View>
+                    </View>
+
+                    {/* 選択週の内訳スタッフリスト */}
+                    {currentWeek.staffBreakdown.length > 0 ? (
+                      <View style={{ marginTop: 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <ThemeText variant="caption" bold color={COLORS.textSecondary} style={{ fontSize: 11 }}>
+                            第{currentWeek.weekIndex}週 対象スタッフ内訳 ({currentWeek.staffBreakdown.length}名)
+                          </ThemeText>
+                          <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>
+                            ※按分比率を適用済み
+                          </ThemeText>
+                        </View>
+
+                        <View style={{ gap: 6 }}>
+                          {currentWeek.staffBreakdown.map(staffItem => {
+                            const isStaffExpanded = expandedWeeklyStaffId === staffItem.staffId;
+                            return (
+                              <View key={`week_staff_${staffItem.staffId}`} style={styles.weeklyStaffItem}>
+                                <TouchableOpacity 
+                                  activeOpacity={0.7}
+                                  onPress={() => setExpandedWeeklyStaffId(isStaffExpanded ? null : staffItem.staffId)}
+                                >
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <View style={{ flex: 1 }}>
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                        <ThemeText bold style={{ fontSize: 13 }}>{staffItem.staffName}</ThemeText>
+                                        <View style={styles.categoryBadge}>
+                                          <ThemeText variant="caption" bold color="#38bdf8" style={{ fontSize: 10 }}>{staffItem.categoryName}</ThemeText>
+                                        </View>
+                                      </View>
+                                      <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10, marginTop: 2 }}>
+                                        所属: {staffItem.placement} / 役職: {staffItem.role}
+                                      </ThemeText>
+                                    </View>
+
+                                    <View style={{ alignItems: 'flex-end', gap: 2 }}>
+                                      <ThemeText bold style={{ fontSize: 13, color: 'white' }}>
+                                        計 {staffItem.totalHoursStr}
+                                      </ThemeText>
+                                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                                        {staffItem.floor2Hours > 0 && (
+                                          <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>2F: {staffItem.floor2HoursStr}</ThemeText>
+                                        )}
+                                        {staffItem.floor4Hours > 0 && (
+                                          <ThemeText variant="caption" color="#f59e0b" style={{ fontSize: 10 }}>4F: {staffItem.floor4HoursStr}</ThemeText>
+                                        )}
+                                      </View>
+                                    </View>
+                                  </View>
+                                </TouchableOpacity>
+
+                                {/* スタッフの日別詳細展開 */}
+                                {isStaffExpanded && (
+                                  <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.04)', flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                                    {staffItem.dayDetails.map((day, dIdx) => (
+                                      <View key={dIdx} style={styles.breakdownChip}>
+                                        <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>
+                                          {day.date.slice(5)}: <ThemeText bold color="#38bdf8">{day.rawType}</ThemeText> ({safeFormatHours(day.hours)})
+                                        </ThemeText>
+                                      </View>
+                                    ))}
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={{ paddingVertical: 12, alignItems: 'center' }}>
+                        <ThemeText variant="caption" color={COLORS.textSecondary}>この週に対象となる勤務を要しない時間はありません</ThemeText>
+                      </View>
+                    )}
+                  </ThemeCard>
+                )}
+
+                {/* 月内 全週一覧テーブル形式カード */}
+                <ThemeCard style={styles.weeklyTableCard}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <ThemeText bold style={{ fontSize: 13, color: 'white' }}>📋 {selectedWeeklyMonth}月 全週サマリー一覧</ThemeText>
+                    <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>月またぎの週を含む全{weeklyFloorSummaryList.length}週</ThemeText>
+                  </View>
+
+                  {/* テーブルヘッダー */}
+                  <View style={styles.tableHeaderRow}>
+                    <View style={{ flex: 1.5 }}><ThemeText variant="caption" bold color={COLORS.textSecondary} style={{ fontSize: 11 }}>対象週</ThemeText></View>
+                    <View style={{ flex: 1, alignItems: 'center' }}><ThemeText variant="caption" bold color="#38bdf8" style={{ fontSize: 11 }}>2F 合計</ThemeText></View>
+                    <View style={{ flex: 1, alignItems: 'center' }}><ThemeText variant="caption" bold color="#f59e0b" style={{ fontSize: 11 }}>4F 合計</ThemeText></View>
+                    <View style={{ flex: 1, alignItems: 'flex-end' }}><ThemeText variant="caption" bold color="#34d399" style={{ fontSize: 11 }}>週全体合計</ThemeText></View>
+                  </View>
+
+                  {/* 各週の行 */}
+                  {weeklyFloorSummaryList.map(week => {
+                    const isSelected = currentWeek?.weekIndex === week.weekIndex;
+                    return (
+                      <TouchableOpacity 
+                        key={`week_row_${week.weekIndex}`}
+                        activeOpacity={0.7}
+                        onPress={() => setSelectedWeekIndex(week.weekIndex)}
+                        style={[styles.tableDataRow, isSelected && styles.tableDataRowSelected]}
+                      >
+                        <View style={{ flex: 1.5 }}>
+                          <ThemeText bold={isSelected} style={{ fontSize: 12, color: isSelected ? '#38bdf8' : 'white' }}>
+                            第{week.weekIndex}週 ({week.label})
+                          </ThemeText>
+                        </View>
+                        <View style={{ flex: 1, alignItems: 'center' }}>
+                          <ThemeText bold={isSelected} style={{ fontSize: 12, color: '#38bdf8' }}>
+                            {week.floor2TotalStr}
+                          </ThemeText>
+                        </View>
+                        <View style={{ flex: 1, alignItems: 'center' }}>
+                          <ThemeText bold={isSelected} style={{ fontSize: 12, color: '#f59e0b' }}>
+                            {week.floor4TotalStr}
+                          </ThemeText>
+                        </View>
+                        <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                          <ThemeText bold={isSelected} style={{ fontSize: 12, color: '#34d399' }}>
+                            {week.weekTotalStr}
+                          </ThemeText>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+
+                  {/* 合計行 */}
+                  <View style={styles.tableTotalRow}>
+                    <View style={{ flex: 1.5 }}>
+                      <ThemeText bold style={{ fontSize: 12, color: 'white' }}>月間合計</ThemeText>
+                    </View>
+                    <View style={{ flex: 1, alignItems: 'center' }}>
+                      <ThemeText bold style={{ fontSize: 13, color: '#38bdf8' }}>{monthlyFloorTotals.floor2TotalStr}</ThemeText>
+                    </View>
+                    <View style={{ flex: 1, alignItems: 'center' }}>
+                      <ThemeText bold style={{ fontSize: 13, color: '#f59e0b' }}>{monthlyFloorTotals.floor4TotalStr}</ThemeText>
+                    </View>
+                    <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                      <ThemeText bold style={{ fontSize: 13, color: '#34d399' }}>{monthlyFloorTotals.overallTotalStr}</ThemeText>
+                    </View>
+                  </View>
+                </ThemeCard>
+              </View>
+
               {/* 🕒 管理者専用: 月別「勤務を要しない時間」集計一覧（時間換算表示） */}
               <View style={{ marginTop: 24 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -1623,5 +2065,19 @@ const styles = StyleSheet.create({
   filterChipSmall: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   filterChipSmallActive: { backgroundColor: 'rgba(56, 189, 248, 0.15)', borderColor: '#38bdf8' },
   exemptStaffCard: { padding: 14, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.04)', width: '100%' },
-  breakdownChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(255, 255, 255, 0.04)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)' }
+  breakdownChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(255, 255, 255, 0.04)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)' },
+
+  // 🏢 週別フロア別集計用スタイル
+  weeklySummaryCard: { padding: 14, marginBottom: 12, backgroundColor: 'rgba(56, 189, 248, 0.04)', borderColor: 'rgba(56, 189, 248, 0.15)', borderWidth: 1, borderRadius: 16, width: '100%' },
+  currentWeekCard: { padding: 14, marginBottom: 12, backgroundColor: 'rgba(255, 255, 255, 0.02)', borderColor: 'rgba(255, 255, 255, 0.08)', borderWidth: 1, borderRadius: 16, width: '100%' },
+  weekNavBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.12)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, gap: 4 },
+  weekHoursRow: { flexDirection: 'row', gap: 8, marginTop: 6, width: '100%' },
+  weekHourBox: { flex: 1, alignItems: 'center', paddingVertical: 10, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1 },
+  weeklyStaffItem: { padding: 10, backgroundColor: 'rgba(255, 255, 255, 0.02)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.04)' },
+  categoryBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: 'rgba(56, 189, 248, 0.12)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.25)' },
+  weeklyTableCard: { padding: 14, marginBottom: 12, backgroundColor: 'rgba(255, 255, 255, 0.02)', borderColor: 'rgba(255, 255, 255, 0.06)', borderWidth: 1, borderRadius: 16, width: '100%' },
+  tableHeaderRow: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.08)', alignItems: 'center' },
+  tableDataRow: { flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.04)', alignItems: 'center' },
+  tableDataRowSelected: { backgroundColor: 'rgba(56, 189, 248, 0.08)', borderRadius: 8 },
+  tableTotalRow: { flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 6, borderTopWidth: 1.5, borderTopColor: 'rgba(255, 255, 255, 0.15)', backgroundColor: 'rgba(255, 255, 255, 0.03)', alignItems: 'center', marginTop: 4, borderRadius: 8 }
 });

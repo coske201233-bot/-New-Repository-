@@ -956,6 +956,506 @@ export function calculateAllStaffMonthlyNonWorkingHours(
     .map(s => calculateStaffMonthlyNonWorkingHours(s, allCalendarData, year, month));
 }
 
+// ---------------------------------------------------------------------------
+// 🏢 週別（平日5日間）フロア別「勤務を要しない時間」集計エンジン（所属ルールの更新）
+// ---------------------------------------------------------------------------
+
+export interface FloorAllocation {
+  isExcluded: boolean;      // 事務、無効、入職前、対象外など
+  floor2Ratio: number;      // 2F按分割合 (0.0 〜 1.0)
+  floor4Ratio: number;      // 4F按分割合 (0.0 〜 1.0)
+  categoryName: string;     // 'SC(包括)' | 'SA' | 'フォロー' | '2F' | '4F' | '2F/4F兼務' | '事務(除外)' | '対象外'
+  matchReason: string;      // 判定の根拠
+}
+
+/**
+ * スタッフの所属・役職からフロア振り分けおよび按分比率を判定します
+ * 
+ * 【ルール】
+ * 1. 除外基準:
+ *    - 「事務」のみを除外（役職・職種・所属等に「事務」が含まれるスタッフは集計外）
+ *    - 「管理職（管理者・主任等）」であっても、2Fまたは4Fに所属している、あるいはフォローを担当している場合は集計対象に含める
+ * 2. フロア振り分け・按分ルール:
+ *    - SC（包括）: 全て「2Fスタッフ」として加算 (2F: 1.0)
+ *    - SA: 「2F」に 0.5、「4F」に 0.5 で半分ずつ按分 (2F: 0.5, 4F: 0.5)
+ *    - フォロー（所属や役職に「フォロー」が含まれるスタッフ）: 「2F」に 0.5、「4F」に 0.5 で半分ずつ按分
+ *    - 2F所属スタッフ: 全て「2F」へ加算 (2F: 1.0)
+ *    - 4F所属スタッフ: 全て「4F」へ加算 (4F: 1.0)
+ */
+export function getStaffFloorAllocation(staff: any): FloorAllocation {
+  if (!staff || staff.status === '無効' || staff.status === '入職前') {
+    return { isExcluded: true, floor2Ratio: 0, floor4Ratio: 0, categoryName: '無効/入職前', matchReason: 'status' };
+  }
+
+  const name = String(staff.name || '').trim();
+  const normalizedName = normalizeName(name);
+
+  // 全角英数を半角化して大文字へ変換
+  const toHalfUpper = (v: any): string =>
+    String(v || '')
+      .replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+      .toUpperCase()
+      .trim();
+
+  const placement = toHalfUpper(staff.placement);
+  const department = toHalfUpper(staff.department);
+  const affiliation = toHalfUpper(staff.affiliation);
+  const role = toHalfUpper(staff.role);
+  const jobType = toHalfUpper(staff.jobType);
+  const profession = toHalfUpper(staff.profession);
+  const position = toHalfUpper(staff.position);
+
+  // 全属性を結合
+  const combined = [placement, department, affiliation, role, jobType, profession, position].join(' ');
+
+  // 1. 除外基準: 「事務」のみを除外（役職・職種・所属等に「事務」が含まれるスタッフは集計外）
+  // ※管理職（管理者・主任等）は除外しない
+  if (combined.includes('事務') || name.includes('事務')) {
+    return { isExcluded: true, floor2Ratio: 0, floor4Ratio: 0, categoryName: '事務(除外)', matchReason: '事務' };
+  }
+
+  // 2. フロア振り分け・按分ルール
+  // (a) SC（包括）: 全て「2Fスタッフ」として加算 (2F: 1.0)
+  const isSC =
+    normalizedName === 'SC' ||
+    STAFF_ALIASES['SC']?.some(alias => name.includes(alias) || alias.includes(name)) ||
+    combined.includes('包括') ||
+    combined.includes('SC') ||
+    placement.includes('包括') ||
+    placement.includes('SC') ||
+    role.includes('包括') ||
+    role.includes('SC');
+
+  if (isSC) {
+    return { isExcluded: false, floor2Ratio: 1.0, floor4Ratio: 0.0, categoryName: 'SC(包括)', matchReason: 'SC/包括' };
+  }
+
+  // (b) SA: 「2F」に 0.5、「4F」に 0.5 で半分ずつ按分
+  const isSA =
+    normalizedName === 'SA' ||
+    STAFF_ALIASES['SA']?.some(alias => name.includes(alias) || alias.includes(name)) ||
+    name.includes('佐久間') ||
+    placement === 'SA' ||
+    role === 'SA' ||
+    combined.includes('SA');
+
+  if (isSA) {
+    return { isExcluded: false, floor2Ratio: 0.5, floor4Ratio: 0.5, categoryName: 'SA', matchReason: 'SA' };
+  }
+
+  // (c) フォロー（所属や役職に「フォロー」が含まれるスタッフ）: 「2F」に 0.5、「4F」に 0.5 で半分ずつ按分
+  const isFollow = combined.includes('フォロー') || name.includes('フォロー');
+  if (isFollow) {
+    return { isExcluded: false, floor2Ratio: 0.5, floor4Ratio: 0.5, categoryName: 'フォロー', matchReason: 'フォロー' };
+  }
+
+  // 2F / 4F の所属判定
+  const has2F = combined.includes('2F') || combined.includes('2階');
+  const has4F = combined.includes('4F') || combined.includes('4階');
+
+  if (has2F && has4F) {
+    // 2Fと4Fの兼務
+    return { isExcluded: false, floor2Ratio: 0.5, floor4Ratio: 0.5, categoryName: '2F/4F兼務', matchReason: '2F+4F' };
+  }
+
+  // (d) 2F所属スタッフ: 全て「2F」へ加算 (2F: 1.0)
+  if (has2F) {
+    return { isExcluded: false, floor2Ratio: 1.0, floor4Ratio: 0.0, categoryName: '2F', matchReason: '2F' };
+  }
+
+  // (e) 4F所属スタッフ: 全て「4F」へ加算 (4F: 1.0)
+  if (has4F) {
+    return { isExcluded: false, floor2Ratio: 0.0, floor4Ratio: 1.0, categoryName: '4F', matchReason: '4F' };
+  }
+
+  // 2F・4Fいずれにも該当しない場合
+  return { isExcluded: true, floor2Ratio: 0, floor4Ratio: 0, categoryName: '集計対象外', matchReason: 'フロア対象外' };
+}
+
+/**
+ * 特定スタッフ・特定日（targetDateStr: 'YYYY-MM-DD'）の勤務を要しない時間を算出します
+ * (確定シフト解決エンジン: 手動入力優先、最新更新日時優先、自動は休み優先)
+ */
+export function calculateStaffDailyNonWorkingHours(
+  staff: any,
+  allCalendarData: any[],
+  targetDateStr: string,
+  precomputedRejectedIds?: Set<string>
+): { hours: number; rawType: string; resolvedShift: any } {
+  if (!staff || !Array.isArray(allCalendarData) || !targetDateStr) {
+    return { hours: 0, rawType: '', resolvedShift: null };
+  }
+
+  const isFiscal = isAccountingYearStaff(staff);
+  const fullDayHours = isFiscal ? FISCAL_YEAR_HOURS_PER_DAY : HOURS_PER_DAY; // 7.5 or 7.75
+
+  const normTarget = normalizeDateStr(targetDateStr);
+  const parts = normTarget.split('-');
+  if (parts.length < 3) return { hours: 0, rawType: '', resolvedShift: null };
+
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+  const dDate = new Date(y, m - 1, d);
+  const dayType = getDayType(dDate);
+
+  const isInvalid = (r: any): boolean => {
+    if (!r) return true;
+    const st = String(r.status || '').trim().toLowerCase();
+    const detailSt = String(r.details?.status || '').trim().toLowerCase();
+    const invalidList = [
+      'deleted', '削除',
+      'rejected', '却下',
+      'canceled', 'cancelled', 'キャンセル', '取り消し', '申請取消'
+    ];
+    return invalidList.includes(st) || invalidList.includes(detailSt);
+  };
+
+  const rejectedIds = precomputedRejectedIds || new Set(
+    allCalendarData.filter(isInvalid).map(r => String(r.id || '')).filter(Boolean)
+  );
+
+  const dayRecords = allCalendarData.filter(r => {
+    if (!r || !r.date) return false;
+    if (isInvalid(r)) return false;
+    const rId = String(r.id || '');
+    const reqId = String(r.requestId || r.request_id || '');
+    if (rId && rejectedIds.has(rId)) return false;
+    if (reqId && rejectedIds.has(reqId)) return false;
+    if (normalizeDateStr(r.date) !== normTarget) return false;
+    return isStaffMatchRequest(staff, r);
+  });
+
+  if (dayRecords.length === 0) {
+    return { hours: 0, rawType: '', resolvedShift: null };
+  }
+
+  const isManualEntry = (rec: any): boolean => {
+    if (!rec) return false;
+    if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
+    if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
+    const idStr = String(rec.id || '');
+    return idStr.startsWith('m-') || idStr.startsWith('req-');
+  };
+
+  const getTime = (i: any): number => {
+    const t = i?.updatedAt || i?.updated_at || i?.createdAt || i?.created_at || 0;
+    return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
+  };
+
+  let resolvedShift: any = null;
+  for (const r of dayRecords) {
+    if (!resolvedShift) {
+      resolvedShift = r;
+      continue;
+    }
+
+    const isManNew = isManualEntry(r);
+    const wasManOld = isManualEntry(resolvedShift);
+
+    let isBetter = false;
+    if (isManNew && !wasManOld) {
+      isBetter = true;
+    } else if (!isManNew && wasManOld) {
+      isBetter = false;
+    } else if (isManNew && wasManOld) {
+      isBetter = getTime(r) > getTime(resolvedShift);
+    } else {
+      const isOffNew = !['出勤', '日勤'].includes(r?.type || r?.shiftType);
+      const isOffOld = !['出勤', '日勤'].includes(resolvedShift?.type || resolvedShift?.shiftType);
+      isBetter = isOffNew && !isOffOld;
+    }
+
+    if (isBetter) {
+      resolvedShift = r;
+    }
+  }
+
+  if (!resolvedShift) {
+    return { hours: 0, rawType: '', resolvedShift: null };
+  }
+
+  const rawType = String(resolvedShift.type || resolvedShift.shiftType || '').trim();
+  let addedHours = 0;
+
+  // 1. 出勤・日勤・公休（週休）・休日出勤は勤務を要しない時間には加算しない (0h)
+  if (['出勤', '日勤', '公休', '休日出勤'].includes(rawType)) {
+    addedHours = 0;
+  }
+  // 2. 年休 (通常: 7.75h, 会計年度: 7.5h)
+  else if (['年休', '有給休暇', '有休', '年給', '有給'].includes(rawType)) {
+    addedHours = fullDayHours;
+  }
+  // 3. 特休 (登録時間。終日の場合は 常勤: 7.75h / 会計年度: 7.5h)
+  else if (rawType === '特休') {
+    const rawH = resolvedShift.details?.specialHours ?? resolvedShift.specialHours ?? resolvedShift.details?.duration ?? resolvedShift.hours ?? resolvedShift.duration ?? resolvedShift.details?.hours;
+    const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? parseFloat(String(rawH)) : null;
+    let h = fullDayHours;
+    if (parsedH !== null && !isNaN(parsedH) && parsedH > 0 && parsedH < fullDayHours) {
+      h = parsedH;
+    }
+    addedHours = h;
+  }
+  // 4. 時間休 (登録時間: カレンダー表示と完全一致するパース関数を使用)
+  else if (['時間休', '時間給', '時間給2'].includes(rawType)) {
+    const h = parseHourlyLeaveHours(resolvedShift);
+    if (h > 0) {
+      addedHours = h;
+    }
+  }
+  // 5. 夏季休暇 (通常: 7.75h, 会計年度: 0h)
+  else if (['夏季休暇', '夏期休暇', '夏休'].includes(rawType)) {
+    if (!isFiscal) {
+      addedHours = HOURS_PER_DAY; // 7.75h
+    }
+  }
+  // 6. 振替4 (4.0h)
+  else if (['振替4', '振4'].includes(rawType)) {
+    addedHours = 4.0;
+  }
+  // 7. 振替＋時間休 (4.0h ＋ 登録された時間休の時間数)
+  else if (rawType === '振替＋時間休') {
+    const hrHours = Number(resolvedShift.details?.hourlyHours ?? resolvedShift.hourlyHours ?? (resolvedShift.hours && resolvedShift.hours > 4 ? resolvedShift.hours - 4 : 0));
+    const validHr = (!isNaN(hrHours) && hrHours > 0) ? hrHours : 0;
+    addedHours = 4.0 + validHr;
+  }
+  // 8. 特休＋時間休 (特休時間数 ＋ 時間休時間数)
+  else if (rawType === '特休＋時間休') {
+    const spHours = Number(resolvedShift.details?.specialHours ?? resolvedShift.specialHours ?? 0);
+    const hrHours = Number(resolvedShift.details?.hourlyHours ?? resolvedShift.hourlyHours ?? 0);
+    let h = 0;
+    if (!isNaN(spHours) && !isNaN(hrHours) && (spHours > 0 || hrHours > 0)) {
+      h = spHours + hrHours;
+    } else if (resolvedShift.hours && !isNaN(Number(resolvedShift.hours)) && Number(resolvedShift.hours) > 0) {
+      h = Number(resolvedShift.hours);
+    } else {
+      h = fullDayHours;
+    }
+    addedHours = h;
+  }
+  // 9. 平日の出張 (土日祝は除外。平日の出張のみ登録時間、終日は 常勤: 7.75h / 会計年度: 7.5h)
+  else if (rawType === '出張') {
+    if (dayType === 'weekday') {
+      const rawH = resolvedShift.details?.duration ?? resolvedShift.hours ?? resolvedShift.duration ?? resolvedShift.details?.hours;
+      const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? parseFloat(String(rawH)) : null;
+      let h = fullDayHours;
+      if (parsedH !== null && !isNaN(parsedH) && parsedH > 0 && parsedH < fullDayHours) {
+        h = parsedH;
+      }
+      addedHours = h;
+    }
+  }
+  // 10. 午前休 / 午後休 (半休対応)
+  else if (rawType === '午前休') {
+    addedHours = 4.0;
+  }
+  else if (rawType === '午後休') {
+    const h = isFiscal ? 3.5 : 3.75;
+    addedHours = h;
+  }
+
+  return {
+    hours: addedHours,
+    rawType,
+    resolvedShift,
+  };
+}
+
+export interface WeekPeriod {
+  weekIndex: number;
+  startDate: Date;
+  endDate: Date;
+  startDateStr: string; // 'YYYY-MM-DD'
+  endDateStr: string;   // 'YYYY-MM-DD'
+  label: string;       // 例: '8/31(月) 〜 9/4(金)'
+  days: string[];      // 平日5日間の 'YYYY-MM-DD' 配列 (月〜金)
+}
+
+/**
+ * 選択された月において、その月に少なくとも1日以上の平日が含まれる週（月曜〜金曜の5日間）をすべて抽出します
+ * 月またぎの週（例: 8/31(月)〜9/4(金)）も、1つの週（月〜金の5日間）として抽出します
+ */
+export function getWeekdayWeeksForMonth(year: number, month: number): WeekPeriod[] {
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const mondayMap = new Map<string, Date>();
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const curDate = new Date(year, month - 1, d);
+    const dow = curDate.getDay(); // 0: 日, 1: 月, 2: 火, 3: 水, 4: 木, 5: 金, 6: 土
+    if (dow >= 1 && dow <= 5) {
+      // 平日
+      const offsetToMon = dow - 1; // 月曜日からの経過日数
+      const monDate = new Date(year, month - 1, d - offsetToMon);
+      const monKey = `${monDate.getFullYear()}-${String(monDate.getMonth() + 1).padStart(2, '0')}-${String(monDate.getDate()).padStart(2, '0')}`;
+      if (!mondayMap.has(monKey)) {
+        mondayMap.set(monKey, monDate);
+      }
+    }
+  }
+
+  const sortedMondayKeys = Array.from(mondayMap.keys()).sort();
+
+  return sortedMondayKeys.map((monKey, idx) => {
+    const monDate = mondayMap.get(monKey)!;
+    const days: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const d = new Date(monDate.getFullYear(), monDate.getMonth(), monDate.getDate() + i);
+      days.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    }
+
+    const friDate = new Date(monDate.getFullYear(), monDate.getMonth(), monDate.getDate() + 4);
+    const friKey = `${friDate.getFullYear()}-${String(friDate.getMonth() + 1).padStart(2, '0')}-${String(friDate.getDate()).padStart(2, '0')}`;
+
+    const label = `${monDate.getMonth() + 1}/${monDate.getDate()}(月) 〜 ${friDate.getMonth() + 1}/${friDate.getDate()}(金)`;
+
+    return {
+      weekIndex: idx + 1,
+      startDate: monDate,
+      endDate: friDate,
+      startDateStr: monKey,
+      endDateStr: friKey,
+      label,
+      days,
+    };
+  });
+}
+
+export interface StaffWeeklyFloorItem {
+  staffId: string;
+  staffName: string;
+  categoryName: string;
+  placement: string;
+  role: string;
+  floor2Ratio: number;
+  floor4Ratio: number;
+  rawTotalHours: number;
+  floor2Hours: number;
+  floor4Hours: number;
+  floor2HoursStr: string;
+  floor4HoursStr: string;
+  totalHoursStr: string;
+  dayDetails: { date: string; hours: number; rawType: string }[];
+}
+
+export interface WeeklyFloorSummaryResult {
+  weekIndex: number;
+  label: string;
+  startDateStr: string;
+  endDateStr: string;
+  days: string[];
+  floor2Total: number;
+  floor4Total: number;
+  weekTotal: number;
+  floor2TotalStr: string;
+  floor4TotalStr: string;
+  weekTotalStr: string;
+  staffBreakdown: StaffWeeklyFloorItem[];
+}
+
+/**
+ * 週別（平日5日間）フロア別（2Fスタッフ合計・4Fスタッフ合計）の「勤務を要しない時間」を集計します
+ */
+export function calculateWeeklyFloorNonWorkingHours(
+  staffList: any[],
+  allCalendarData: any[],
+  year: number,
+  month: number
+): WeeklyFloorSummaryResult[] {
+  if (!Array.isArray(staffList) || !Array.isArray(allCalendarData)) return [];
+
+  const weeks = getWeekdayWeeksForMonth(year, month);
+
+  const isInvalid = (r: any): boolean => {
+    if (!r) return true;
+    const st = String(r.status || '').trim().toLowerCase();
+    const detailSt = String(r.details?.status || '').trim().toLowerCase();
+    const invalidList = [
+      'deleted', '削除',
+      'rejected', '却下',
+      'canceled', 'cancelled', 'キャンセル', '取り消し', '申請取消'
+    ];
+    return invalidList.includes(st) || invalidList.includes(detailSt);
+  };
+
+  const rejectedIds = new Set(
+    allCalendarData.filter(isInvalid).map(r => String(r.id || '')).filter(Boolean)
+  );
+
+  // 対象スタッフと按分情報の判定（除外基準：事務、無効、入職前などを除外）
+  const eligibleStaffWithAlloc = staffList
+    .map(staff => {
+      const alloc = getStaffFloorAllocation(staff);
+      return { staff, alloc };
+    })
+    .filter(item => !item.alloc.isExcluded && (item.alloc.floor2Ratio > 0 || item.alloc.floor4Ratio > 0));
+
+  return weeks.map(week => {
+    let weekFloor2Total = 0;
+    let weekFloor4Total = 0;
+    const staffBreakdown: StaffWeeklyFloorItem[] = [];
+
+    for (const { staff, alloc } of eligibleStaffWithAlloc) {
+      let staffRawTotal = 0;
+      const dayDetails: { date: string; hours: number; rawType: string }[] = [];
+
+      for (const dayStr of week.days) {
+        const { hours, rawType } = calculateStaffDailyNonWorkingHours(staff, allCalendarData, dayStr, rejectedIds);
+        if (hours > 0) {
+          staffRawTotal += hours;
+          dayDetails.push({ date: dayStr, hours, rawType });
+        }
+      }
+
+      if (staffRawTotal > 0) {
+        const f2 = Math.round(staffRawTotal * alloc.floor2Ratio * 100) / 100;
+        const f4 = Math.round(staffRawTotal * alloc.floor4Ratio * 100) / 100;
+        weekFloor2Total += f2;
+        weekFloor4Total += f4;
+
+        staffBreakdown.push({
+          staffId: String(staff.id || staff.email || staff.name),
+          staffName: staff.name || '名称未設定',
+          categoryName: alloc.categoryName,
+          placement: staff.placement || staff.department || '-',
+          role: staff.role || staff.position || '-',
+          floor2Ratio: alloc.floor2Ratio,
+          floor4Ratio: alloc.floor4Ratio,
+          rawTotalHours: Math.round(staffRawTotal * 100) / 100,
+          floor2Hours: f2,
+          floor4Hours: f4,
+          floor2HoursStr: formatNonWorkingHours(f2),
+          floor4HoursStr: formatNonWorkingHours(f4),
+          totalHoursStr: formatNonWorkingHours(staffRawTotal),
+          dayDetails,
+        });
+      }
+    }
+
+    // スタッフの内訳を合計時間の多い順にソート
+    staffBreakdown.sort((a, b) => b.rawTotalHours - a.rawTotalHours);
+
+    const f2Rounded = Math.round(weekFloor2Total * 100) / 100;
+    const f4Rounded = Math.round(weekFloor4Total * 100) / 100;
+    const totalRounded = Math.round((f2Rounded + f4Rounded) * 100) / 100;
+
+    return {
+      weekIndex: week.weekIndex,
+      label: week.label,
+      startDateStr: week.startDateStr,
+      endDateStr: week.endDateStr,
+      days: week.days,
+      floor2Total: f2Rounded,
+      floor4Total: f4Rounded,
+      weekTotal: totalRounded,
+      floor2TotalStr: formatNonWorkingHours(f2Rounded),
+      floor4TotalStr: formatNonWorkingHours(f4Rounded),
+      weekTotalStr: formatNonWorkingHours(totalRounded),
+      staffBreakdown,
+    };
+  });
+}
+
+
 
 
 
