@@ -180,29 +180,56 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       });
   }, [staffList, allCalendarData, currentDate]);
 
-  // 🕒 スタッフごとの月別「勤務を要しない時間」集計一覧（管理者閲覧専用）
+  // 🕒 時間フォーマット安全ガード（キャッシュ遅延・未定義対策）
+  const safeFormatHours = (hours: number): string => {
+    if (typeof formatNonWorkingHours === 'function') {
+      try {
+        return formatNonWorkingHours(hours);
+      } catch (e) {
+        console.warn('formatNonWorkingHours error:', e);
+      }
+    }
+    if (isNaN(hours) || hours <= 0) return '0.0h';
+    const rounded = Math.round(hours * 100) / 100;
+    return rounded % 1 === 0 ? `${rounded.toFixed(1)}h` : `${rounded}h`;
+  };
+
+  // 🕒 スタッフごとの月別「勤務を要しない時間」集計一覧（管理者閲覧専用・安全ガード付き）
   const staffNonWorkingHoursList = React.useMemo(() => {
-    return calculateAllStaffMonthlyNonWorkingHours(
-      staffList,
-      allCalendarData,
-      selectedExemptYear,
-      selectedExemptMonth
-    );
+    try {
+      if (typeof calculateAllStaffMonthlyNonWorkingHours === 'function') {
+        return calculateAllStaffMonthlyNonWorkingHours(
+          staffList,
+          allCalendarData,
+          selectedExemptYear,
+          selectedExemptMonth
+        );
+      }
+      if (typeof calculateStaffMonthlyNonWorkingHours === 'function' && Array.isArray(staffList)) {
+        return staffList
+          .filter(s => s && s.status !== '無効' && s.status !== '入職前')
+          .map(s => calculateStaffMonthlyNonWorkingHours(s, allCalendarData, selectedExemptYear, selectedExemptMonth));
+      }
+    } catch (err) {
+      console.error('[AdminScreen] calculateAllStaffMonthlyNonWorkingHours fallback triggered:', err);
+    }
+    return [];
   }, [staffList, allCalendarData, selectedExemptYear, selectedExemptMonth]);
 
   // 🕒 月別「勤務を要しない時間」サマリー集計
   const nonWorkingHoursSummary = React.useMemo(() => {
-    const totalHours = staffNonWorkingHoursList.reduce((sum, item) => sum + item.totalHours, 0);
+    const list = Array.isArray(staffNonWorkingHoursList) ? staffNonWorkingHoursList : [];
+    const totalHours = list.reduce((sum, item) => sum + (Number(item?.totalHours) || 0), 0);
     const roundedTotal = Math.round(totalHours * 100) / 100;
-    const staffWithHoursCount = staffNonWorkingHoursList.filter(item => item.totalHours > 0).length;
-    const avgHours = staffNonWorkingHoursList.length > 0 
-      ? Math.round((totalHours / staffNonWorkingHoursList.length) * 10) / 10 
+    const staffWithHoursCount = list.filter(item => (Number(item?.totalHours) || 0) > 0).length;
+    const avgHours = list.length > 0 
+      ? Math.round((totalHours / list.length) * 10) / 10 
       : 0;
 
     return {
       totalHours: roundedTotal,
-      totalHoursStr: formatNonWorkingHours(roundedTotal),
-      staffCount: staffNonWorkingHoursList.length,
+      totalHoursStr: safeFormatHours(roundedTotal),
+      staffCount: list.length,
       staffWithHoursCount,
       avgHoursStr: `${avgHours.toFixed(1)}h`,
     };
@@ -259,14 +286,14 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             <td>${s.placement || s.department || '-'}</td>
             <td>${empType}</td>
             <td style="font-weight: bold; color: #0284c7; font-size: 11px; background-color: #f0f9ff;">${item.totalHoursStr}</td>
-            <td>${b.annualLeaveHours > 0 ? formatNonWorkingHours(b.annualLeaveHours) : '-'}</td>
-            <td>${b.specialLeaveHours > 0 ? formatNonWorkingHours(b.specialLeaveHours) : '-'}</td>
-            <td>${b.hourlyLeaveHours > 0 ? formatNonWorkingHours(b.hourlyLeaveHours) : '-'}</td>
-            <td>${b.summerLeaveHours > 0 ? formatNonWorkingHours(b.summerLeaveHours) : '-'}</td>
-            <td>${b.furikae4Hours > 0 ? formatNonWorkingHours(b.furikae4Hours) : '-'}</td>
-            <td>${b.furikaeHourlyHours > 0 ? formatNonWorkingHours(b.furikaeHourlyHours) : '-'}</td>
-            <td>${b.specialHourlyHours > 0 ? formatNonWorkingHours(b.specialHourlyHours) : '-'}</td>
-            <td>${b.weekdayTripHours > 0 ? formatNonWorkingHours(b.weekdayTripHours) : '-'}</td>
+            <td>${b.annualLeaveHours > 0 ? safeFormatHours(b.annualLeaveHours) : '-'}</td>
+            <td>${b.specialLeaveHours > 0 ? safeFormatHours(b.specialLeaveHours) : '-'}</td>
+            <td>${b.hourlyLeaveHours > 0 ? safeFormatHours(b.hourlyLeaveHours) : '-'}</td>
+            <td>${b.summerLeaveHours > 0 ? safeFormatHours(b.summerLeaveHours) : '-'}</td>
+            <td>${b.furikae4Hours > 0 ? safeFormatHours(b.furikae4Hours) : '-'}</td>
+            <td>${b.furikaeHourlyHours > 0 ? safeFormatHours(b.furikaeHourlyHours) : '-'}</td>
+            <td>${b.specialHourlyHours > 0 ? safeFormatHours(b.specialHourlyHours) : '-'}</td>
+            <td>${b.weekdayTripHours > 0 ? safeFormatHours(b.weekdayTripHours) : '-'}</td>
           </tr>
         `;
       });
@@ -1147,42 +1174,42 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                               {b.annualLeaveHours > 0 && (
                                 <View style={styles.breakdownChip}>
-                                  <ThemeText variant="caption" color="#34d399">年休: <ThemeText bold color="#34d399">{formatNonWorkingHours(b.annualLeaveHours)}</ThemeText></ThemeText>
+                                  <ThemeText variant="caption" color="#34d399">年休: <ThemeText bold color="#34d399">{safeFormatHours(b.annualLeaveHours)}</ThemeText></ThemeText>
                                 </View>
                               )}
                               {b.specialLeaveHours > 0 && (
                                 <View style={styles.breakdownChip}>
-                                  <ThemeText variant="caption" color="#38bdf8">特休: <ThemeText bold color="#38bdf8">{formatNonWorkingHours(b.specialLeaveHours)}</ThemeText></ThemeText>
+                                  <ThemeText variant="caption" color="#38bdf8">特休: <ThemeText bold color="#38bdf8">{safeFormatHours(b.specialLeaveHours)}</ThemeText></ThemeText>
                                 </View>
                               )}
                               {b.hourlyLeaveHours > 0 && (
                                 <View style={styles.breakdownChip}>
-                                  <ThemeText variant="caption" color="#a855f7">時間休: <ThemeText bold color="#a855f7">{formatNonWorkingHours(b.hourlyLeaveHours)}</ThemeText></ThemeText>
+                                  <ThemeText variant="caption" color="#a855f7">時間休: <ThemeText bold color="#a855f7">{safeFormatHours(b.hourlyLeaveHours)}</ThemeText></ThemeText>
                                 </View>
                               )}
                               {b.summerLeaveHours > 0 && (
                                 <View style={styles.breakdownChip}>
-                                  <ThemeText variant="caption" color="#ca8a04">夏季休暇: <ThemeText bold color="#ca8a04">{formatNonWorkingHours(b.summerLeaveHours)}</ThemeText></ThemeText>
+                                  <ThemeText variant="caption" color="#ca8a04">夏季休暇: <ThemeText bold color="#ca8a04">{safeFormatHours(b.summerLeaveHours)}</ThemeText></ThemeText>
                                 </View>
                               )}
                               {b.furikae4Hours > 0 && (
                                 <View style={styles.breakdownChip}>
-                                  <ThemeText variant="caption" color="#38bdf8">振替4: <ThemeText bold color="#38bdf8">{formatNonWorkingHours(b.furikae4Hours)}</ThemeText></ThemeText>
+                                  <ThemeText variant="caption" color="#38bdf8">振替4: <ThemeText bold color="#38bdf8">{safeFormatHours(b.furikae4Hours)}</ThemeText></ThemeText>
                                 </View>
                               )}
                               {b.furikaeHourlyHours > 0 && (
                                 <View style={styles.breakdownChip}>
-                                  <ThemeText variant="caption" color="#38bdf8">振替+時間休: <ThemeText bold color="#38bdf8">{formatNonWorkingHours(b.furikaeHourlyHours)}</ThemeText></ThemeText>
+                                  <ThemeText variant="caption" color="#38bdf8">振替+時間休: <ThemeText bold color="#38bdf8">{safeFormatHours(b.furikaeHourlyHours)}</ThemeText></ThemeText>
                                 </View>
                               )}
                               {b.specialHourlyHours > 0 && (
                                 <View style={styles.breakdownChip}>
-                                  <ThemeText variant="caption" color="#38bdf8">特休+時間休: <ThemeText bold color="#38bdf8">{formatNonWorkingHours(b.specialHourlyHours)}</ThemeText></ThemeText>
+                                  <ThemeText variant="caption" color="#38bdf8">特休+時間休: <ThemeText bold color="#38bdf8">{safeFormatHours(b.specialHourlyHours)}</ThemeText></ThemeText>
                                 </View>
                               )}
                               {b.weekdayTripHours > 0 && (
                                 <View style={styles.breakdownChip}>
-                                  <ThemeText variant="caption" color="#2563eb">平日出張: <ThemeText bold color="#2563eb">{formatNonWorkingHours(b.weekdayTripHours)}</ThemeText></ThemeText>
+                                  <ThemeText variant="caption" color="#2563eb">平日出張: <ThemeText bold color="#2563eb">{safeFormatHours(b.weekdayTripHours)}</ThemeText></ThemeText>
                                 </View>
                               )}
                               {item.totalHours === 0 && (
@@ -1475,42 +1502,42 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 4 }}>
                         {b.annualLeaveHours > 0 && (
                           <View style={styles.breakdownChip}>
-                            <ThemeText variant="caption" color="#34d399" style={{ fontSize: 10 }}>年休: {formatNonWorkingHours(b.annualLeaveHours)}</ThemeText>
+                            <ThemeText variant="caption" color="#34d399" style={{ fontSize: 10 }}>年休: {safeFormatHours(b.annualLeaveHours)}</ThemeText>
                           </View>
                         )}
                         {b.specialLeaveHours > 0 && (
                           <View style={styles.breakdownChip}>
-                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>特休: {formatNonWorkingHours(b.specialLeaveHours)}</ThemeText>
+                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>特休: {safeFormatHours(b.specialLeaveHours)}</ThemeText>
                           </View>
                         )}
                         {b.hourlyLeaveHours > 0 && (
                           <View style={styles.breakdownChip}>
-                            <ThemeText variant="caption" color="#a855f7" style={{ fontSize: 10 }}>時間休: {formatNonWorkingHours(b.hourlyLeaveHours)}</ThemeText>
+                            <ThemeText variant="caption" color="#a855f7" style={{ fontSize: 10 }}>時間休: {safeFormatHours(b.hourlyLeaveHours)}</ThemeText>
                           </View>
                         )}
                         {b.summerLeaveHours > 0 && (
                           <View style={styles.breakdownChip}>
-                            <ThemeText variant="caption" color="#ca8a04" style={{ fontSize: 10 }}>夏季: {formatNonWorkingHours(b.summerLeaveHours)}</ThemeText>
+                            <ThemeText variant="caption" color="#ca8a04" style={{ fontSize: 10 }}>夏季: {safeFormatHours(b.summerLeaveHours)}</ThemeText>
                           </View>
                         )}
                         {b.furikae4Hours > 0 && (
                           <View style={styles.breakdownChip}>
-                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>振4: {formatNonWorkingHours(b.furikae4Hours)}</ThemeText>
+                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>振4: {safeFormatHours(b.furikae4Hours)}</ThemeText>
                           </View>
                         )}
                         {b.furikaeHourlyHours > 0 && (
                           <View style={styles.breakdownChip}>
-                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>振+時: {formatNonWorkingHours(b.furikaeHourlyHours)}</ThemeText>
+                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>振+時: {safeFormatHours(b.furikaeHourlyHours)}</ThemeText>
                           </View>
                         )}
                         {b.specialHourlyHours > 0 && (
                           <View style={styles.breakdownChip}>
-                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>特+時: {formatNonWorkingHours(b.specialHourlyHours)}</ThemeText>
+                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>特+時: {safeFormatHours(b.specialHourlyHours)}</ThemeText>
                           </View>
                         )}
                         {b.weekdayTripHours > 0 && (
                           <View style={styles.breakdownChip}>
-                            <ThemeText variant="caption" color="#2563eb" style={{ fontSize: 10 }}>平日出張: {formatNonWorkingHours(b.weekdayTripHours)}</ThemeText>
+                            <ThemeText variant="caption" color="#2563eb" style={{ fontSize: 10 }}>平日出張: {safeFormatHours(b.weekdayTripHours)}</ThemeText>
                           </View>
                         )}
                         {item.totalHours === 0 && (

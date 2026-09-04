@@ -4,6 +4,8 @@
  * 会計年度職員: 1日 = 7.50時間 (4/1起算)
  */
 
+import { getDayType, normalizeDateStr } from './dateUtils';
+
 export const HOURS_PER_DAY = 7.75;
 export const FISCAL_YEAR_HOURS_PER_DAY = 7.5;
 
@@ -568,6 +570,302 @@ export const calculateAnnualLeaveRate = (
     isMandatoryMet
   };
 };
+
+/**
+ * 会計年度職員（雇用形態）の判定
+ * スタッフの isAssistant、isAccountingYear、雇用形態フラグ、職種/役職定義等を参照
+ */
+export function isAccountingYearStaff(staff: any): boolean {
+  if (!staff) return false;
+  if (staff.isAccountingYear === true || staff.is_accounting_year === true) return true;
+  if (staff.isAssistant === true) return true;
+  
+  const pos = String(staff.position || staff.title || '').trim();
+  const role = String(staff.role || '').trim();
+  const job = String(staff.jobType || staff.profession || staff.job || '').trim();
+  const placement = String(staff.placement || '').trim();
+  const status = String(staff.status || staff.employmentType || staff.employment_type || '').trim();
+
+  if (pos.includes('会計年度') || role.includes('会計年度') || job.includes('会計年度') || status.includes('会計年度')) return true;
+  if (job === '助手' || role === '助手' || pos === '助手' || placement === '助手') return true;
+
+  return false;
+}
+
+/**
+ * 時間数を「〇〇.〇h」形式にフォーマットします
+ */
+export function formatNonWorkingHours(hours: number): string {
+  if (isNaN(hours) || hours <= 0) return '0.0h';
+  const rounded = Math.round(hours * 100) / 100;
+  if (rounded % 1 === 0) {
+    return `${rounded.toFixed(1)}h`;
+  }
+  return `${rounded}h`;
+}
+
+export interface NonWorkingHoursBreakdown {
+  annualLeaveHours: number;    // 1. 年休 (常勤: 7.75h, 会計年度: 7.5h)
+  specialLeaveHours: number;   // 2. 特休 (登録時間、終日なら 7.75h / 7.5h)
+  hourlyLeaveHours: number;    // 3. 時間休 (登録時間)
+  summerLeaveHours: number;    // 4. 夏季休暇 (常勤: 7.75h, 会計年度: 0h)
+  furikae4Hours: number;       // 5. 振替4 (4.0h)
+  furikaeHourlyHours: number;  // 6. 振替＋時間休 (4.0h ＋ 登録された時間休の時間数)
+  specialHourlyHours: number;  // 7. 特休＋時間休 (特休時間数 ＋ 時間休時間数)
+  weekdayTripHours: number;    // 8. 平日の出張 (平日の出張のみ登録時間、終日は 7.75h / 7.5h)
+  totalHours: number;          // 合計時間
+  totalHoursStr: string;       // フォーマット文字列 (例: '31.0h')
+}
+
+export interface StaffMonthlyNonWorkingHoursResult {
+  staff: any;
+  isFiscalYear: boolean;
+  totalHours: number;
+  totalHoursStr: string;
+  breakdown: NonWorkingHoursBreakdown;
+  itemCount: number; // 該当日数・件数
+}
+
+/**
+ * スタッフごとの月別「勤務を要しない時間」を算出します
+ * 
+ * 【算出ルール】
+ * 1. 年休: 常勤: 7.75h / 会計年度: 7.5h
+ * 2. 特休: 登録時間（終日の場合は 常勤: 7.75h / 会計年度: 7.5h）
+ * 3. 時間休: 登録時間
+ * 4. 夏季休暇: 常勤: 7.75h / 会計年度: 0h（加算対象外）
+ * 5. 振替4: 4.0h
+ * 6. 振替＋時間休: 4.0h ＋ 登録された時間休の時間数
+ * 7. 特休＋時間休: 特休時間数 ＋ 時間休時間数
+ * 8. 平日の出張: 土日祝は除外。平日の出張のみ登録時間（終日の場合は 常勤: 7.75h / 会計年度: 7.5h）を加算
+ * 
+ * ※公休（週休）、休日出勤、通常の出勤は対象外
+ */
+export function calculateStaffMonthlyNonWorkingHours(
+  staff: any,
+  allCalendarData: any[],
+  year: number,
+  month: number
+): StaffMonthlyNonWorkingHoursResult {
+  const isFiscal = isAccountingYearStaff(staff);
+  const fullDayHours = isFiscal ? FISCAL_YEAR_HOURS_PER_DAY : HOURS_PER_DAY; // 7.5 or 7.75
+
+  const breakdown: NonWorkingHoursBreakdown = {
+    annualLeaveHours: 0,
+    specialLeaveHours: 0,
+    hourlyLeaveHours: 0,
+    summerLeaveHours: 0,
+    furikae4Hours: 0,
+    furikaeHourlyHours: 0,
+    specialHourlyHours: 0,
+    weekdayTripHours: 0,
+    totalHours: 0,
+    totalHoursStr: '0.0h',
+  };
+
+  if (!staff || !Array.isArray(allCalendarData)) {
+    return {
+      staff,
+      isFiscalYear: isFiscal,
+      totalHours: 0,
+      totalHoursStr: '0.0h',
+      breakdown,
+      itemCount: 0,
+    };
+  }
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  const isManualEntry = (rec: any) => {
+    if (!rec) return false;
+    if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
+    if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
+    const idStr = String(rec.id || '');
+    return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
+  };
+
+  const getTime = (i: any) => {
+    const t = i?.updatedAt || i?.updated_at || i?.createdAt || i?.created_at || 0;
+    return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
+  };
+
+  let itemCount = 0;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const targetDateStr = normalizeDateStr(dStr);
+    const dDate = new Date(year, month - 1, d);
+    const dayType = getDayType(dDate); // 'weekday' | 'sat' | 'sun' | 'holiday'
+
+    // 対象スタッフ・該当日のレコードを抽出（削除・却下は除外）
+    const dayRecords = allCalendarData.filter(r => {
+      if (!r || !r.date) return false;
+      if (r.status === 'deleted' || r.status === '削除' || r.status === 'rejected' || r.status === '却下') return false;
+      if (normalizeDateStr(r.date) !== targetDateStr) return false;
+      return isStaffMatchRequest(staff, r);
+    });
+
+    if (dayRecords.length === 0) continue;
+
+    // 手動入力優先
+    const manualRecords = dayRecords.filter(isManualEntry);
+    const activeRecords = manualRecords.length > 0 ? manualRecords : dayRecords;
+
+    // 最新更新順にソート
+    activeRecords.sort((a, b) => {
+      const aMan = isManualEntry(a);
+      const bMan = isManualEntry(b);
+      if (aMan !== bMan) return aMan ? -1 : 1;
+      return getTime(b) - getTime(a);
+    });
+
+    // 1レコードごとの集計処理
+    const processRecord = (r: any) => {
+      const rawType = String(r.type || r.shiftType || '').trim();
+      let counted = false;
+
+      // 1. 年休 (通常: 7.75h, 会計年度: 7.5h)
+      if (['年休', '有給休暇', '有休', '年給', '有給'].includes(rawType)) {
+        breakdown.annualLeaveHours += fullDayHours;
+        counted = true;
+      }
+      // 2. 特休 (登録時間。終日の場合は 常勤: 7.75h / 会計年度: 7.5h)
+      else if (rawType === '特休') {
+        const rawH = r.hours ?? r.duration ?? r.details?.duration ?? r.details?.hours;
+        const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? Number(rawH) : null;
+        let h = fullDayHours;
+        if (parsedH !== null && !isNaN(parsedH) && parsedH > 0 && parsedH < fullDayHours) {
+          h = parsedH;
+        }
+        breakdown.specialLeaveHours += h;
+        counted = true;
+      }
+      // 3. 時間休 (登録時間)
+      else if (['時間休', '時間給', '時間給2'].includes(rawType)) {
+        const rawH = r.hours ?? r.duration ?? r.details?.duration ?? r.details?.hours;
+        const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? Number(rawH) : null;
+        const h = (parsedH !== null && !isNaN(parsedH) && parsedH > 0) ? parsedH : 1.0;
+        breakdown.hourlyLeaveHours += h;
+        counted = true;
+      }
+      // 4. 夏季休暇 (通常: 7.75h, 会計年度: 0h)
+      else if (['夏季休暇', '夏期休暇', '夏休'].includes(rawType)) {
+        if (!isFiscal) {
+          breakdown.summerLeaveHours += HOURS_PER_DAY; // 7.75h
+          counted = true;
+        }
+        // 会計年度職員には夏季休暇がないため加算対象外 (0h)
+      }
+      // 5. 振替4 (4.0h)
+      else if (['振替4', '振4'].includes(rawType)) {
+        breakdown.furikae4Hours += 4.0;
+        counted = true;
+      }
+      // 6. 振替＋時間休 (4.0h ＋ 登録された時間休の時間数)
+      else if (rawType === '振替＋時間休') {
+        const hrHours = Number(r.details?.hourlyHours ?? r.hourlyHours ?? (r.hours && r.hours > 4 ? r.hours - 4 : 0));
+        const validHr = (!isNaN(hrHours) && hrHours > 0) ? hrHours : 0;
+        breakdown.furikaeHourlyHours += (4.0 + validHr);
+        counted = true;
+      }
+      // 7. 特休＋時間休 (特休時間数 ＋ 時間休時間数)
+      else if (rawType === '特休＋時間休') {
+        const spHours = Number(r.details?.specialHours ?? r.specialHours ?? 0);
+        const hrHours = Number(r.details?.hourlyHours ?? r.hourlyHours ?? 0);
+        let h = 0;
+        if (!isNaN(spHours) && !isNaN(hrHours) && (spHours > 0 || hrHours > 0)) {
+          h = spHours + hrHours;
+        } else if (r.hours && !isNaN(Number(r.hours)) && Number(r.hours) > 0) {
+          h = Number(r.hours);
+        } else {
+          h = fullDayHours;
+        }
+        breakdown.specialHourlyHours += h;
+        counted = true;
+      }
+      // 8. 平日の出張 (土日祝は除外。平日の出張のみ登録時間、終日は 常勤: 7.75h / 会計年度: 7.5h)
+      else if (rawType === '出張') {
+        if (dayType === 'weekday') {
+          const rawH = r.hours ?? r.duration ?? r.details?.duration ?? r.details?.hours;
+          const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? Number(rawH) : null;
+          let h = fullDayHours;
+          if (parsedH !== null && !isNaN(parsedH) && parsedH > 0 && parsedH < fullDayHours) {
+            h = parsedH;
+          }
+          breakdown.weekdayTripHours += h;
+          counted = true;
+        }
+      }
+
+      if (counted) itemCount++;
+    };
+
+    const firstRec = activeRecords[0];
+    const firstType = String(firstRec.type || firstRec.shiftType || '').trim();
+
+    // 時間休単体以外は、日の最優先レコードを採用
+    if (!['時間休', '時間給', '時間給2'].includes(firstType)) {
+      processRecord(firstRec);
+    } else {
+      // 時間休の場合は、その日に複数時間休がある可能性を考慮して集計（重複IDは除外）
+      const seenIds = new Set<string>();
+      activeRecords.forEach(r => {
+        const t = String(r.type || r.shiftType || '').trim();
+        const rId = String(r.id || '');
+        if (['時間休', '時間給', '時間給2'].includes(t)) {
+          if (!rId || !seenIds.has(rId)) {
+            if (rId) seenIds.add(rId);
+            processRecord(r);
+          }
+        }
+      });
+    }
+  }
+
+  const rawTotal = breakdown.annualLeaveHours +
+    breakdown.specialLeaveHours +
+    breakdown.hourlyLeaveHours +
+    breakdown.summerLeaveHours +
+    breakdown.furikae4Hours +
+    breakdown.furikaeHourlyHours +
+    breakdown.specialHourlyHours +
+    breakdown.weekdayTripHours;
+
+  const totalHours = Math.round(rawTotal * 100) / 100;
+  const totalHoursStr = formatNonWorkingHours(totalHours);
+
+  breakdown.totalHours = totalHours;
+  breakdown.totalHoursStr = totalHoursStr;
+
+  return {
+    staff,
+    isFiscalYear: isFiscal,
+    totalHours,
+    totalHoursStr,
+    breakdown,
+    itemCount,
+  };
+}
+
+/**
+ * 全スタッフの月別「勤務を要しない時間」を一括集計します
+ */
+export function calculateAllStaffMonthlyNonWorkingHours(
+  staffList: any[],
+  allCalendarData: any[],
+  year: number,
+  month: number
+): StaffMonthlyNonWorkingHoursResult[] {
+  if (!Array.isArray(staffList)) return [];
+
+  return staffList
+    .filter(s => {
+      if (!s || s.status === '無効' || s.status === '入職前') return false;
+      return true;
+    })
+    .map(s => calculateStaffMonthlyNonWorkingHours(s, allCalendarData, year, month));
+}
+
 
 
 
