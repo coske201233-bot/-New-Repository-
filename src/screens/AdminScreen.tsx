@@ -4,7 +4,7 @@ import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING } from '../theme/theme';
 import { 
-  ChevronRight, Database, FileOutput, 
+  ChevronRight, ChevronLeft, Database, FileOutput, 
   QrCode, X, Check, Shield, User, Save, LogOut, Edit3, Printer, FileText, UserPlus, Clock, XCircle, RefreshCw, History,
   BarChart2, TrendingUp, ChevronDown, ChevronUp, Award
 } from 'lucide-react-native';
@@ -16,7 +16,18 @@ import { AuditLogModal } from '../components/AuditLogModal';
 import * as Print from 'expo-print';
 import { generateMonthlyShifts } from '../utils/shiftEngine';
 import { forceAppUpdate } from '../utils/appReloader';
-import { calculateRemainingLeaveHours, formatRemainingLeave, getLeaveHoursPerDay, calculateUsedLeaveHours, calculateMandatoryLeaveStatus, calculateAnnualLeaveRate } from '../utils/leaveUtils';
+import { 
+  calculateRemainingLeaveHours, 
+  formatRemainingLeave, 
+  getLeaveHoursPerDay, 
+  calculateUsedLeaveHours, 
+  calculateMandatoryLeaveStatus, 
+  calculateAnnualLeaveRate,
+  calculateAllStaffMonthlyNonWorkingHours,
+  calculateStaffMonthlyNonWorkingHours,
+  formatNonWorkingHours,
+  isAccountingYearStaff
+} from '../utils/leaveUtils';
 
 
 interface AdminScreenProps {
@@ -69,6 +80,14 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   // 年休取得率集計モーダル・表示用ステート
   const [showLeaveStatsModal, setShowLeaveStatsModal] = useState(false);
   const [leaveStatsSort, setLeaveStatsSort] = useState<'rate_asc' | 'rate_desc' | 'name'>('rate_asc');
+
+  // 🕒 月別「勤務を要しない時間」集計用ステート
+  const [selectedExemptYear, setSelectedExemptYear] = useState<number>((currentDate || new Date()).getFullYear());
+  const [selectedExemptMonth, setSelectedExemptMonth] = useState<number>((currentDate || new Date()).getMonth() + 1);
+  const [showNonWorkingHoursModal, setShowNonWorkingHoursModal] = useState(false);
+  const [nonWorkingHoursSort, setNonWorkingHoursSort] = useState<'hours_desc' | 'hours_asc' | 'name'>('hours_desc');
+  const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
+  const [showOnlyWithHours, setShowOnlyWithHours] = useState(false);
 
   // 全シフト＋リクエストデータ
   const allCalendarData = React.useMemo(() => {
@@ -160,6 +179,170 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         };
       });
   }, [staffList, allCalendarData, currentDate]);
+
+  // 🕒 スタッフごとの月別「勤務を要しない時間」集計一覧（管理者閲覧専用）
+  const staffNonWorkingHoursList = React.useMemo(() => {
+    return calculateAllStaffMonthlyNonWorkingHours(
+      staffList,
+      allCalendarData,
+      selectedExemptYear,
+      selectedExemptMonth
+    );
+  }, [staffList, allCalendarData, selectedExemptYear, selectedExemptMonth]);
+
+  // 🕒 月別「勤務を要しない時間」サマリー集計
+  const nonWorkingHoursSummary = React.useMemo(() => {
+    const totalHours = staffNonWorkingHoursList.reduce((sum, item) => sum + item.totalHours, 0);
+    const roundedTotal = Math.round(totalHours * 100) / 100;
+    const staffWithHoursCount = staffNonWorkingHoursList.filter(item => item.totalHours > 0).length;
+    const avgHours = staffNonWorkingHoursList.length > 0 
+      ? Math.round((totalHours / staffNonWorkingHoursList.length) * 10) / 10 
+      : 0;
+
+    return {
+      totalHours: roundedTotal,
+      totalHoursStr: formatNonWorkingHours(roundedTotal),
+      staffCount: staffNonWorkingHoursList.length,
+      staffWithHoursCount,
+      avgHoursStr: `${avgHours.toFixed(1)}h`,
+    };
+  }, [staffNonWorkingHoursList]);
+
+  // ソート・フィルター適用後のリスト
+  const displayedNonWorkingHoursList = React.useMemo(() => {
+    let list = [...staffNonWorkingHoursList];
+    if (showOnlyWithHours) {
+      list = list.filter(item => item.totalHours > 0);
+    }
+    return list.sort((a, b) => {
+      if (nonWorkingHoursSort === 'hours_desc') return b.totalHours - a.totalHours;
+      if (nonWorkingHoursSort === 'hours_asc') return a.totalHours - b.totalHours;
+      return (a.staff.name || '').localeCompare(b.staff.name || '');
+    });
+  }, [staffNonWorkingHoursList, showOnlyWithHours, nonWorkingHoursSort]);
+
+  // 前月・翌月移動
+  const handlePrevExemptMonth = () => {
+    if (selectedExemptMonth === 1) {
+      setSelectedExemptYear(prev => prev - 1);
+      setSelectedExemptMonth(12);
+    } else {
+      setSelectedExemptMonth(prev => prev - 1);
+    }
+  };
+
+  const handleNextExemptMonth = () => {
+    if (selectedExemptMonth === 12) {
+      setSelectedExemptYear(prev => prev + 1);
+      setSelectedExemptMonth(1);
+    } else {
+      setSelectedExemptMonth(prev => prev + 1);
+    }
+  };
+
+  // 🕒 月別「勤務を要しない時間」集計表のA4印刷ハンドラー
+  const handlePrintNonWorkingHoursReport = () => {
+    if (Platform.OS !== 'web') return;
+
+    try {
+      let rowsHtml = '';
+      displayedNonWorkingHoursList.forEach((item, index) => {
+        const s = item.staff;
+        const b = item.breakdown;
+        const empType = item.isFiscalYear ? '<span style="color:#d97706; font-weight:bold;">会計年度</span>' : '常勤';
+        
+        rowsHtml += `
+          <tr>
+            <td>${index + 1}</td>
+            <td style="text-align: left; padding-left: 6px; font-weight: bold;">${s.name}</td>
+            <td>${s.jobType || s.profession || '-'}</td>
+            <td>${s.placement || s.department || '-'}</td>
+            <td>${empType}</td>
+            <td style="font-weight: bold; color: #0284c7; font-size: 11px; background-color: #f0f9ff;">${item.totalHoursStr}</td>
+            <td>${b.annualLeaveHours > 0 ? formatNonWorkingHours(b.annualLeaveHours) : '-'}</td>
+            <td>${b.specialLeaveHours > 0 ? formatNonWorkingHours(b.specialLeaveHours) : '-'}</td>
+            <td>${b.hourlyLeaveHours > 0 ? formatNonWorkingHours(b.hourlyLeaveHours) : '-'}</td>
+            <td>${b.summerLeaveHours > 0 ? formatNonWorkingHours(b.summerLeaveHours) : '-'}</td>
+            <td>${b.furikae4Hours > 0 ? formatNonWorkingHours(b.furikae4Hours) : '-'}</td>
+            <td>${b.furikaeHourlyHours > 0 ? formatNonWorkingHours(b.furikaeHourlyHours) : '-'}</td>
+            <td>${b.specialHourlyHours > 0 ? formatNonWorkingHours(b.specialHourlyHours) : '-'}</td>
+            <td>${b.weekdayTripHours > 0 ? formatNonWorkingHours(b.weekdayTripHours) : '-'}</td>
+          </tr>
+        `;
+      });
+
+      const html = `
+        <html>
+          <head>
+            <title>勤務を要しない時間 集計表（${selectedExemptYear}年${selectedExemptMonth}月）</title>
+            <style>
+              @page { size: A4 landscape; margin: 8mm; }
+              body { font-family: sans-serif; padding: 6px; color: #1e293b; }
+              .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 8px; border-bottom: 2px solid #0284c7; padding-bottom: 4px; }
+              .summary-box { display: flex; gap: 20px; margin-bottom: 8px; font-size: 11px; background: #f8fafc; padding: 6px 12px; border: 1px solid #e2e8f0; border-radius: 4px; }
+              table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1px solid #cbd5e1; }
+              th, td { border: 1px solid #cbd5e1; padding: 4px 2px; text-align: center; font-size: 9.5px; }
+              th { background-color: #f1f5f9; font-weight: bold; }
+              tr:nth-child(even) { background-color: #f8fafc; }
+              .notes { margin-top: 8px; font-size: 9px; color: #64748b; line-height: 1.4; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <div>
+                <h1 style="margin:0; font-size:16px;">勤務を要しない時間 月別集計表</h1>
+                <div style="font-size: 11px; color: #64748b; margin-top: 2px;">対象年月: ${selectedExemptYear}年${selectedExemptMonth}月（管理者専用）</div>
+              </div>
+              <div style="font-size: 10px;">印刷日: ${new Date().toLocaleDateString('ja-JP')}</div>
+            </div>
+            <div class="summary-box">
+              <span>対象職員数: <b>${nonWorkingHoursSummary.staffCount}名</b> (取得者: <b>${nonWorkingHoursSummary.staffWithHoursCount}名</b>)</span>
+              <span>全体合計時間: <b style="color:#0284c7; font-size:12px;">${nonWorkingHoursSummary.totalHoursStr}</b></span>
+              <span>1人あたり平均: <b>${nonWorkingHoursSummary.avgHoursStr}</b></span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 25px;">No</th>
+                  <th style="width: 75px;">氏名</th>
+                  <th style="width: 45px;">職種</th>
+                  <th style="width: 55px;">所属</th>
+                  <th style="width: 50px;">形態</th>
+                  <th style="width: 65px; background-color: #e0f2fe; color: #0369a1;">合計時間</th>
+                  <th style="width: 45px;">年休</th>
+                  <th style="width: 45px;">特休</th>
+                  <th style="width: 45px;">時間休</th>
+                  <th style="width: 45px;">夏季</th>
+                  <th style="width: 45px;">振4</th>
+                  <th style="width: 50px;">振+時</th>
+                  <th style="width: 50px;">特+時</th>
+                  <th style="width: 50px;">平日出張</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+            </table>
+            <div class="notes">
+              ※【集計基準】年休(常勤:7.75h/会計年度:7.5h) / 特休(登録時間、終日7.75h/7.5h) / 時間休(登録時間) / 夏季休暇(常勤:7.75h/会計年度:0h) / 振替4(4.0h) / 振替＋時間休(4.0h＋時間休) / 特休＋時間休(特休＋時間休) / 平日の出張(平日のみ登録時間、終日7.75h/7.5h、土日祝は除外) ※公休、休日出勤、通常の出勤は対象外
+            </div>
+            <script>window.onload=function(){window.print();};<\/script>
+          </body>
+        </html>
+      `;
+
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
+      } else {
+        Alert.alert('ポップアップ制限', 'ブラウザのポップアップ設定を許可してください。');
+      }
+    } catch (err) {
+      console.error('Print logic error:', err);
+      Alert.alert('エラー', '集計表の印刷中に問題が発生しました。');
+    }
+  };
 
   // 年休取得状況集計表のA4印刷ハンドラー
   const handlePrintLeaveStatsReport = () => {
@@ -811,6 +994,211 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </TouchableOpacity>
               </ThemeCard>
 
+              {/* 🕒 管理者専用: 月別「勤務を要しない時間」集計一覧（時間換算表示） */}
+              <View style={{ marginTop: 24 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Clock size={20} color="#38bdf8" />
+                    <ThemeText bold variant="h2">🕒 勤務を要しない時間 集計</ThemeText>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    {Platform.OS === 'web' && (
+                      <TouchableOpacity 
+                        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.12)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}
+                        onPress={handlePrintNonWorkingHoursReport}
+                      >
+                        <Printer size={14} color="#38bdf8" />
+                        <ThemeText variant="caption" bold color="#38bdf8" style={{ marginLeft: 4 }}>A4印刷</ThemeText>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity 
+                      style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.15)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }}
+                      onPress={() => setShowNonWorkingHoursModal(true)}
+                    >
+                      <ThemeText variant="caption" bold color="#38bdf8">全体集計表</ThemeText>
+                      <ChevronRight size={14} color="#38bdf8" style={{ marginLeft: 2 }} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* 月選択セレクタ ＆ サマリーカード */}
+                <ThemeCard style={styles.exemptSummaryCard}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <TouchableOpacity onPress={handlePrevExemptMonth} style={styles.monthNavBtn}>
+                      <ChevronLeft size={18} color="#38bdf8" />
+                      <ThemeText variant="caption" bold color="#38bdf8">前月</ThemeText>
+                    </TouchableOpacity>
+                    <View style={{ alignItems: 'center' }}>
+                      <ThemeText bold variant="h2" color="#38bdf8">{selectedExemptYear}年 {selectedExemptMonth}月</ThemeText>
+                      <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11, marginTop: 2 }}>月次実績・時間換算集計（管理者専用）</ThemeText>
+                    </View>
+                    <TouchableOpacity onPress={handleNextExemptMonth} style={styles.monthNavBtn}>
+                      <ThemeText variant="caption" bold color="#38bdf8">翌月</ThemeText>
+                      <ChevronRight size={18} color="#38bdf8" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* サマリー3項目 */}
+                  <View style={styles.exemptSummaryGrid}>
+                    <View style={[styles.exemptSummaryCell, { borderRightWidth: 1, borderRightColor: 'rgba(255, 255, 255, 0.06)' }]}>
+                      <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11 }}>全体合計時間</ThemeText>
+                      <ThemeText bold style={{ fontSize: 18, color: '#38bdf8', marginTop: 3 }}>{nonWorkingHoursSummary.totalHoursStr}</ThemeText>
+                    </View>
+                    <View style={[styles.exemptSummaryCell, { borderRightWidth: 1, borderRightColor: 'rgba(255, 255, 255, 0.06)' }]}>
+                      <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11 }}>対象職員</ThemeText>
+                      <ThemeText bold style={{ fontSize: 18, color: 'white', marginTop: 3 }}>{nonWorkingHoursSummary.staffCount}名</ThemeText>
+                      <ThemeText variant="caption" style={{ fontSize: 10, color: COLORS.textSecondary }}>(取得者: {nonWorkingHoursSummary.staffWithHoursCount}名)</ThemeText>
+                    </View>
+                    <View style={styles.exemptSummaryCell}>
+                      <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11 }}>1人平均</ThemeText>
+                      <ThemeText bold style={{ fontSize: 18, color: '#34d399', marginTop: 3 }}>{nonWorkingHoursSummary.avgHoursStr}</ThemeText>
+                    </View>
+                  </View>
+                </ThemeCard>
+
+                {/* フィルター＆ソートコントロール */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity 
+                      style={[styles.filterChipSmall, nonWorkingHoursSort === 'hours_desc' && styles.filterChipSmallActive]}
+                      onPress={() => setNonWorkingHoursSort('hours_desc')}
+                    >
+                      <ThemeText variant="caption" bold={nonWorkingHoursSort === 'hours_desc'} color={nonWorkingHoursSort === 'hours_desc' ? '#38bdf8' : COLORS.textSecondary} style={{ fontSize: 11 }}>多い順</ThemeText>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.filterChipSmall, nonWorkingHoursSort === 'hours_asc' && styles.filterChipSmallActive]}
+                      onPress={() => setNonWorkingHoursSort('hours_asc')}
+                    >
+                      <ThemeText variant="caption" bold={nonWorkingHoursSort === 'hours_asc'} color={nonWorkingHoursSort === 'hours_asc' ? '#38bdf8' : COLORS.textSecondary} style={{ fontSize: 11 }}>少ない順</ThemeText>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.filterChipSmall, nonWorkingHoursSort === 'name' && styles.filterChipSmallActive]}
+                      onPress={() => setNonWorkingHoursSort('name')}
+                    >
+                      <ThemeText variant="caption" bold={nonWorkingHoursSort === 'name'} color={nonWorkingHoursSort === 'name' ? '#38bdf8' : COLORS.textSecondary} style={{ fontSize: 11 }}>氏名順</ThemeText>
+                    </TouchableOpacity>
+                  </View>
+
+                  <TouchableOpacity 
+                    style={[styles.filterChipSmall, showOnlyWithHours && styles.filterChipSmallActive]}
+                    onPress={() => setShowOnlyWithHours(prev => !prev)}
+                  >
+                    <ThemeText variant="caption" bold={showOnlyWithHours} color={showOnlyWithHours ? '#38bdf8' : COLORS.textSecondary} style={{ fontSize: 11 }}>
+                      {showOnlyWithHours ? '取得者のみ' : '全員表示'}
+                    </ThemeText>
+                  </TouchableOpacity>
+                </View>
+
+                {/* スタッフ別カード一覧 */}
+                <View style={{ gap: 8 }}>
+                  {displayedNonWorkingHoursList.map(item => {
+                    const isExpanded = expandedStaffId === (item.staff.id || item.staff.name);
+                    const b = item.breakdown;
+                    const empLabel = item.isFiscalYear ? '会計年度' : '常勤';
+                    const empColor = item.isFiscalYear ? '#f59e0b' : '#38bdf8';
+
+                    return (
+                      <ThemeCard key={`exempt_card_${item.staff.id || item.staff.email || item.staff.name}`} style={styles.exemptStaffCard}>
+                        <TouchableOpacity 
+                          activeOpacity={0.7} 
+                          onPress={() => setExpandedStaffId(isExpanded ? null : (item.staff.id || item.staff.name))}
+                        >
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <View style={{ flex: 1, paddingRight: 8 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                                <ThemeText bold style={{ fontSize: 15 }}>{item.staff.name}</ThemeText>
+                                <View style={{ backgroundColor: 'rgba(255,255,255,0.06)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                  <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>{item.staff.jobType || item.staff.profession || '-'}</ThemeText>
+                                </View>
+                                <View style={{ backgroundColor: `${empColor}15`, borderColor: `${empColor}40`, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                  <ThemeText variant="caption" bold color={empColor} style={{ fontSize: 10 }}>{empLabel}</ThemeText>
+                                </View>
+                              </View>
+                              <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 4, fontSize: 11 }}>
+                                所属: {item.staff.placement || item.staff.department || '未設定'}
+                              </ThemeText>
+                            </View>
+
+                            <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                              <View style={[styles.rateBadge, { 
+                                backgroundColor: item.totalHours > 0 ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.04)', 
+                                borderColor: item.totalHours > 0 ? '#38bdf8' : 'rgba(255, 255, 255, 0.08)' 
+                              }]}>
+                                <ThemeText bold color={item.totalHours > 0 ? '#38bdf8' : COLORS.textSecondary} style={{ fontSize: 13 }}>
+                                  勤務を要しない時間: {item.totalHoursStr}
+                                </ThemeText>
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>
+                                  {isExpanded ? '内訳を閉じる' : '内訳を表示'}
+                                </ThemeText>
+                                {isExpanded ? <ChevronUp size={12} color={COLORS.textSecondary} style={{ marginLeft: 2 }} /> : <ChevronDown size={12} color={COLORS.textSecondary} style={{ marginLeft: 2 }} />}
+                              </View>
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+
+                        {/* 展開時の内訳バッジ一覧 */}
+                        {isExpanded && (
+                          <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
+                            <ThemeText variant="caption" bold color={COLORS.textSecondary} style={{ marginBottom: 6, fontSize: 10 }}>
+                              【{selectedExemptMonth}月の種別内訳詳細】
+                            </ThemeText>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                              {b.annualLeaveHours > 0 && (
+                                <View style={styles.breakdownChip}>
+                                  <ThemeText variant="caption" color="#34d399">年休: <ThemeText bold color="#34d399">{formatNonWorkingHours(b.annualLeaveHours)}</ThemeText></ThemeText>
+                                </View>
+                              )}
+                              {b.specialLeaveHours > 0 && (
+                                <View style={styles.breakdownChip}>
+                                  <ThemeText variant="caption" color="#38bdf8">特休: <ThemeText bold color="#38bdf8">{formatNonWorkingHours(b.specialLeaveHours)}</ThemeText></ThemeText>
+                                </View>
+                              )}
+                              {b.hourlyLeaveHours > 0 && (
+                                <View style={styles.breakdownChip}>
+                                  <ThemeText variant="caption" color="#a855f7">時間休: <ThemeText bold color="#a855f7">{formatNonWorkingHours(b.hourlyLeaveHours)}</ThemeText></ThemeText>
+                                </View>
+                              )}
+                              {b.summerLeaveHours > 0 && (
+                                <View style={styles.breakdownChip}>
+                                  <ThemeText variant="caption" color="#ca8a04">夏季休暇: <ThemeText bold color="#ca8a04">{formatNonWorkingHours(b.summerLeaveHours)}</ThemeText></ThemeText>
+                                </View>
+                              )}
+                              {b.furikae4Hours > 0 && (
+                                <View style={styles.breakdownChip}>
+                                  <ThemeText variant="caption" color="#38bdf8">振替4: <ThemeText bold color="#38bdf8">{formatNonWorkingHours(b.furikae4Hours)}</ThemeText></ThemeText>
+                                </View>
+                              )}
+                              {b.furikaeHourlyHours > 0 && (
+                                <View style={styles.breakdownChip}>
+                                  <ThemeText variant="caption" color="#38bdf8">振替+時間休: <ThemeText bold color="#38bdf8">{formatNonWorkingHours(b.furikaeHourlyHours)}</ThemeText></ThemeText>
+                                </View>
+                              )}
+                              {b.specialHourlyHours > 0 && (
+                                <View style={styles.breakdownChip}>
+                                  <ThemeText variant="caption" color="#38bdf8">特休+時間休: <ThemeText bold color="#38bdf8">{formatNonWorkingHours(b.specialHourlyHours)}</ThemeText></ThemeText>
+                                </View>
+                              )}
+                              {b.weekdayTripHours > 0 && (
+                                <View style={styles.breakdownChip}>
+                                  <ThemeText variant="caption" color="#2563eb">平日出張: <ThemeText bold color="#2563eb">{formatNonWorkingHours(b.weekdayTripHours)}</ThemeText></ThemeText>
+                                </View>
+                              )}
+                              {item.totalHours === 0 && (
+                                <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11, fontStyle: 'italic' }}>
+                                  今月の対象休暇・申請はありません
+                                </ThemeText>
+                              )}
+                            </View>
+                          </View>
+                        )}
+                      </ThemeCard>
+                    );
+                  })}
+                </View>
+              </View>
+
               {/* 📊 管理者専用: 全職員の年休取得率一覧（インライン表示） */}
               <View style={{ marginTop: 24 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -981,6 +1369,165 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         </View>
       </Modal>
 
+      {/* 🕒 月別「勤務を要しない時間」集計表モーダル */}
+      <Modal visible={showNonWorkingHoursModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.statsModalBox}>
+            <View style={styles.pickerHeader}>
+              <View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Clock size={22} color="#38bdf8" />
+                  <ThemeText variant="h2">勤務を要しない時間 集計表</ThemeText>
+                </View>
+                <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 2 }}>
+                  {selectedExemptYear}年{selectedExemptMonth}月（管理者専用・全職員一覧）
+                </ThemeText>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                {Platform.OS === 'web' && (
+                  <TouchableOpacity onPress={handlePrintNonWorkingHoursReport} style={styles.iconBtn}>
+                    <Printer size={20} color="#38bdf8" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={() => setShowNonWorkingHoursModal(false)}>
+                  <X size={24} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* 月選択＆サマリー */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, backgroundColor: 'rgba(255,255,255,0.02)', padding: 10, borderRadius: 12 }}>
+              <TouchableOpacity onPress={handlePrevExemptMonth} style={styles.monthNavBtn}>
+                <ChevronLeft size={16} color="#38bdf8" />
+                <ThemeText variant="caption" bold color="#38bdf8">前月</ThemeText>
+              </TouchableOpacity>
+              <View style={{ alignItems: 'center' }}>
+                <ThemeText bold color="#38bdf8" style={{ fontSize: 16 }}>{selectedExemptYear}年 {selectedExemptMonth}月</ThemeText>
+                <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>合計: <ThemeText bold color="#38bdf8">{nonWorkingHoursSummary.totalHoursStr}</ThemeText> | 平均: <ThemeText bold color="#34d399">{nonWorkingHoursSummary.avgHoursStr}</ThemeText></ThemeText>
+              </View>
+              <TouchableOpacity onPress={handleNextExemptMonth} style={styles.monthNavBtn}>
+                <ThemeText variant="caption" bold color="#38bdf8">翌月</ThemeText>
+                <ChevronRight size={16} color="#38bdf8" />
+              </TouchableOpacity>
+            </View>
+
+            {/* ソート＆フィルターボタン */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <TouchableOpacity 
+                  style={[styles.filterChipSmall, nonWorkingHoursSort === 'hours_desc' && styles.filterChipSmallActive]}
+                  onPress={() => setNonWorkingHoursSort('hours_desc')}
+                >
+                  <ThemeText variant="caption" bold={nonWorkingHoursSort === 'hours_desc'} color={nonWorkingHoursSort === 'hours_desc' ? '#38bdf8' : COLORS.textSecondary} style={{ fontSize: 11 }}>多い順</ThemeText>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.filterChipSmall, nonWorkingHoursSort === 'hours_asc' && styles.filterChipSmallActive]}
+                  onPress={() => setNonWorkingHoursSort('hours_asc')}
+                >
+                  <ThemeText variant="caption" bold={nonWorkingHoursSort === 'hours_asc'} color={nonWorkingHoursSort === 'hours_asc' ? '#38bdf8' : COLORS.textSecondary} style={{ fontSize: 11 }}>少ない順</ThemeText>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.filterChipSmall, nonWorkingHoursSort === 'name' && styles.filterChipSmallActive]}
+                  onPress={() => setNonWorkingHoursSort('name')}
+                >
+                  <ThemeText variant="caption" bold={nonWorkingHoursSort === 'name'} color={nonWorkingHoursSort === 'name' ? '#38bdf8' : COLORS.textSecondary} style={{ fontSize: 11 }}>氏名順</ThemeText>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity 
+                style={[styles.filterChipSmall, showOnlyWithHours && styles.filterChipSmallActive]}
+                onPress={() => setShowOnlyWithHours(prev => !prev)}
+              >
+                <ThemeText variant="caption" bold={showOnlyWithHours} color={showOnlyWithHours ? '#38bdf8' : COLORS.textSecondary} style={{ fontSize: 11 }}>
+                  {showOnlyWithHours ? '取得者のみ' : '全員表示'}
+                </ThemeText>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+              <View style={{ gap: 8 }}>
+                {displayedNonWorkingHoursList.map(item => {
+                  const b = item.breakdown;
+                  const empLabel = item.isFiscalYear ? '会計年度' : '常勤';
+                  const empColor = item.isFiscalYear ? '#f59e0b' : '#38bdf8';
+
+                  return (
+                    <View key={`modal_exempt_${item.staff.id || item.staff.email || item.staff.name}`} style={styles.modalStaffRow}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <ThemeText bold style={{ fontSize: 15 }}>{item.staff.name}</ThemeText>
+                          <ThemeText variant="caption" color={COLORS.textSecondary}>{item.staff.jobType || item.staff.profession || ''} / {item.staff.placement || ''}</ThemeText>
+                          <View style={{ backgroundColor: `${empColor}15`, borderColor: `${empColor}40`, borderWidth: 1, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                            <ThemeText variant="caption" bold color={empColor} style={{ fontSize: 9 }}>{empLabel}</ThemeText>
+                          </View>
+                        </View>
+                        <View style={[styles.rateBadge, { 
+                          backgroundColor: item.totalHours > 0 ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.04)', 
+                          borderColor: item.totalHours > 0 ? '#38bdf8' : 'rgba(255, 255, 255, 0.08)' 
+                        }]}>
+                          <ThemeText bold color={item.totalHours > 0 ? '#38bdf8' : COLORS.textSecondary} style={{ fontSize: 12 }}>
+                            {item.totalHoursStr}
+                          </ThemeText>
+                        </View>
+                      </View>
+                      
+                      {/* 内訳詳細タグ */}
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 4 }}>
+                        {b.annualLeaveHours > 0 && (
+                          <View style={styles.breakdownChip}>
+                            <ThemeText variant="caption" color="#34d399" style={{ fontSize: 10 }}>年休: {formatNonWorkingHours(b.annualLeaveHours)}</ThemeText>
+                          </View>
+                        )}
+                        {b.specialLeaveHours > 0 && (
+                          <View style={styles.breakdownChip}>
+                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>特休: {formatNonWorkingHours(b.specialLeaveHours)}</ThemeText>
+                          </View>
+                        )}
+                        {b.hourlyLeaveHours > 0 && (
+                          <View style={styles.breakdownChip}>
+                            <ThemeText variant="caption" color="#a855f7" style={{ fontSize: 10 }}>時間休: {formatNonWorkingHours(b.hourlyLeaveHours)}</ThemeText>
+                          </View>
+                        )}
+                        {b.summerLeaveHours > 0 && (
+                          <View style={styles.breakdownChip}>
+                            <ThemeText variant="caption" color="#ca8a04" style={{ fontSize: 10 }}>夏季: {formatNonWorkingHours(b.summerLeaveHours)}</ThemeText>
+                          </View>
+                        )}
+                        {b.furikae4Hours > 0 && (
+                          <View style={styles.breakdownChip}>
+                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>振4: {formatNonWorkingHours(b.furikae4Hours)}</ThemeText>
+                          </View>
+                        )}
+                        {b.furikaeHourlyHours > 0 && (
+                          <View style={styles.breakdownChip}>
+                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>振+時: {formatNonWorkingHours(b.furikaeHourlyHours)}</ThemeText>
+                          </View>
+                        )}
+                        {b.specialHourlyHours > 0 && (
+                          <View style={styles.breakdownChip}>
+                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>特+時: {formatNonWorkingHours(b.specialHourlyHours)}</ThemeText>
+                          </View>
+                        )}
+                        {b.weekdayTripHours > 0 && (
+                          <View style={styles.breakdownChip}>
+                            <ThemeText variant="caption" color="#2563eb" style={{ fontSize: 10 }}>平日出張: {formatNonWorkingHours(b.weekdayTripHours)}</ThemeText>
+                          </View>
+                        )}
+                        {item.totalHours === 0 && (
+                          <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10, fontStyle: 'italic' }}>
+                            取得時間なし
+                          </ThemeText>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* 操作履歴（監査ログ）モーダル */}
       <AuditLogModal
         visible={showAuditLogModal}
@@ -1039,5 +1586,15 @@ const styles = StyleSheet.create({
   filterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   filterChipActive: { backgroundColor: 'rgba(52, 211, 153, 0.15)', borderColor: '#34d399' },
   modalStaffRow: { padding: 12, backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.04)' },
-  iconBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' }
+  iconBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
+
+  // 🕒 勤務を要しない時間用スタイル
+  exemptSummaryCard: { padding: 14, marginBottom: 12, backgroundColor: 'rgba(56, 189, 248, 0.04)', borderColor: 'rgba(56, 189, 248, 0.15)', borderWidth: 1, borderRadius: 16, width: '100%' },
+  exemptSummaryGrid: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: 'rgba(255, 255, 255, 0.03)', borderRadius: 12, padding: 12 },
+  exemptSummaryCell: { flex: 1, alignItems: 'center' },
+  monthNavBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.1)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, gap: 2 },
+  filterChipSmall: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  filterChipSmallActive: { backgroundColor: 'rgba(56, 189, 248, 0.15)', borderColor: '#38bdf8' },
+  exemptStaffCard: { padding: 14, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.04)', width: '100%' },
+  breakdownChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(255, 255, 255, 0.04)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)' }
 });
