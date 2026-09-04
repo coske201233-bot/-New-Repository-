@@ -604,6 +604,37 @@ export function formatNonWorkingHours(hours: number): string {
   return `${rounded}h`;
 }
 
+/**
+ * 時間休レコードから正確な時間数をパース・取得します (カレンダー表示・StaffScreen表示と完全一致)
+ * 
+ * 優先順位:
+ * details.hourlyHours -> hourlyHours -> details.partialLeaveHours -> partialLeaveHours ->
+ * details.duration -> hours -> duration -> details.hours
+ * 
+ * ※固定値（7.75h/8.0h/4.0h）の誤混入を完全に防止します
+ */
+export function parseHourlyLeaveHours(r: any): number {
+  if (!r) return 0;
+
+  const rawH = r.details?.hourlyHours ?? 
+               r.hourlyHours ?? 
+               r.details?.partialLeaveHours ?? 
+               r.partialLeaveHours ?? 
+               r.details?.duration ?? 
+               r.hours ?? 
+               r.duration ??
+               r.details?.hours;
+
+  if (rawH !== undefined && rawH !== null && rawH !== '') {
+    const parsedH = parseFloat(String(rawH));
+    if (!isNaN(parsedH) && parsedH > 0) {
+      return parsedH;
+    }
+  }
+
+  return 0;
+}
+
 export interface NonWorkingHoursBreakdown {
   annualLeaveHours: number;    // 1. 年休 (常勤: 7.75h, 会計年度: 7.5h)
   specialLeaveHours: number;   // 2. 特休 (登録時間、終日なら 7.75h / 7.5h)
@@ -731,8 +762,8 @@ export function calculateStaffMonthlyNonWorkingHours(
       }
       // 2. 特休 (登録時間。終日の場合は 常勤: 7.75h / 会計年度: 7.5h)
       else if (rawType === '特休') {
-        const rawH = r.hours ?? r.duration ?? r.details?.duration ?? r.details?.hours;
-        const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? Number(rawH) : null;
+        const rawH = r.details?.specialHours ?? r.specialHours ?? r.details?.duration ?? r.hours ?? r.duration ?? r.details?.hours;
+        const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? parseFloat(String(rawH)) : null;
         let h = fullDayHours;
         if (parsedH !== null && !isNaN(parsedH) && parsedH > 0 && parsedH < fullDayHours) {
           h = parsedH;
@@ -740,13 +771,13 @@ export function calculateStaffMonthlyNonWorkingHours(
         breakdown.specialLeaveHours += h;
         counted = true;
       }
-      // 3. 時間休 (登録時間)
+      // 3. 時間休 (登録時間: カレンダー表示と完全一致するプロパティ優先順位で取得)
       else if (['時間休', '時間給', '時間給2'].includes(rawType)) {
-        const rawH = r.hours ?? r.duration ?? r.details?.duration ?? r.details?.hours;
-        const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? Number(rawH) : null;
-        const h = (parsedH !== null && !isNaN(parsedH) && parsedH > 0) ? parsedH : 1.0;
-        breakdown.hourlyLeaveHours += h;
-        counted = true;
+        const h = parseHourlyLeaveHours(r);
+        if (h > 0) {
+          breakdown.hourlyLeaveHours += h;
+          counted = true;
+        }
       }
       // 4. 夏季休暇 (通常: 7.75h, 会計年度: 0h)
       else if (['夏季休暇', '夏期休暇', '夏休'].includes(rawType)) {
@@ -786,8 +817,8 @@ export function calculateStaffMonthlyNonWorkingHours(
       // 8. 平日の出張 (土日祝は除外。平日の出張のみ登録時間、終日は 常勤: 7.75h / 会計年度: 7.5h)
       else if (rawType === '出張') {
         if (dayType === 'weekday') {
-          const rawH = r.hours ?? r.duration ?? r.details?.duration ?? r.details?.hours;
-          const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? Number(rawH) : null;
+          const rawH = r.details?.duration ?? r.hours ?? r.duration ?? r.details?.hours;
+          const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? parseFloat(String(rawH)) : null;
           let h = fullDayHours;
           if (parsedH !== null && !isNaN(parsedH) && parsedH > 0 && parsedH < fullDayHours) {
             h = parsedH;
@@ -828,12 +859,8 @@ export function calculateStaffMonthlyNonWorkingHours(
       });
 
       if (hourlyRecords.length > 0) {
-        // 時間休の時間数取得ヘルパー
-        const getHourlyHours = (r: any): number => {
-          const rawH = r.hours ?? r.duration ?? r.partialLeaveHours ?? r.leaveHours ?? r.details?.duration ?? r.details?.hours ?? r.details?.partialLeaveHours;
-          const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? Number(rawH) : null;
-          return (parsedH !== null && !isNaN(parsedH) && parsedH > 0) ? parsedH : 1.0;
-        };
+        // 時間休の時間数取得ヘルパー（共通パース関数を利用）
+        const getHourlyHours = (r: any): number => parseHourlyLeaveHours(r);
 
         // 時間休の時間帯取得ヘルパー
         const getHourlySlot = (r: any): string => {
@@ -872,6 +899,8 @@ export function calculateStaffMonthlyNonWorkingHours(
 
         for (const r of hourlyRecords) {
           const rHours = getHourlyHours(r);
+          if (rHours <= 0) continue; // 有効な時間休時間が取得できないゴミレコードはスキップ
+
           const rSlot = getHourlySlot(r);
 
           const isDuplicate = uniqueHourlyList.some(u => {
