@@ -116,9 +116,6 @@ export const QrShareScreen: React.FC<QrShareScreenProps> = ({
             <Share2 color="#38bdf8" size={32} />
           </View>
           <ThemeText variant="h1" style={styles.heroTitle}>スタッフに共有</ThemeText>
-          <ThemeText variant="body" style={styles.heroSubtitle}>
-            このQRコードをスタッフに読み取ってもらうか、LINE等で共有してアプリを導入してもらいましょう。
-          </ThemeText>
         </View>
 
         <ThemeCard style={styles.qrCard}>
