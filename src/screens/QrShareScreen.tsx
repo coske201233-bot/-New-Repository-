@@ -1,12 +1,10 @@
-import React, { useRef } from 'react';
-import { StyleSheet, View, SafeAreaView, TouchableOpacity, ScrollView, Dimensions, Platform, Share, Alert, Clipboard } from 'react-native';
+import React from 'react';
+import { StyleSheet, View, SafeAreaView, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
-import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { ChevronLeft, Share2, Info, Copy, MessageCircle, Download } from 'lucide-react-native';
+import { COLORS, SPACING } from '../theme/theme';
+import { ChevronLeft, Share2 } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 
 import { APP_CONFIG } from '../constants/Config';
 
@@ -15,91 +13,12 @@ interface QrShareScreenProps {
   webUrl?: string;
 }
 
-const { width } = Dimensions.get('window');
-
 export const QrShareScreen: React.FC<QrShareScreenProps> = ({ 
   onBack, 
   webUrl
 }) => {
   const defaultWebUrl = APP_CONFIG.WEB_URL;
   const finalWebUrl = webUrl || defaultWebUrl;
-  const svgRef = useRef<any>(null);
-
-  // URLをクリップボードにコピーする関数
-  const handleCopyUrl = async () => {
-    try {
-      if (Platform.OS === 'web') {
-        if (navigator.clipboard) {
-          await navigator.clipboard.writeText(finalWebUrl);
-          Alert.alert('コピー完了', 'URLをクリップボードにコピーしました。');
-        } else {
-          Alert.alert('エラー', 'このブラウザはコピーをサポートしていません。');
-        }
-      } else {
-        Clipboard.setString(finalWebUrl);
-        Alert.alert('コピー完了', 'URLをクリップボードにコピーしました。');
-      }
-    } catch (error) {
-      Alert.alert('エラー', 'コピーに失敗しました。');
-    }
-  };
-
-  // URLをLINEや他のアプリで共有する関数
-  const handleShareUrl = async () => {
-    try {
-      await Share.share({
-        message: `スタッフ用シフト管理アプリの共有URLはこちらです：\n${finalWebUrl}`,
-        url: finalWebUrl,
-      });
-    } catch (error: any) {
-      Alert.alert('エラー', '共有に失敗しました。');
-    }
-  };
-
-  // QRコード画像を共有・保存する関数
-  const handleShareImage = () => {
-    if (!svgRef.current) {
-      Alert.alert('エラー', 'QRコードの読み込みが完了していません。');
-      return;
-    }
-    
-    svgRef.current.toDataURL(async (dataURL: string) => {
-      if (Platform.OS === 'web') {
-        try {
-          const link = document.createElement('a');
-          link.href = `data:image/png;base64,${dataURL}`;
-          link.download = 'staff_app_qrcode.png';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        } catch (error) {
-          Alert.alert('エラー', '画像のダウンロードに失敗しました。');
-        }
-      } else {
-        try {
-          // キャッシュディレクトリに一時保存
-          const fs = FileSystem as any;
-          const filename = `${fs.cacheDirectory || fs.documentDirectory}staff_qrcode.png`;
-          await fs.writeAsStringAsync(filename, dataURL, {
-            encoding: fs.EncodingType?.Base64 || 'base64',
-          });
-          
-          // 共有ダイアログを表示
-          if (await Sharing.isAvailableAsync()) {
-            await Sharing.shareAsync(filename, {
-              mimeType: 'image/png',
-              dialogTitle: 'QRコード画像を共有',
-            });
-          } else {
-            Alert.alert('エラー', 'この端末ではファイル共有がサポートされていません。');
-          }
-        } catch (error) {
-          console.error('Error sharing image:', error);
-          Alert.alert('エラー', '画像の共有に失敗しました。');
-        }
-      }
-    });
-  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -127,7 +46,6 @@ export const QrShareScreen: React.FC<QrShareScreenProps> = ({
                 color="#0f172a"
                 backgroundColor="white"
                 quietZone={10}
-                getRef={(c) => (svgRef.current = c)}
               />
             </View>
           </View>
@@ -141,60 +59,6 @@ export const QrShareScreen: React.FC<QrShareScreenProps> = ({
             </ThemeText>
           </View>
         </ThemeCard>
-
-        {/* 共有アクションボタンエリア */}
-        <View style={styles.actionsContainer}>
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.primaryButton]} 
-            onPress={handleShareUrl}
-            activeOpacity={0.8}
-          >
-            <MessageCircle size={20} color="#ffffff" style={styles.buttonIcon} />
-            <ThemeText style={styles.primaryButtonText} bold>
-              URLをLINE等で送る
-            </ThemeText>
-          </TouchableOpacity>
-
-          <View style={styles.secondaryActions}>
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.secondaryButton]} 
-              onPress={handleShareImage}
-              activeOpacity={0.8}
-            >
-              <Download size={18} color="#38bdf8" style={styles.buttonIcon} />
-              <ThemeText style={styles.secondaryButtonText} bold>
-                {Platform.OS === 'web' ? 'QRコードを保存' : 'QRコードを共有'}
-              </ThemeText>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.secondaryButton]} 
-              onPress={handleCopyUrl}
-              activeOpacity={0.8}
-            >
-              <Copy size={18} color="#38bdf8" style={styles.buttonIcon} />
-              <ThemeText style={styles.secondaryButtonText} bold>
-                URLをコピー
-              </ThemeText>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.infoBox}>
-          <View style={styles.infoIcon}>
-            <Info size={20} color="#38bdf8" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <ThemeText variant="body" bold style={{ color: '#38bdf8', marginBottom: 4 }}>
-              インストールのコツ
-            </ThemeText>
-            <ThemeText variant="caption" color={COLORS.textSecondary}>
-              SafariやChromeの「ホーム画面に追加」機能を使うことで、通常のアプリのようにアイコン化して利用できます。
-            </ThemeText>
-          </View>
-        </View>
-        
-        <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -239,12 +103,6 @@ const styles = StyleSheet.create({
     fontSize: 28,
     marginBottom: 8,
   },
-  heroSubtitle: {
-    textAlign: 'center',
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    lineHeight: 22,
-  },
   qrCard: { 
     padding: 30, 
     alignItems: 'center',
@@ -285,61 +143,5 @@ const styles = StyleSheet.create({
   urlText: { 
     fontSize: 14,
     color: '#38bdf8',
-  },
-  infoBox: { 
-    flexDirection: 'row', 
-    backgroundColor: 'rgba(56, 189, 248, 0.05)', 
-    padding: 20, 
-    borderRadius: 20, 
-    alignItems: 'flex-start',
-    gap: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.1)',
-  },
-  infoIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(56, 189, 248, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  actionsContainer: {
-    gap: 12,
-    width: '100%',
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  primaryButton: {
-    backgroundColor: '#0ea5e9',
-    borderColor: '#0ea5e9',
-    width: '100%',
-  },
-  primaryButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-  },
-  secondaryActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  secondaryButton: {
-    flex: 1,
-    backgroundColor: 'rgba(56, 189, 248, 0.05)',
-    borderColor: 'rgba(56, 189, 248, 0.2)',
-  },
-  secondaryButtonText: {
-    color: '#38bdf8',
-    fontSize: 14,
-  },
-  buttonIcon: {
-    marginRight: 8,
   },
 });
