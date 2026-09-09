@@ -1455,6 +1455,38 @@ export function calculateWeeklyFloorNonWorkingHours(
   });
 }
 
+/**
+ * 休暇申請が許可されている未来の上限日（月末）を取得
+ * 締め切り制限は持たず、前々月15日解禁ルールによる上限のみを返す
+ * 
+ * - 今日の日付が 15日未満: 翌月末日まで申請可能
+ * - 今日の日付が 15日以降: 翌々月末日まで申請可能
+ */
+export function getLeaveApplicationMaxDate(baseDate: Date = new Date()): Date {
+  const year = baseDate.getFullYear();
+  const month = baseDate.getMonth(); // 0-indexed
+  const day = baseDate.getDate();
+
+  // 15日未満なら翌月末（month + 2 の 0日目）
+  // 15日以降なら翌々月末（month + 3 の 0日目）
+  const offset = day >= 15 ? 3 : 2;
+  return new Date(year, month + offset, 0, 23, 59, 59, 999);
+}
+
+/**
+ * 指定された日付が休暇申請の解禁範囲内（未来上限日以前）かどうかを判定
+ * （締め切り制限なし、過去日はすべて許可）
+ */
+export function isLeaveApplicationDateAllowed(dateStrOrDate: string | Date, baseDate: Date = new Date()): boolean {
+  if (!dateStrOrDate) return false;
+  const maxDate = getLeaveApplicationMaxDate(baseDate);
+  const targetDate = typeof dateStrOrDate === 'string' ? new Date(dateStrOrDate.replace(/-/g, '/')) : dateStrOrDate;
+  const compareTarget = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 0, 0, 0);
+  const compareMax = new Date(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate(), 23, 59, 59, 999);
+  return compareTarget.getTime() <= compareMax.getTime();
+}
+
+
 
 
 

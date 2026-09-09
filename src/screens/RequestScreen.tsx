@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, TextInput, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { ClipboardList, Plus, Calendar as CalendarIcon, Clock, CheckCircle2, AlertCircle, X, ChevronRight, RefreshCw } from 'lucide-react-native';
-import { formatDate, getDateStr } from '../utils/dateUtils';
+import { ClipboardList, Plus, Calendar as CalendarIcon, Clock, CheckCircle2, AlertCircle, X, ChevronRight, ChevronLeft, RefreshCw } from 'lucide-react-native';
+import { formatDate, getDateStr, getMonthInfo } from '../utils/dateUtils';
 import { normalizeName } from '../utils/staffUtils';
 import { supabase } from '../utils/supabase';
 import { deleteShiftRequest } from '../utils/requestApi';
 import { checkIsAdmin } from '../utils/authUtils';
+import { getLeaveApplicationMaxDate, isLeaveApplicationDateAllowed } from '../utils/leaveUtils';
 
 interface RequestScreenProps {
   requests: any[];
@@ -44,6 +45,53 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
   const [offTargetDate, setOffTargetDate] = useState('');
   const [activeDateField, setActiveDateField] = useState<'single' | 'original' | 'target' | 'workOriginal' | 'workTarget' | 'offOriginal' | 'offTarget'>('single');
   const [formError, setFormError] = useState('');
+
+  // 前々月15日解禁ルールに基づく未来の申請上限日（月末）
+  const maxAllowedDate = useMemo(() => getLeaveApplicationMaxDate(new Date()), []);
+  const maxYear = maxAllowedDate.getFullYear();
+  const maxMonth = maxAllowedDate.getMonth(); // 0-indexed
+
+  // カレンダー表示月（初期値: 現在の月）
+  const [pickerMonth, setPickerMonth] = useState<Date>(new Date());
+
+  // 表示月が上限の年月以上であれば翌月への遷移をブロック
+  const canGoNextMonth = useMemo(() => {
+    const pickerYear = pickerMonth.getFullYear();
+    const pickerMonthIdx = pickerMonth.getMonth();
+    return (pickerYear < maxYear) || (pickerYear === maxYear && pickerMonthIdx < maxMonth);
+  }, [pickerMonth, maxYear, maxMonth]);
+
+  const handlePrevMonth = () => {
+    // 過去月へは無制限に遡れる（締め切り制限なし）
+    setPickerMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  };
+
+  const handleNextMonth = () => {
+    if (!canGoNextMonth) return;
+    setPickerMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  };
+
+  const openDatePicker = (
+    field: 'single' | 'original' | 'target' | 'workOriginal' | 'workTarget' | 'offOriginal' | 'offTarget',
+    currentDateVal?: string
+  ) => {
+    setActiveDateField(field);
+    if (currentDateVal) {
+      const parsed = new Date(currentDateVal.replace(/-/g, '/'));
+      if (!isNaN(parsed.getTime())) {
+        setPickerMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
+      } else {
+        setPickerMonth(new Date());
+      }
+    } else {
+      setPickerMonth(new Date());
+    }
+    setIsDateModalVisible(true);
+  };
+
+  const monthDays = useMemo(() => {
+    return getMonthInfo(pickerMonth.getFullYear(), pickerMonth.getMonth()) || [];
+  }, [pickerMonth]);
 
   React.useEffect(() => {
     if (profile?.position?.trim() === '会計年度') {
@@ -149,6 +197,24 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
       setFormError(msg);
       if (Platform.OS === 'web') window.alert(msg);
       return;
+    }
+
+    // 【未来月解禁ルール（前々月15日解禁）の検証】
+    // 締め切り（過去日等）の制限は行わず、未解禁の未来月のみブロック
+    const datesToValidate = isDoublePairType
+      ? [workOriginalDate, workTargetDate, offOriginalDate, offTargetDate]
+      : isSinglePairType
+        ? [originalDate, targetDate]
+        : [newRequest.date];
+
+    for (const d of datesToValidate) {
+      if (d && !isLeaveApplicationDateAllowed(d)) {
+        const msg = `申請可能期間外の日付（${formatDate(d)}）が含まれています。現在申請可能な日付は ${maxYear}年${maxMonth + 1}月末日までです（毎月15日に翌々月分が解禁されます）。`;
+        setFormError(msg);
+        if (Platform.OS === 'web') window.alert(msg);
+        else Alert.alert('申請エラー', msg);
+        return;
+      }
     }
     
     if (!profile || !profile.id) {
@@ -398,6 +464,18 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
             <ThemeCard style={styles.formCard}>
               <ThemeText variant="h2" style={styles.formTitle}>新規申請</ThemeText>
               
+              <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.25)', marginBottom: 16 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <CalendarIcon size={16} color="#38bdf8" />
+                  <ThemeText bold color="#38bdf8" style={{ fontSize: 13 }}>
+                    申請受付中: {maxYear}年{maxMonth + 1}月末日まで
+                  </ThemeText>
+                </View>
+                <ThemeText variant="caption" style={{ color: COLORS.textSecondary, marginTop: 4, fontSize: 11 }}>
+                  ※ 過去日も含めて申請締め切り制限はありません。未解禁の未来月は毎月15日に翌々月分が解禁されます。
+                </ThemeText>
+              </View>
+              
               {formError ? (
                 <View style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: 12, borderRadius: 8, marginBottom: 16 }}>
                   <ThemeText style={{ color: '#ef4444' }}>{formError}</ThemeText>
@@ -513,7 +591,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   <ThemeText variant="label" bold color={COLORS.primary}>【1】 休日出勤の変更</ThemeText>
                   <View style={styles.inputGroup}>
                     <ThemeText variant="caption">① 休日出勤の変更日（元の出勤予定日）</ThemeText>
-                    <TouchableOpacity style={styles.dateSelectorBtn} onPress={() => { setActiveDateField('workOriginal'); setIsDateModalVisible(true); }}>
+                    <TouchableOpacity style={styles.dateSelectorBtn} onPress={() => openDatePicker('workOriginal', workOriginalDate)}>
                       <CalendarIcon size={18} color="#f87171" />
                       <ThemeText style={{ marginLeft: 12, color: workOriginalDate ? COLORS.text : COLORS.border }}>
                         {workOriginalDate ? formatDate(workOriginalDate) : 'タップして元の休日出勤日を選択'}
@@ -522,7 +600,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   </View>
                   <View style={styles.inputGroup}>
                     <ThemeText variant="caption">② 休日出勤の変更希望日（新しい出勤希望日）</ThemeText>
-                    <TouchableOpacity style={styles.dateSelectorBtn} onPress={() => { setActiveDateField('workTarget'); setIsDateModalVisible(true); }}>
+                    <TouchableOpacity style={styles.dateSelectorBtn} onPress={() => openDatePicker('workTarget', workTargetDate)}>
                       <CalendarIcon size={18} color="#38bdf8" />
                       <ThemeText style={{ marginLeft: 12, color: workTargetDate ? COLORS.text : COLORS.border }}>
                         {workTargetDate ? formatDate(workTargetDate) : 'タップして新しい休日出勤日を選択'}
@@ -533,7 +611,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   <ThemeText variant="label" bold color={COLORS.primary} style={{ marginTop: 8 }}>【2】 公休の変更</ThemeText>
                   <View style={styles.inputGroup}>
                     <ThemeText variant="caption">③ 公休の変更日（元の公休予定日）</ThemeText>
-                    <TouchableOpacity style={styles.dateSelectorBtn} onPress={() => { setActiveDateField('offOriginal'); setIsDateModalVisible(true); }}>
+                    <TouchableOpacity style={styles.dateSelectorBtn} onPress={() => openDatePicker('offOriginal', offOriginalDate)}>
                       <CalendarIcon size={18} color="#f87171" />
                       <ThemeText style={{ marginLeft: 12, color: offOriginalDate ? COLORS.text : COLORS.border }}>
                         {offOriginalDate ? formatDate(offOriginalDate) : 'タップして元の公休日を選択'}
@@ -542,7 +620,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   </View>
                   <View style={styles.inputGroup}>
                     <ThemeText variant="caption">④ 公休の変更希望日（新しい公休希望日）</ThemeText>
-                    <TouchableOpacity style={styles.dateSelectorBtn} onPress={() => { setActiveDateField('offTarget'); setIsDateModalVisible(true); }}>
+                    <TouchableOpacity style={styles.dateSelectorBtn} onPress={() => openDatePicker('offTarget', offTargetDate)}>
                       <CalendarIcon size={18} color="#38bdf8" />
                       <ThemeText style={{ marginLeft: 12, color: offTargetDate ? COLORS.text : COLORS.border }}>
                         {offTargetDate ? formatDate(offTargetDate) : 'タップして新しい公休日を選択'}
@@ -556,10 +634,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                     <ThemeText variant="label">① 変更日（元の予定日）</ThemeText>
                     <TouchableOpacity 
                       style={styles.dateSelectorBtn} 
-                      onPress={() => {
-                        setActiveDateField('original');
-                        setIsDateModalVisible(true);
-                      }}
+                      onPress={() => openDatePicker('original', originalDate)}
                     >
                       <CalendarIcon size={18} color="#f87171" />
                       <ThemeText style={{ marginLeft: 12, color: originalDate ? COLORS.text : COLORS.border }}>
@@ -572,10 +647,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                     <ThemeText variant="label">② 変更希望日（新たな希望日）</ThemeText>
                     <TouchableOpacity 
                       style={styles.dateSelectorBtn} 
-                      onPress={() => {
-                        setActiveDateField('target');
-                        setIsDateModalVisible(true);
-                      }}
+                      onPress={() => openDatePicker('target', targetDate)}
                     >
                       <CalendarIcon size={18} color="#38bdf8" />
                       <ThemeText style={{ marginLeft: 12, color: targetDate ? COLORS.text : COLORS.border }}>
@@ -589,10 +661,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   <ThemeText variant="label">日付</ThemeText>
                   <TouchableOpacity 
                     style={styles.dateSelectorBtn} 
-                    onPress={() => {
-                      setActiveDateField('single');
-                      setIsDateModalVisible(true);
-                    }}
+                    onPress={() => openDatePicker('single', newRequest.date)}
                   >
                     <CalendarIcon size={18} color={COLORS.primary} />
                     <ThemeText style={{ marginLeft: 12 }}>
@@ -620,10 +689,18 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
         </KeyboardAvoidingView>
       )}
 
-      {/* Date Picker Modal */}
-      <Modal visible={isDateModalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+      {/* Date Picker Modal (月カレンダー形式・未来月解禁ルール適用) */}
+      <Modal visible={isDateModalVisible} transparent animationType="fade">
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1} 
+          onPress={() => setIsDateModalVisible(false)}
+        >
+          <TouchableOpacity 
+            activeOpacity={1} 
+            style={[styles.modalContent, { maxWidth: 420, width: '92%' }]} 
+            onPress={(e) => e.stopPropagation()}
+          >
             <View style={styles.modalHeader}>
               <ThemeText variant="h2">
                 {activeDateField === 'workOriginal' ? '元の休日出勤日を選択' :
@@ -637,45 +714,110 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 <X color={COLORS.textSecondary} size={24} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={{ maxHeight: 400 }} keyboardShouldPersistTaps="always">
-              {Array.from({ length: 60 }).map((_, i) => {
-                const d = new Date();
-                d.setDate(d.getDate() + i);
-                const dateStr = getDateStr(d);
+
+            {/* 解禁案内バナー */}
+            <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.25)', marginBottom: 14 }}>
+              <ThemeText variant="caption" style={{ color: '#38bdf8', fontSize: 11 }}>
+                📅 申請受付中: {maxYear}年{maxMonth + 1}月末日まで（毎月15日に翌々月分が解禁）
+              </ThemeText>
+            </View>
+
+            {/* 月送りナビゲーションバー */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <TouchableOpacity 
+                style={{ padding: 8, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.06)' }}
+                onPress={handlePrevMonth}
+              >
+                <ChevronLeft size={20} color="white" />
+              </TouchableOpacity>
+              <ThemeText bold variant="h2">
+                {pickerMonth.getFullYear()}年 {pickerMonth.getMonth() + 1}月
+              </ThemeText>
+              <TouchableOpacity 
+                style={[
+                  { padding: 8, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.06)' }, 
+                  !canGoNextMonth && { opacity: 0.2 }
+                ]}
+                onPress={handleNextMonth}
+                disabled={!canGoNextMonth}
+              >
+                <ChevronRight size={20} color="white" />
+              </TouchableOpacity>
+            </View>
+
+            {/* 曜日ヘッダー */}
+            <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+              {['日', '月', '火', '水', '木', '金', '土'].map((d, i) => (
+                <ThemeText 
+                  key={d} 
+                  style={{ flex: 1, textAlign: 'center', fontSize: 12, fontWeight: 'bold', color: i === 0 ? '#ef4444' : i === 6 ? '#38bdf8' : COLORS.textSecondary }}
+                >
+                  {d}
+                </ThemeText>
+              ))}
+            </View>
+
+            {/* マス目カレンダー */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              {monthDays.map((d, idx) => {
+                if (d.empty) {
+                  return <View key={`empty-${idx}`} style={{ width: `${100 / 7}%`, height: 42 }} />;
+                }
+                const isAllowed = isLeaveApplicationDateAllowed(d.dateStr);
                 const isSelected = 
-                  activeDateField === 'workOriginal' ? workOriginalDate === dateStr :
-                  activeDateField === 'workTarget' ? workTargetDate === dateStr :
-                  activeDateField === 'offOriginal' ? offOriginalDate === dateStr :
-                  activeDateField === 'offTarget' ? offTargetDate === dateStr :
-                  activeDateField === 'original' ? originalDate === dateStr :
-                  activeDateField === 'target' ? targetDate === dateStr :
-                  newRequest.date === dateStr;
+                  activeDateField === 'workOriginal' ? workOriginalDate === d.dateStr :
+                  activeDateField === 'workTarget' ? workTargetDate === d.dateStr :
+                  activeDateField === 'offOriginal' ? offOriginalDate === d.dateStr :
+                  activeDateField === 'offTarget' ? offTargetDate === d.dateStr :
+                  activeDateField === 'original' ? originalDate === d.dateStr :
+                  activeDateField === 'target' ? targetDate === d.dateStr :
+                  newRequest.date === d.dateStr;
+
+                const dateObj = new Date(d.dateStr.replace(/-/g, '/'));
+                const isSat = dateObj.getDay() === 6;
 
                 return (
-                  <TouchableOpacity 
-                    key={dateStr} 
-                    style={[styles.dateOption, isSelected && styles.dateOptionActive]}
+                  <TouchableOpacity
+                    key={d.dateStr}
+                    disabled={!isAllowed}
+                    style={{
+                      width: `${100 / 7}%`,
+                      height: 42,
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      borderRadius: 8,
+                      backgroundColor: isSelected ? COLORS.primary : 'transparent',
+                      opacity: isAllowed ? 1 : 0.25,
+                    }}
                     onPress={() => {
-                      if (activeDateField === 'workOriginal') setWorkOriginalDate(dateStr);
-                      else if (activeDateField === 'workTarget') setWorkTargetDate(dateStr);
-                      else if (activeDateField === 'offOriginal') setOffOriginalDate(dateStr);
-                      else if (activeDateField === 'offTarget') setOffTargetDate(dateStr);
-                      else if (activeDateField === 'original') setOriginalDate(dateStr);
-                      else if (activeDateField === 'target') setTargetDate(dateStr);
-                      else setNewRequest({ ...newRequest, date: dateStr });
+                      if (!isAllowed) return;
+                      if (activeDateField === 'workOriginal') setWorkOriginalDate(d.dateStr);
+                      else if (activeDateField === 'workTarget') setWorkTargetDate(d.dateStr);
+                      else if (activeDateField === 'offOriginal') setOffOriginalDate(d.dateStr);
+                      else if (activeDateField === 'offTarget') setOffTargetDate(d.dateStr);
+                      else if (activeDateField === 'original') setOriginalDate(d.dateStr);
+                      else if (activeDateField === 'target') setTargetDate(d.dateStr);
+                      else setNewRequest({ ...newRequest, date: d.dateStr });
                       setIsDateModalVisible(false);
                     }}
                   >
-                    <ThemeText color={isSelected ? COLORS.background : COLORS.text}>{formatDate(d)}</ThemeText>
+                    <ThemeText
+                      bold={isSelected}
+                      color={isSelected ? 'white' : !isAllowed ? COLORS.textSecondary : d.isH ? '#ef4444' : isSat ? '#38bdf8' : 'white'}
+                      style={{ fontSize: 13 }}
+                    >
+                      {d.day}
+                    </ThemeText>
                   </TouchableOpacity>
                 );
               })}
-            </ScrollView>
+            </View>
+
             <TouchableOpacity style={styles.closeBtn} onPress={() => setIsDateModalVisible(false)}>
               <ThemeText color={COLORS.primary} bold>閉じる</ThemeText>
             </TouchableOpacity>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );
