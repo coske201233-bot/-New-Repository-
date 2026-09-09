@@ -8,6 +8,7 @@ import { getDayType, getDateStr } from '../utils/dateUtils';
 import { sortStaffByName } from '../utils/staffUtils';
 import { getCurrentLimit } from '../utils/limitUtils';
 import { forceAppUpdate } from '../utils/appReloader';
+import { checkIsAdmin } from '../utils/authUtils';
 
 const hospitalPlacements = ['２F', '４F', '訪問リハ', 'フォロー', '兼務', '管理', '外来', '助手'];
 
@@ -38,6 +39,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onForceCloudSync, profile, isAdminAuthenticated, onOpenRequests, onLogout,
   isInitialized, shifts, isSyncing, isLoadingShifts
 }) => {
+  const isUserAdmin = checkIsAdmin(undefined, profile) || !!isAdminAuthenticated;
+
   const [selectedWardDetails, setSelectedWardDetails] = useState<string | null>(null);
   const [isUpdatingApp, setIsUpdatingApp] = useState(false);
 
@@ -251,8 +254,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <View style={[styles.header, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
             <View>
               <ThemeText variant="h1">ダッシュボード</ThemeText>
-              <ThemeText variant="caption" color={isAdminAuthenticated ? COLORS.primary : COLORS.textSecondary}>
-                {profile?.name || 'スタッフ'} - {isAdminAuthenticated ? '管理者権限' : '一般権限'}
+              <ThemeText variant="caption" color={isUserAdmin ? COLORS.primary : COLORS.textSecondary}>
+                {profile?.name || 'スタッフ'} - {isUserAdmin ? '管理者権限' : '一般権限'}
               </ThemeText>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -296,7 +299,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </View>
 
           {/* 申請承認通知（管理者のみ） */}
-          {isInitialized && ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated) && (
+          {isInitialized && isUserAdmin && (
             (() => {
               // 💡 データ取得中（isSyncing や isLoadingShifts が true）の時は、赤い帯を絶対に画面に出さない
               if (isSyncing || isLoadingShifts) return null;

@@ -15,6 +15,7 @@ import { supabase } from '../utils/supabase';
 import { calculateRemainingLeaveHours, formatRemainingLeave, calculateUsedLeaveHours, calculateMandatoryLeaveStatus } from '../utils/leaveUtils';
 import { createStaffApi, updateStaffInfoApi, updateStaffPasswordApi, deleteStaffApi, directStaffDbUpdate } from '../utils/adminStaffApi';
 import { recordAuditLog } from '../utils/auditLogger';
+import { checkIsAdmin } from '../utils/authUtils';
 import * as Print from 'expo-print';
 
 interface StaffScreenProps {
@@ -78,8 +79,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     );
   }
 
-  const isAdminAuthenticated = props.isAdminAuthenticated || isPrivileged;
-  const userRole = isAdminAuthenticated ? 'admin' : 'staff';
+  const isUserAdmin = checkIsAdmin(undefined, profile) || props.isAdminAuthenticated || isPrivileged;
+  const isAdminAuthenticated = !!isUserAdmin;
+  const userRole = isUserAdmin ? 'admin' : 'staff';
 
   const activeMonthKey = activeDate ? `${activeDate.getFullYear()}-${activeDate.getMonth()}` : '';
   const fetchShiftsRef = React.useRef(fetchShifts);
@@ -168,9 +170,13 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     runDebugFetch();
   }, []);
 
-  // [NEW] 自動的に自分のカレンダーを開くロジック (一般スタッフ用)
+  // 自動的に自分のカレンダーを開くロジック (一般スタッフ用) & 管理者時のリセット
   useEffect(() => {
-    if (profile && !isAdminAuthenticated && !selectedStaff && staffList.length > 0) {
+    if (isAdminAuthenticated) {
+      // 管理者の場合は一般スタッフ向け自動ポップアップを抑制し、選択状態をリセット
+      setIsCalendarModalVisible(false);
+      setSelectedStaff(null);
+    } else if (profile && !selectedStaff && staffList.length > 0) {
       const me = staffList.find(s => s && (s.id === profile.id || normalize(s.name) === normalize(profile.name)));
       if (me) {
         setSelectedStaff(me);

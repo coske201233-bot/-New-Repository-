@@ -11,6 +11,7 @@ import { deleteShiftRequest, updateRequestStatus } from '../utils/requestApi';
 import { recordAuditLog } from '../utils/auditLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '../utils/storage';
+import { cleanupStaffSelectionStorage } from '../utils/authUtils';
 
 export const useAppLogic = () => {
   const [currentTab, setCurrentTab] = useState('home');
@@ -154,6 +155,7 @@ export const useAppLogic = () => {
     try {
       console.log('--- [SECURE_LOGIN] ---');
       await auth.login(email, pass);
+      await cleanupStaffSelectionStorage();
       setCurrentTab('home');
       return true;
     } catch (e: any) {
@@ -185,6 +187,7 @@ export const useAppLogic = () => {
       await AsyncStorage.removeItem('@staff_list');
       await AsyncStorage.removeItem('shifts');
       await AsyncStorage.removeItem('@profile');
+      await cleanupStaffSelectionStorage();
       
       // Supabaseが生成した認証トークンキーをすべて消去する
       const keys = await AsyncStorage.getAllKeys();

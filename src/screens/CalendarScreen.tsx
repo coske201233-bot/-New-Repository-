@@ -8,6 +8,7 @@ import { getDayType, formatDate, getDateStr, normalizeName } from '../utils/date
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
 import { recordAuditLog } from '../utils/auditLogger';
+import { checkIsAdmin } from '../utils/authUtils';
 
 const getSeasonalTheme = (month: number) => {
   const themes: Record<number, { icon: string, color: string }> = {
@@ -258,7 +259,7 @@ export const CalendarScreen: React.FC<any> = ({
     return map;
   }, [requests, shifts, staffList]);
 
-  const isPrivileged = ((profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者') || profile?.role?.includes('管理者') || profile?.role === 'admin') && !staffViewMode) || (isAdminAuthenticated && !staffViewMode);
+  const isPrivileged = ((checkIsAdmin(undefined, profile) || isAdminAuthenticated) && !staffViewMode);
   const isAdmin = isPrivileged;
 
   const getDetailedDayInfo = (date: Date) => {

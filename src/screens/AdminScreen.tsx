@@ -16,6 +16,7 @@ import { AuditLogModal } from '../components/AuditLogModal';
 import * as Print from 'expo-print';
 import { generateMonthlyShifts } from '../utils/shiftEngine';
 import { forceAppUpdate } from '../utils/appReloader';
+import { checkIsAdmin } from '../utils/authUtils';
 import { 
   calculateRemainingLeaveHours, 
   formatRemainingLeave, 
@@ -672,11 +673,13 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     }
   };
  
+  const isEffectiveAdmin = checkIsAdmin(undefined, profile) || isAdminAuthenticated;
+
   // [CRITICAL VERSION 49.0] 自動管理者認証バイパス
   React.useEffect(() => {
-    const isPowerUser = profile?.role === 'admin' || profile?.role === '管理者' || profile?.role === '開発者' || profile?.is_admin === true;
+    const isPowerUser = checkIsAdmin(undefined, profile);
     if (isPowerUser && !isAdminAuthenticated) {
-      console.log('--- [AUTO_ADMIN] Role-based bypass activated for:', profile.name);
+      console.log('--- [AUTO_ADMIN] Role-based bypass activated for:', profile?.name);
       setIsAdminAuthenticated(true);
     }
   }, [profile, isAdminAuthenticated]);
@@ -1043,7 +1046,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
 
 
-          {isAdminAuthenticated ? (
+          {isEffectiveAdmin ? (
             <View style={{ marginTop: 24 }}>
 
               <ThemeText bold style={{ color: '#ef4444', marginBottom: 12, marginTop: 12 }}>🔔 承認が必要な申請</ThemeText>

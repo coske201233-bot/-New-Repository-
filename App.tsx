@@ -21,6 +21,7 @@ import { useAppLogic } from './src/hooks/useAppLogic';
 import { supabase, isSupabaseAuthReady } from './src/utils/supabase';
 
 import { forceAppUpdate } from './src/utils/appReloader';
+import { checkIsAdmin } from './src/utils/authUtils';
 
 /**
  * VERSION 44.2 [RESILIENCE]
@@ -104,6 +105,12 @@ export default function App() {
 
   if (fatalError) return <ErrorFallback error={fatalError} />;
 
+  // 共通判定ヘルパーおよびステートに基づく実効管理者権限（即時再描画トリガー）
+  const isEffectiveAdmin = checkIsAdmin(logic.user, profile) || isAdminAuthenticated;
+
+  // 認証セッション復元および DB からの権限取得が完全に完了するまでメイン画面を描画させない強固なガード
+  const isAppLoading = !logic.isInitialized || !logic.isAuthReady || (!!logic.user && logic.isCheckingProfile);
+
   const renderContent = () => {
     const commonProps = {
       staffList, setStaffList, updateStaffList, patchStaff,
@@ -119,7 +126,7 @@ export default function App() {
       weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit,
       monthlyLimits, updateLimits,
       adminPassword, updatePassword,
-      isAdminAuthenticated, setIsAdminAuthenticated,
+      isAdminAuthenticated: isEffectiveAdmin, setIsAdminAuthenticated,
       onOpenRequests: () => setCurrentTab('adminRequests'),
       onShareApp: () => setCurrentTab('qrShare'),
       onLogout: handleLogout,
@@ -151,7 +158,7 @@ export default function App() {
       case 'home': return <HomeScreen onNavigateToStaff={handleNavigateToStaff} {...commonProps} />;
       case 'calendar': return <CalendarScreen {...commonProps} />;
       case 'requests': return <RequestScreen {...commonProps} />;
-      case 'staff': return <StaffScreen {...commonProps} isPrivileged={isAdminAuthenticated} />;
+      case 'staff': return <StaffScreen {...commonProps} isPrivileged={isEffectiveAdmin} isAdminAuthenticated={isEffectiveAdmin} />;
       case 'admin': return <AdminScreen onNavigateToStaff={() => setCurrentTab('staff')} {...commonProps} />;
       case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={approveRequest} handleBulkApprove={handleBulkApprove} deleteRequest={onDeleteRequest} handleReject={handleReject} />;
       case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab('admin')} />;
@@ -167,11 +174,11 @@ export default function App() {
         <StatusBar style="light" />
 
 
-        {/* --- [STRICT BINARY ROUTING] --- */}
-        {(!logic.isInitialized) ? (
+        {/* --- [STRICT BINARY ROUTING WITH COMPREHENSIVE LOADING GUARD] --- */}
+        {isAppLoading ? (
           <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
             <ActivityIndicator size="large" color={COLORS.primary || '#0ea5e9'} />
-            <ThemeText style={{ marginTop: 16 }}>初期化中...</ThemeText>
+            <ThemeText style={{ marginTop: 16 }}>初期化・権限確認中...</ThemeText>
           </SafeAreaView>
         ) : (!logic.user) ? (
           /* --- [AUTH FLOW] --- */
@@ -191,7 +198,7 @@ export default function App() {
                   { id: 'calendar', icon: Calendar, label: '出勤' },
                   { id: 'staff', icon: Users, label: '職員' },
                   { id: 'requests', icon: ClipboardList, label: '申請' },
-                  ...(isAdminAuthenticated ? [{ id: 'admin', icon: Shield, label: '管理・設定' }] : [])
+                  ...(isEffectiveAdmin ? [{ id: 'admin', icon: Shield, label: '管理・設定' }] : [])
                 ].map(tab => (
                   <TouchableOpacity key={tab.id} style={styles.tabItem} onPress={() => setCurrentTab(tab.id)} activeOpacity={0.7}>
                     <tab.icon size={24} color={currentTab === tab.id ? COLORS.primary : COLORS.textSecondary} />

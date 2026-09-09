@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../utils/supabase';
 import { STORAGE_KEYS, saveData, loadData } from '../utils/storage';
 import { cloudStorage } from '../utils/cloudStorage';
+import { checkIsAdmin, cleanupStaffSelectionStorage } from '../utils/authUtils';
 
 export const useAuthSession = () => {
   const [profile, setProfile] = useState<any>(null);
@@ -14,11 +15,18 @@ export const useAuthSession = () => {
   const loadingProfileEmailRef = useRef<string | null>(null);
 
   // CRITICAL ARCHITECT COMMAND: Global Admin Override
-  const isMasterAdminAuth = user?.email ? user.email.includes('admin@reha.local') : false;
-  const isGlobalAdmin = isMasterAdminAuth || (profile?.role === 'admin' || profile?.role?.includes('管理者') || profile?.role?.includes('開発者') || profile?.is_admin === true);
+  // 共通判定ヘルパーで user / profile の両面から確実に管理者フラグを算出
+  const isGlobalAdmin = checkIsAdmin(user, profile);
   
   // Replace standalone isAdminAuthenticated with forced evaluate to prevent race conditions
   const currentAdminState = !!(isGlobalAdmin || isAdminAuthenticated);
+
+  const checkAdmin = (_p: any, u?: any) => {
+    const adminStatus = checkIsAdmin(u || user, _p || profile);
+    console.log(`[ACL] UserEmail:${(u?.email || user?.email || '')} AdminStatus:${adminStatus} (FORCED_MASTER_KEY)`);
+    setIsAdminAuthenticated(adminStatus);
+    return adminStatus;
+  };
 
   const loadProfile = async (session: any, nameHint?: string) => {
     const userEmail = session?.user?.email;
@@ -43,14 +51,14 @@ export const useAuthSession = () => {
       setUser(session.user);
       console.log('--- [AUTH_GATE] Checking profile for:', userEmail);
       
-      // 🚨 CRITICAL: 1.5-second Timeout Guard for Profile Fetching
+      // 🚨 7-second Timeout Guard for Profile Fetching (prevents premature timeout)
       const fetchWithTimeout = async () => {
-        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 1500));
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 7000));
         const fetch = supabase.from('staff').select('*').eq('email', userEmail).maybeSingle();
         return Promise.race([fetch, timeout]);
       };
 
-      // 🚨 [VERSION 48.61 EMERGENCY YOSHIDA BYPASS]
+      // 🚨 [EMERGENCY YOSHIDA BYPASS]
       if (userEmail === 'yoshida@reha.local') {
         const yoshidaProfile = { 
           id: session.user.id,
@@ -64,10 +72,11 @@ export const useAuthSession = () => {
         console.log('--- [EMERGENCY] Yoshida Bypass Activated ---');
         setProfile(yoshidaProfile);
         setIsAdminAuthenticated(true);
+        await cleanupStaffSelectionStorage();
         return yoshidaProfile;
       }
 
-      // 🚨 [VERSION 49.1 EMERGENCY MAKOTO BYPASS]
+      // 🚨 [EMERGENCY MAKOTO BYPASS]
       if (userEmail.toLowerCase().includes('makoto')) {
         const makotoProfile = { 
           id: session.user.id,
@@ -80,6 +89,7 @@ export const useAuthSession = () => {
         console.log('--- [EMERGENCY] Makoto Bypass Activated ---');
         setProfile(makotoProfile);
         setIsAdminAuthenticated(true);
+        await cleanupStaffSelectionStorage();
         return makotoProfile;
       }
 
@@ -94,7 +104,10 @@ export const useAuthSession = () => {
       if (profileData) {
         console.log('Profile found via email:', profileData.name);
         setProfile(profileData);
-        checkAdmin(profileData, session.user);
+        const isAdmin = checkAdmin(profileData, session.user);
+        if (isAdmin) {
+          await cleanupStaffSelectionStorage();
+        }
         
         if (!profileData.user_id) {
           await supabase.from('staff').update({ user_id: session.user.id }).eq('id', profileData.id);
@@ -102,26 +115,23 @@ export const useAuthSession = () => {
         return profileData;
       }
 
-      // Fallback Profile to unblock the UI (純粋なUUIDを使用)
+      // Fallback Profile: checkIsAdmin を通すことで、管理者ユーザーが一般スタッフに降格されるのを防止
+      const isAdminCandidate = checkIsAdmin(session.user, null);
       const fallbackProfile = { 
         id: session.user.id, 
-        name: session.user.user_metadata?.full_name || userEmail.split('@')[0] || '利用者', 
-        role: '一般スタッフ', 
-        profession: '職員',
+        name: session.user.user_metadata?.full_name || userEmail.split('@')[0] || (isAdminCandidate ? '管理者' : '利用者'), 
+        role: isAdminCandidate ? 'admin' : '一般スタッフ', 
+        profession: isAdminCandidate ? '管理者' : '職員',
         email: userEmail,
-        isApproved: true 
+        isApproved: true,
+        is_admin: isAdminCandidate,
       };
 
-      // 2. VIP Bypass (if still not found)
-      const isA = userEmail === 'admin@reha.local' || userEmail === 'admin@example.com' || userEmail.toLowerCase().includes('admin');
-      if (isA) {
-        const adminProfile = { ...fallbackProfile, role: '開発者', profession: '管理者', is_admin: true };
-        setProfile(adminProfile);
-        setIsAdminAuthenticated(true);
-        return adminProfile;
-      }
-
       setProfile(fallbackProfile);
+      setIsAdminAuthenticated(isAdminCandidate);
+      if (isAdminCandidate) {
+        await cleanupStaffSelectionStorage();
+      }
       return fallbackProfile;
     } catch (e: any) {
       console.error('Critical Profile Error:', e);
@@ -134,13 +144,12 @@ export const useAuthSession = () => {
   };
 
   useEffect(() => {
-    const mounted = true;
+    let mounted = true;
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       console.log('Auth event:', _event);
       
       if (session) {
-        setUser(session.user); // [V60.2] Set user immediately to unlock UI
-        // Direct email lookup, no loops, no setup screens
+        setUser(session.user);
         await loadProfile(session);
       } else {
         setUser((prev: any) => {
@@ -158,19 +167,20 @@ export const useAuthSession = () => {
       }
     });
 
-    // [CRITICAL VERSION 48.61] 1.5秒後に強制的に初期化フラグを立てるフェイルセーフ
+    // 8秒後に強制的に初期化フラグを立てるフェイルセーフ（早期ロック解除を防止）
     const failsafeTimer = setTimeout(() => {
       if (mounted && !isInitialized) {
-        console.warn('--- [FAILSAFE] Forced initialization unlock after 1.5s ---');
+        console.warn('--- [FAILSAFE] Forced initialization unlock after 8s ---');
         setIsInitialized(true);
+        setIsCheckingProfile(false);
       }
-    }, 1500);
+    }, 8000);
 
     // Initial session grab
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
-        setUser(session.user); // [V60.2] Set user immediately
-        loadProfile(session);
+        setUser(session.user);
+        await loadProfile(session);
       } else {
         setIsCheckingProfile(false);
         setIsInitialized(true);
@@ -178,51 +188,36 @@ export const useAuthSession = () => {
     });
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
       clearTimeout(failsafeTimer);
     };
   }, []);
 
-  const checkAdmin = (_p: any, u?: any) => {
-    const email = (u?.email || user?.email || '').toLowerCase();
-    // [VERSION 49.1] Added 'makoto' to admin master list
-    const isAdmin = email.includes('admin') || email.includes('makoto') || _p?.role === 'admin' || _p?.role?.includes('管理者') || _p?.is_admin === true;
-    
-    console.log(`[ACL] UserEmail:${email} AdminStatus:${isAdmin} (FORCED_MASTER_KEY)`);
-    setIsAdminAuthenticated(isAdmin);
-    return isAdmin;
-  };
-
   const login = async (email: string, pass: string) => {
     setLoadError(null);
+    setIsCheckingProfile(true);
     const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
     
     if (error) {
+      setIsCheckingProfile(false);
       await supabase.auth.signOut().catch(() => {});
       throw error;
     }
-    
-    // [VERSION 48.62 ABSOLUTE BYPASS]
-    // DO NOT await profile loading before unlocking the UI
-    console.log('--- [ABSOLUTE_BYPASS] Force unlocking UI gates... ---');
-    setIsCheckingProfile(false);
-    setIsInitialized(true);
-    
-    if (email === 'yoshida@reha.local' && !profile) {
-      const yoshidaFallback = { 
-        id: 'yoshida-force', 
-        name: '吉田', 
-        email: 'yoshida@reha.local', 
-        role: 'admin',
-        isApproved: true,
-        is_admin: true 
-      };
-      setProfile(yoshidaFallback);
-      setIsAdminAuthenticated(true);
+
+    try {
+      setUser(data.session.user);
+      // 権限判定およびプロファイルのロードが完了するまで確実に await
+      const loaded = await loadProfile(data.session);
+      const isAdm = checkIsAdmin(data.session.user, loaded);
+      setIsAdminAuthenticated(isAdm);
+      if (isAdm) {
+        await cleanupStaffSelectionStorage();
+      }
+    } finally {
+      setIsCheckingProfile(false);
+      setIsInitialized(true);
     }
-    
-    // Start profile load in background, do not block
-    loadProfile(data.session).catch(e => console.warn('Background profile load failed:', e));
     
     return data.session;
   };
@@ -233,6 +228,7 @@ export const useAuthSession = () => {
     setUser(null);
     setIsAdminAuthenticated(false);
     await saveData(STORAGE_KEYS.PROFILE, null);
+    await cleanupStaffSelectionStorage();
     if (typeof window !== 'undefined') {
       localStorage.clear();
     }
@@ -255,4 +251,4 @@ export const useAuthSession = () => {
     login,
     logout 
   };
-}
+};

@@ -8,6 +8,7 @@ import { formatDate, getDateStr } from '../utils/dateUtils';
 import { normalizeName } from '../utils/staffUtils';
 import { supabase } from '../utils/supabase';
 import { deleteShiftRequest } from '../utils/requestApi';
+import { checkIsAdmin } from '../utils/authUtils';
 
 interface RequestScreenProps {
   requests: any[];
@@ -21,7 +22,7 @@ interface RequestScreenProps {
 }
 
 export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setRequests, onDeleteRequest, approveRequest, profile, isAdminAuthenticated, onForceCloudSync, onSubmitRequest }) => {
-  const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者') || profile?.role?.includes('管理者')) || isAdminAuthenticated;
+  const isManager = checkIsAdmin(undefined, profile) || isAdminAuthenticated;
   const [showForm, setShowForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDateModalVisible, setIsDateModalVisible] = useState(false);
@@ -157,7 +158,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
       return;
     }
     
-    const isManager = (profile?.role?.includes('シフト管理者') || profile?.role?.includes('開発者')) || isAdminAuthenticated;
+    const isManager = checkIsAdmin(undefined, profile) || isAdminAuthenticated;
     const nameStr = profile?.name || '不明な職員';
     const isFiscalYear = (profile.position?.trim() === '会計年度');
     const MORNING_H = 4.0;
