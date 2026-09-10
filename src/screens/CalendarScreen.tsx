@@ -1727,6 +1727,10 @@ export const CalendarScreen: React.FC<any> = ({
                       const isCustom = (item.type || '') === 'カスタム' || ((item.type || '') !== '出張' && !!customName);
                       const tripTitle = (item.type || '') === '出張' ? (item.customTitle || item.customType || item.details?.customTitle || item.details?.customType || (item.details?.note && !['出張', '手動割当', '管理画面よりクイック変更', '管理画面より更新'].includes(item.details?.note) ? item.details?.note : '')) : '';
 
+                      if (['出勤', '日勤', '公休'].includes(item.type || '') && !isCustom) {
+                        return null;
+                      }
+
                       if (dur > 0 || (item.type || '') === '振替4' || (item.type || '') === '振4' || (item.type || '') === '特別出勤' || isCustom) {
                         const text = isCustom
                           ? ` ${customName || 'カスタム'}`
@@ -1835,11 +1839,22 @@ export const CalendarScreen: React.FC<any> = ({
                         style={{ marginLeft: 8, color: (item.type !== '公休' && item.type !== '年休') ? COLORS.primary : COLORS.textSecondary }} 
                         numberOfLines={1}
                       >
-                        ({item.type})
-                        {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
-                        {(!item.details?.startTime && (item.details?.duration ?? item.hours ?? item.details?.hours) > 0) && (
-                          <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details?.duration ?? item.hours ?? item.details?.hours}h</ThemeText>
-                        )}
+                        {(() => {
+                          const tripTitle = (item.type || '') === '出張' ? (item.customTitle || item.customType || item.details?.customTitle || item.details?.customType || (item.details?.note && !['出張', '手動割当', '管理画面よりクイック変更', '管理画面より更新'].includes(item.details?.note) ? item.details?.note : '')) : '';
+                          const displayType = tripTitle || item.type;
+                          const dur = item.details?.duration ?? item.hours ?? item.details?.hours ?? 0;
+                          // 公休・年休・有給・夏季休暇などの全日休日は時間を絶対に非表示
+                          const shouldShowHours = !['公休', '年休', '有給', '有給休暇', '年給', '夏季休暇', '全休', '特別出勤', 'カスタム'].includes(item.type || '') && dur > 0;
+                          return (
+                            <>
+                              ({displayType})
+                              {item.details?.startTime && <ThemeText variant="caption" style={{ color: COLORS.accent }}> {item.details.startTime}-{item.details.endTime}</ThemeText>}
+                              {(!item.details?.startTime && shouldShowHours) && (
+                                <ThemeText variant="caption" style={{ color: COLORS.accent }}> {dur}h</ThemeText>
+                              )}
+                            </>
+                          );
+                        })()}
                         {(() => {
                           const isApprovedItem = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
                           const isPendingItem = !isApprovedItem && (item.status === 'pending' || item.status === '申請中');
