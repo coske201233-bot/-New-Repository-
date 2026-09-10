@@ -55,9 +55,11 @@ export const getLeaveHoursPerDay = (position?: string): number => {
 export const isWorkShiftType = (r: any): boolean => {
   if (!r) return false;
   const t = typeof r === 'string' ? r.trim() : String(r.type || r.shiftType || '').trim();
+  if (t === '出張') return false; // 出張は勤務を要しない時間への加算対象（出勤系ではない）
   if (['出勤', '日勤', '特別出勤', 'カスタム'].includes(t)) return true;
   if (typeof r === 'object') {
-    if (r.details?.isCustomWork || r.isCustomWork || !!r.customType || !!r.details?.customType) return true;
+    if (r.details?.isCustomWork || r.isCustomWork) return true;
+    if ((r.customType || r.details?.customType) && t === 'カスタム') return true;
   }
   return false;
 };
@@ -826,7 +828,7 @@ export function calculateStaffMonthlyNonWorkingHours(
     let counted = false;
 
     // 1. 出勤・日勤・特別出勤・カスタム出勤・公休（週休）・休日出勤は勤務を要しない時間には加算しない (0h)
-    if (['出勤', '日勤', '特別出勤', 'カスタム', '公休', '休日出勤'].includes(rawType) || isWorkShiftType(resolvedShift)) {
+    if (['出勤', '日勤', '特別出勤', 'カスタム', '公休', '休日出勤'].includes(rawType) || (rawType !== '出張' && isWorkShiftType(resolvedShift))) {
       addedHours = 0;
     }
     // 2. 年休 (通常: 7.75h, 会計年度: 7.5h)
@@ -1195,7 +1197,7 @@ export function calculateStaffDailyNonWorkingHours(
   let addedHours = 0;
 
   // 1. 出勤・日勤・特別出勤・カスタム出勤・公休（週休）・休日出勤は勤務を要しない時間には加算しない (0h)
-  if (['出勤', '日勤', '特別出勤', 'カスタム', '公休', '休日出勤'].includes(rawType) || isWorkShiftType(resolvedShift)) {
+  if (['出勤', '日勤', '特別出勤', 'カスタム', '公休', '休日出勤'].includes(rawType) || (rawType !== '出張' && isWorkShiftType(resolvedShift))) {
     addedHours = 0;
   }
   // 2. 年休 (通常: 7.75h, 会計年度: 7.5h)

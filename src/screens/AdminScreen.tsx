@@ -878,11 +878,16 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             let cellStyle = '';
             let label = '';
 
-            const customName = req?.customType || req?.details?.customType;
+            const isTrip = type === '出張';
+            const customName = !isTrip ? (req?.customType || req?.details?.customType) : '';
 
             if (type === '出勤' || type === '日勤') {
               cellStyle = 'background-color: #ffffff; color: #1e293b; font-weight: bold;';
               label = '出';
+            } else if (type === '出張') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              const tripName = req?.customTitle || req?.customType || req?.details?.customTitle || req?.details?.customType || (req?.details?.note && !['出張', '手動割当', '管理画面よりクイック変更', '管理画面より更新'].includes(req?.details?.note) ? req?.details?.note : '');
+              label = tripName ? (tripName.length > 2 ? tripName.slice(0, 2) : tripName) : '張';
             } else if (type === 'カスタム' || customName) {
               cellStyle = 'background-color: #ffffff; color: #1e293b; font-weight: bold;';
               const cName = customName || 'カスタム';
@@ -931,9 +936,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             } else if (type === '研修') {
               cellStyle = 'background-color: #f5f3ff; color: #7c3aed; font-weight: bold;';
               label = '研';
-            } else if (type === '出張') {
-              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
-              label = '張';
             } else if (type === '欠勤') {
               cellStyle = 'background-color: #fff7ed; color: #ea580c;';
               label = '欠';

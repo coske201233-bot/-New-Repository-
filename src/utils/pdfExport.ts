@@ -89,9 +89,15 @@ export const exportShiftToPDF = async (
 
     if (req && req.type) {
       const rawType = String(req.type).trim();
-      const customName = req.customType || req.details?.customType;
+      const isTrip = rawType === '出張';
+      const customName = !isTrip ? (req.customType || req.details?.customType) : '';
       if (rawType === '出勤' || rawType === '日勤') {
         statusText = '出勤';
+        statusClass = 'status-work';
+      } else if (rawType === '出張') {
+        const tripName = req.customTitle || req.customType || req.details?.customTitle || req.details?.customType || (req.details?.note && !['出張', '手動割当', '管理画面よりクイック変更', '管理画面より更新'].includes(req.details?.note) ? req.details?.note : '');
+        const hrs = req.hours ? `${req.hours}h` : '';
+        statusText = `${tripName || '出張'}${hrs ? `(${hrs})` : ''}`;
         statusClass = 'status-work';
       } else if (rawType === 'カスタム' || customName) {
         statusText = customName || 'カスタム';
@@ -137,9 +143,6 @@ export const exportShiftToPDF = async (
       } else if (rawType === '研修') {
         statusText = '研修';
         statusClass = 'status-special';
-      } else if (rawType === '出張') {
-        statusText = '出張';
-        statusClass = 'status-work';
       } else if (rawType === '欠勤') {
         statusText = '欠勤';
         statusClass = 'status-off';

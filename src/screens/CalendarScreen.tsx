@@ -76,6 +76,7 @@ export const CalendarScreen: React.FC<any> = ({
   const [selectedStaffToAdd, setSelectedStaffToAdd] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState('出勤');
   const [customTitle, setCustomTitle] = useState('');
+  const [tripTitle, setTripTitle] = useState('');
   const [hourlyDuration, setHourlyDuration] = useState(1.0);
   const [adminSpecialHours, setAdminSpecialHours] = useState(1.0);
   const [adminHourlyHours, setAdminHourlyHours] = useState(1.0);
@@ -86,6 +87,7 @@ export const CalendarScreen: React.FC<any> = ({
   const [editActionTab, setEditActionTab] = useState<'type' | 'move' | 'copy' | 'delete'>('type');
   const [newEditType, setNewEditType] = useState<string>('出勤');
   const [editCustomTitle, setEditCustomTitle] = useState('');
+  const [editTripTitle, setEditTripTitle] = useState('');
   const [newEditHours, setNewEditHours] = useState<number>(1.0);
   const [newEditSpecialHours, setNewEditSpecialHours] = useState<number>(1.0);
   const [newEditHourlyHours, setNewEditHourlyHours] = useState<number>(1.0);
@@ -604,12 +606,15 @@ export const CalendarScreen: React.FC<any> = ({
 
     const isCustom = selectedType === 'カスタム';
     const cTitle = customTitle.trim() || 'カスタム';
+    const isTrip = selectedType === '出張';
+    const tTitle = tripTitle.trim();
 
     const newReqs = staffNames.map(nameOrId => {
       const staff = staffList.find(s => s.id === nameOrId || normalizeName(s.name) === normalizeName(nameOrId));
       const finalName = staff ? staff.name : nameOrId;
       const sId = staff ? staff.id : undefined;
       const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+      const customVal = isCustom ? cTitle : (isTrip && tTitle ? tTitle : undefined);
       return {
         id: newId,
         staffId: sId,
@@ -617,9 +622,10 @@ export const CalendarScreen: React.FC<any> = ({
         staffName: finalName,
         date: dateStr,
         type: selectedType,
-        customType: isCustom ? cTitle : undefined,
+        customType: customVal,
+        customTitle: customVal,
         status: 'approved',
-        reason: isCustom ? `カスタム出勤: ${cTitle}` : '管理者による調整',
+        reason: isCustom ? `カスタム出勤: ${cTitle}` : (isTrip && tTitle ? `出張: ${tTitle}` : '管理者による調整'),
         isManual: true, // リクエストテーブル用
         is_manual: true,
         hours: isCustom
@@ -635,13 +641,15 @@ export const CalendarScreen: React.FC<any> = ({
                   : null,
         details: isCustom
           ? { note: cTitle, customType: cTitle, isCustomWork: true, isManual: true }
-          : selectedType === '特休＋時間休'
-            ? { note: '手動割当', specialHours: adminSpecialHours, hourlyHours: adminHourlyHours, isManual: true }
-            : selectedType === '振替＋時間休'
-              ? { note: '手動割当', furikaeHours: 4.0, hourlyHours: adminHourlyHours, isManual: true }
-              : selectedType === '振替4'
-                ? { note: '振替4時間', furikaeHours: 4.0, isManual: true }
-                : { note: '手動割当', isManual: true },
+          : isTrip
+            ? { note: tTitle || '出張', customTitle: tTitle, customType: tTitle, duration: hourlyDuration, hours: hourlyDuration, isManual: true }
+            : selectedType === '特休＋時間休'
+              ? { note: '手動割当', specialHours: adminSpecialHours, hourlyHours: adminHourlyHours, isManual: true }
+              : selectedType === '振替＋時間休'
+                ? { note: '手動割当', furikaeHours: 4.0, hourlyHours: adminHourlyHours, isManual: true }
+                : selectedType === '振替4'
+                  ? { note: '振替4時間', furikaeHours: 4.0, isManual: true }
+                  : { note: '手動割当', isManual: true },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(), // [V61.0] 優先度判定のためにupdatedAtを付与
       };
@@ -712,7 +720,9 @@ export const CalendarScreen: React.FC<any> = ({
           targetDate: r.date,
           details: r.type === 'カスタム'
             ? `${r.staffName}さんのシフト（${r.date}）を「${r.customType || 'カスタム'}（カスタム出勤）」に設定しました`
-            : `${r.staffName}さんのシフト（${r.date}）を「${r.type}」に設定しました${r.hours ? ` (${r.hours}h)` : ''}`,
+            : r.type === '出張'
+              ? `${r.staffName}さんのシフト（${r.date}）を「${r.customTitle || '出張'}」(${r.hours}h)に設定しました`
+              : `${r.staffName}さんのシフト（${r.date}）を「${r.type}」に設定しました${r.hours ? ` (${r.hours}h)` : ''}`,
           afterData: r,
         });
       }
@@ -722,6 +732,7 @@ export const CalendarScreen: React.FC<any> = ({
       setSelectedStaffToAdd([]);
       setSelectedType('出勤');
       setCustomTitle('');
+      setTripTitle('');
       
       // 保存完了後に確実に再取得
       await fetchShifts();
@@ -1006,6 +1017,8 @@ export const CalendarScreen: React.FC<any> = ({
     });
     const existingCustom = item.customType || item.details?.customType || (item.type === '特別出勤' ? '特別出勤' : '');
     setEditCustomTitle(existingCustom);
+    const existingTrip = item.type === '出張' ? (item.customTitle || item.customType || item.details?.customTitle || item.details?.customType || (item.details?.note && item.details?.note !== '出張' && item.details?.note !== '手動割当' && item.details?.note !== '管理画面よりクイック変更' ? item.details?.note : '')) : '';
+    setEditTripTitle(existingTrip || '');
     setNewEditType(item.type === '特別出勤' ? 'カスタム' : (item.type || '出勤'));
     setNewEditHours(item.hours ?? item.details?.duration ?? 1.0);
     setNewEditSpecialHours(item.details?.specialHours ?? 1.0);
@@ -1051,6 +1064,8 @@ export const CalendarScreen: React.FC<any> = ({
       const newType = newEditType;
       const isCustom = newType === 'カスタム';
       const cTitle = editCustomTitle.trim() || 'カスタム';
+      const isTrip = newType === '出張';
+      const tTitle = editTripTitle.trim();
 
       let calcHours = null;
       let details: any = { note: '管理画面よりクイック変更', isManual: true };
@@ -1067,21 +1082,26 @@ export const CalendarScreen: React.FC<any> = ({
       } else if (newType === '振替4') {
         calcHours = 4.0;
         details = { note: '振替4時間', furikaeHours: 4.0, isManual: true };
-      } else if (['時間休', '時間給', '特休', '出張'].includes(newType)) {
+      } else if (['時間休', '時間給', '特休'].includes(newType)) {
         calcHours = newEditHours;
         details = { note: '管理画面よりクイック変更', duration: newEditHours, isManual: true };
+      } else if (newType === '出張') {
+        calcHours = newEditHours;
+        details = { note: tTitle || '出張', customTitle: tTitle, customType: tTitle, duration: newEditHours, hours: newEditHours, isManual: true };
       }
 
       const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+      const customVal = isCustom ? cTitle : (isTrip && tTitle ? tTitle : undefined);
       const updatedReq = {
         id: selectedShiftToEdit.requestId && !String(selectedShiftToEdit.requestId).startsWith('auto-') ? selectedShiftToEdit.requestId : newId,
         staff_id: cleanStaffId,
         staff_name: staffName,
         date: dateStr,
         type: newType,
-        customType: isCustom ? cTitle : undefined,
+        customType: customVal,
+        customTitle: customVal,
         status: 'approved',
-        reason: isCustom ? `カスタム出勤: ${cTitle}` : '管理者による変更',
+        reason: isCustom ? `カスタム出勤: ${cTitle}` : (isTrip && tTitle ? `出張: ${tTitle}` : '管理者による変更'),
         is_manual: true,
         hours: calcHours,
         details: details,
@@ -1126,7 +1146,7 @@ export const CalendarScreen: React.FC<any> = ({
       });
 
       // 4. 監査ログ記録
-      const newTypeDisplay = isCustom ? `${cTitle}（カスタム出勤）` : newType;
+      const newTypeDisplay = isCustom ? `${cTitle}（カスタム出勤）` : (isTrip && tTitle ? `${tTitle}(${calcHours}h)` : newType);
       await recordAuditLog({
         operatorId: profile?.id,
         operatorName: profile?.name || '管理者',
@@ -1143,7 +1163,8 @@ export const CalendarScreen: React.FC<any> = ({
       if (fetchShifts) await fetchShifts();
       setSelectedShiftToEdit(null);
       setEditCustomTitle('');
-      Alert.alert('完了', `${staffName}さんのシフトを「${isCustom ? cTitle : newType}」に変更しました。`);
+      setEditTripTitle('');
+      Alert.alert('完了', `${staffName}さんのシフトを「${newTypeDisplay}」に変更しました。`);
 
     } catch (err: any) {
       console.error('Quick edit error:', err);
@@ -1316,7 +1337,15 @@ export const CalendarScreen: React.FC<any> = ({
             label = ' 振＋時';
           } else if (type === '振替4' || type === '振4') {
             label = ' 振4';
-          } else if (type === 'カスタム' || customName) {
+          } else if (type === '出張') {
+            const tripName = item.customTitle || item.customType || item.details?.customTitle || item.details?.customType || (item.details?.note && !['出張', '手動割当', '管理画面よりクイック変更', '管理画面より更新'].includes(item.details?.note) ? item.details?.note : '');
+            if (tripName) {
+              const shortTrip = tripName.length > 3 ? tripName.slice(0, 3) : tripName;
+              label = ` ${shortTrip}(${duration}h)`;
+            } else {
+              label = ` 出(${duration}h)`;
+            }
+          } else if (type === 'カスタム' || (type !== '出張' && customName)) {
             const cName = customName || 'カスタム';
             const shortName = cName.length > 3 ? cName.slice(0, 3) : cName;
             label = ` (${shortName})`;
@@ -1324,7 +1353,6 @@ export const CalendarScreen: React.FC<any> = ({
             label = ' (特出)';
           } else {
             if (type === '時間休' || type === '時間給') label = `(${duration}h)`;
-            else if (type === '出張') label = `出(${duration}h)`;
             else if (type === '特休＋時間休') {
               const sp = item.details?.specialHours ?? 0;
               const hr = item.details?.hourlyHours ?? 0;
@@ -1665,8 +1693,9 @@ export const CalendarScreen: React.FC<any> = ({
                         dur = 0;
                       }
 
-                      const customName = item.customType || item.details?.customType;
-                      const isCustom = (item.type || '') === 'カスタム' || !!customName;
+                      const customName = (item.type || '') !== '出張' ? (item.customType || item.details?.customType) : '';
+                      const isCustom = (item.type || '') === 'カスタム' || ((item.type || '') !== '出張' && !!customName);
+                      const tripTitle = (item.type || '') === '出張' ? (item.customTitle || item.customType || item.details?.customTitle || item.details?.customType || (item.details?.note && !['出張', '手動割当', '管理画面よりクイック変更', '管理画面より更新'].includes(item.details?.note) ? item.details?.note : '')) : '';
 
                       if (dur > 0 || (item.type || '') === '振替4' || (item.type || '') === '振4' || (item.type || '') === '特別出勤' || isCustom) {
                         const text = isCustom
@@ -1684,7 +1713,7 @@ export const CalendarScreen: React.FC<any> = ({
                               : (item.type || '').includes('特')
                                 ? ` 特休${dur}h`
                                 : (item.type || '') === '出張'
-                                  ? ` 出張${dur}h`
+                                  ? ` ${tripTitle || '出張'}${dur}h`
                                   : ` 時間休${dur}h`;
                         return (
                           <ThemeText variant="caption" style={{ color: isCustom ? '#38bdf8' : COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
@@ -1935,6 +1964,28 @@ export const CalendarScreen: React.FC<any> = ({
               </View>
             )}
 
+            {selectedType === '出張' && (
+              <View style={{ marginBottom: 20 }}>
+                <ThemeText variant="label" style={{ marginBottom: 8 }}>出張・研修名 (任意・未入力時は「出張」)</ThemeText>
+                <TextInput
+                  style={{
+                    backgroundColor: 'rgba(255,255,255,0.08)',
+                    borderRadius: 12,
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    color: COLORS.text,
+                    borderWidth: 1,
+                    borderColor: COLORS.border,
+                    fontSize: 14,
+                  }}
+                  placeholder="出張・研修名を入力 (例: 〇〇学会)"
+                  placeholderTextColor={COLORS.textSecondary}
+                  value={tripTitle}
+                  onChangeText={setTripTitle}
+                />
+              </View>
+            )}
+
             {(selectedType === '時間休' || selectedType === '特休' || selectedType === '特休＋時間休' || selectedType === '振替＋時間休' || selectedType === '出張') && (
               <View style={{ marginBottom: 20 }}>
                 <ThemeText variant="label" style={{ marginBottom: 8 }}>時間設定 (15分単位)</ThemeText>
@@ -2129,6 +2180,28 @@ export const CalendarScreen: React.FC<any> = ({
                       placeholderTextColor={COLORS.textSecondary}
                       value={editCustomTitle}
                       onChangeText={setEditCustomTitle}
+                    />
+                  </View>
+                )}
+
+                {newEditType === '出張' && (
+                  <View style={{ marginBottom: 16 }}>
+                    <ThemeText variant="label" style={{ marginBottom: 8 }}>出張・研修名 (任意・未入力時は「出張」)</ThemeText>
+                    <TextInput
+                      style={{
+                        backgroundColor: 'rgba(255,255,255,0.08)',
+                        borderRadius: 10,
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        color: COLORS.text,
+                        borderWidth: 1,
+                        borderColor: COLORS.border,
+                        fontSize: 14,
+                      }}
+                      placeholder="出張・研修名を入力 (例: 〇〇学会)"
+                      placeholderTextColor={COLORS.textSecondary}
+                      value={editTripTitle}
+                      onChangeText={setEditTripTitle}
                     />
                   </View>
                 )}

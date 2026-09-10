@@ -124,10 +124,14 @@ export const getNormalizedShiftMatrix = (
         type = (dtype === 'weekday') ? '出勤' : '公休';
       }
 
-      const customName = req?.customType || req?.details?.customType;
+      const isTrip = type === '出張';
+      const customName = !isTrip ? (req?.customType || req?.details?.customType) : '';
 
       if (type === '出勤' || type === '日勤') {
         label = '出';
+      } else if (type === '出張') {
+        const tripName = req?.customTitle || req?.customType || req?.details?.customTitle || req?.details?.customType || (req?.details?.note && !['出張', '手動割当', '管理画面よりクイック変更', '管理画面より更新'].includes(req?.details?.note) ? req?.details?.note : '');
+        label = tripName ? (tripName.length > 2 ? tripName.slice(0, 2) : tripName) : '張';
       } else if (type === 'カスタム' || customName) {
         const cName = customName || 'カスタム';
         label = cName.length > 3 ? cName.slice(0, 3) : cName;
@@ -160,8 +164,6 @@ export const getNormalizedShiftMatrix = (
         label = '振';
       } else if (type === '研修') {
         label = '研';
-      } else if (type === '出張') {
-        label = '張';
       } else if (type === '欠勤') {
         label = '欠';
       } else {
