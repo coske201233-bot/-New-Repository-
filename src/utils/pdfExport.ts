@@ -89,8 +89,12 @@ export const exportShiftToPDF = async (
 
     if (req && req.type) {
       const rawType = String(req.type).trim();
+      const customName = req.customType || req.details?.customType;
       if (rawType === '出勤' || rawType === '日勤') {
         statusText = '出勤';
+        statusClass = 'status-work';
+      } else if (rawType === 'カスタム' || customName) {
+        statusText = customName || 'カスタム';
         statusClass = 'status-work';
       } else if (rawType === '特別出勤') {
         statusText = '特別出勤';

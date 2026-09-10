@@ -878,9 +878,15 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             let cellStyle = '';
             let label = '';
 
+            const customName = req?.customType || req?.details?.customType;
+
             if (type === '出勤' || type === '日勤') {
               cellStyle = 'background-color: #ffffff; color: #1e293b; font-weight: bold;';
               label = '出';
+            } else if (type === 'カスタム' || customName) {
+              cellStyle = 'background-color: #ffffff; color: #1e293b; font-weight: bold;';
+              const cName = customName || 'カスタム';
+              label = cName.length > 3 ? cName.slice(0, 3) : cName;
             } else if (type === '特別出勤') {
               cellStyle = 'background-color: #ffffff; color: #1e293b; font-weight: bold;';
               label = '特出';

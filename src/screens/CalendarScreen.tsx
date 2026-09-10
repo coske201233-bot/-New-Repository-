@@ -75,6 +75,7 @@ export const CalendarScreen: React.FC<any> = ({
   const [isAddStaffModalVisible, setIsAddStaffModalVisible] = useState(false);
   const [selectedStaffToAdd, setSelectedStaffToAdd] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState('出勤');
+  const [customTitle, setCustomTitle] = useState('');
   const [hourlyDuration, setHourlyDuration] = useState(1.0);
   const [adminSpecialHours, setAdminSpecialHours] = useState(1.0);
   const [adminHourlyHours, setAdminHourlyHours] = useState(1.0);
@@ -84,6 +85,7 @@ export const CalendarScreen: React.FC<any> = ({
   const [selectedShiftToEdit, setSelectedShiftToEdit] = useState<any | null>(null);
   const [editActionTab, setEditActionTab] = useState<'type' | 'move' | 'copy' | 'delete'>('type');
   const [newEditType, setNewEditType] = useState<string>('出勤');
+  const [editCustomTitle, setEditCustomTitle] = useState('');
   const [newEditHours, setNewEditHours] = useState<number>(1.0);
   const [newEditSpecialHours, setNewEditSpecialHours] = useState<number>(1.0);
   const [newEditHourlyHours, setNewEditHourlyHours] = useState<number>(1.0);
@@ -304,7 +306,8 @@ export const CalendarScreen: React.FC<any> = ({
         // 稼働としてカウントする種別の定義
         const isWorkType = (t: string) => {
           if (!t) return false;
-          if (t === '出勤' || t === '日勤' || t === '特別出勤') return true; 
+          if (t === '出勤' || t === '日勤' || t === '特別出勤' || t === 'カスタム') return true; 
+          if (singleReq?.customType || singleReq?.details?.customType || singleReq?.details?.isCustomWork) return true;
           // 🚨 【最終解決】「時」が含まれていても、承認済み(approved)または申請中(pending)でなければカウントしない
           if (t.includes('時')) {
             if (!singleReq) return false;
@@ -320,7 +323,8 @@ export const CalendarScreen: React.FC<any> = ({
         // 休暇系種別の定義
         const isOffType = (t: string) => {
           if (!t) return false;
-          // [V54.6] 研修も「出勤人数（分母）」に含めない休みとして扱う
+          // [V54.6] 研修も「出勤人数（分母）」に含めない休みとして扱う（ただしカスタム出勤の研修は除く）
+          if (singleReq?.type === 'カスタム' || singleReq?.customType || singleReq?.details?.customType || singleReq?.details?.isCustomWork) return false;
           if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修'].includes(t)) return true;
           return false;
         };
@@ -338,6 +342,7 @@ export const CalendarScreen: React.FC<any> = ({
           }
 
           const rType = (r.type || '').trim();
+          if (rType === 'カスタム' || r.customType || r.details?.customType || r.details?.isCustomWork) return 0;
           if (rType === '振替＋時間休') return isAssistant ? 7.5 : 7.75;
           if (rType === '振替4') return 4.0;
           const isFullDayLeaveType = ['公休', '年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給', '出張', '振替＋時間休'].includes(rType);
@@ -382,19 +387,19 @@ export const CalendarScreen: React.FC<any> = ({
 
           if (isFullDayLeave || (offReq && getLeaveHoursOfRequest(offReq) >= maxLimit)) {
             const displayReq = offReq || workReq || approvedReqs[0];
-            off.push({ staff, type: displayReq.type, requestId: displayReq.id, isManual: !!(displayReq.is_manual || displayReq.isManual), isHomeVisit, isAssistant, status: 'approved', hours: totalLeaveHours, details: displayReq.details });
+            off.push({ staff, type: displayReq.type, customType: displayReq.customType || displayReq.details?.customType, requestId: displayReq.id, isManual: !!(displayReq.is_manual || displayReq.isManual), isHomeVisit, isAssistant, status: 'approved', hours: totalLeaveHours, details: displayReq.details });
           } else if (workReq || offReq) {
             const displayReq = workReq || offReq || approvedReqs[0];
-            working.push({ staff, type: displayReq.type, requestId: displayReq.id, isManual: !!(displayReq.is_manual || displayReq.isManual), isHomeVisit, isAssistant, status: 'approved', hours: totalLeaveHours, details: displayReq.details });
+            working.push({ staff, type: displayReq.type, customType: displayReq.customType || displayReq.details?.customType, requestId: displayReq.id, isManual: !!(displayReq.is_manual || displayReq.isManual), isHomeVisit, isAssistant, status: 'approved', hours: totalLeaveHours, details: displayReq.details });
           } else {
             off.push({ staff, type: '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
           }
         } else if (pendingReq) {
           const isPendingOff = isOffType(pendingReq.type) || (pendingReq.type === '出張' && getLeaveHoursOfRequest(pendingReq) >= maxLimit);
           if (isFullDayLeave || isPendingOff) {
-            off.push({ staff, type: pendingReq.type, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: totalLeaveHours, details: pendingReq.details });
+            off.push({ staff, type: pendingReq.type, customType: pendingReq.customType || pendingReq.details?.customType, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: totalLeaveHours, details: pendingReq.details });
           } else {
-            working.push({ staff, type: pendingReq.type, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: totalLeaveHours, details: pendingReq.details });
+            working.push({ staff, type: pendingReq.type, customType: pendingReq.customType || pendingReq.details?.customType, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: totalLeaveHours, details: pendingReq.details });
           }
         } else {
           // [V54.9] デフォルトロジック：平日は出勤、休日は公休
@@ -597,6 +602,9 @@ export const CalendarScreen: React.FC<any> = ({
       return;
     }
 
+    const isCustom = selectedType === 'カスタム';
+    const cTitle = customTitle.trim() || 'カスタム';
+
     const newReqs = staffNames.map(nameOrId => {
       const staff = staffList.find(s => s.id === nameOrId || normalizeName(s.name) === normalizeName(nameOrId));
       const finalName = staff ? staff.name : nameOrId;
@@ -609,26 +617,31 @@ export const CalendarScreen: React.FC<any> = ({
         staffName: finalName,
         date: dateStr,
         type: selectedType,
+        customType: isCustom ? cTitle : undefined,
         status: 'approved',
-        reason: '管理者による調整',
+        reason: isCustom ? `カスタム出勤: ${cTitle}` : '管理者による調整',
         isManual: true, // リクエストテーブル用
         is_manual: true,
-        hours: selectedType === '特休＋時間休'
-          ? (adminSpecialHours + adminHourlyHours)
-          : selectedType === '振替＋時間休'
-            ? (4.0 + adminHourlyHours)
-            : selectedType === '振替4'
-              ? 4.0
-              : (['時間休', '時間給', '特休', '出張'].includes(selectedType))
-                ? hourlyDuration
-                : null,
-        details: selectedType === '特休＋時間休'
-          ? { note: '手動割当', specialHours: adminSpecialHours, hourlyHours: adminHourlyHours, isManual: true }
-          : selectedType === '振替＋時間休'
-            ? { note: '手動割当', furikaeHours: 4.0, hourlyHours: adminHourlyHours, isManual: true }
-            : selectedType === '振替4'
-              ? { note: '振替4時間', furikaeHours: 4.0, isManual: true }
-              : { note: '手動割当', isManual: true },
+        hours: isCustom
+          ? 0
+          : selectedType === '特休＋時間休'
+            ? (adminSpecialHours + adminHourlyHours)
+            : selectedType === '振替＋時間休'
+              ? (4.0 + adminHourlyHours)
+              : selectedType === '振替4'
+                ? 4.0
+                : (['時間休', '時間給', '特休', '出張'].includes(selectedType))
+                  ? hourlyDuration
+                  : null,
+        details: isCustom
+          ? { note: cTitle, customType: cTitle, isCustomWork: true, isManual: true }
+          : selectedType === '特休＋時間休'
+            ? { note: '手動割当', specialHours: adminSpecialHours, hourlyHours: adminHourlyHours, isManual: true }
+            : selectedType === '振替＋時間休'
+              ? { note: '手動割当', furikaeHours: 4.0, hourlyHours: adminHourlyHours, isManual: true }
+              : selectedType === '振替4'
+                ? { note: '振替4時間', furikaeHours: 4.0, isManual: true }
+                : { note: '手動割当', isManual: true },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(), // [V61.0] 優先度判定のためにupdatedAtを付与
       };
@@ -697,7 +710,9 @@ export const CalendarScreen: React.FC<any> = ({
           targetStaffName: r.staffName,
           actionType: 'SHIFT_UPDATE',
           targetDate: r.date,
-          details: `${r.staffName}さんのシフト（${r.date}）を「${r.type}」に設定しました${r.hours ? ` (${r.hours}h)` : ''}`,
+          details: r.type === 'カスタム'
+            ? `${r.staffName}さんのシフト（${r.date}）を「${r.customType || 'カスタム'}（カスタム出勤）」に設定しました`
+            : `${r.staffName}さんのシフト（${r.date}）を「${r.type}」に設定しました${r.hours ? ` (${r.hours}h)` : ''}`,
           afterData: r,
         });
       }
@@ -706,6 +721,7 @@ export const CalendarScreen: React.FC<any> = ({
       setIsTypeModalVisible(false);
       setSelectedStaffToAdd([]);
       setSelectedType('出勤');
+      setCustomTitle('');
       
       // 保存完了後に確実に再取得
       await fetchShifts();
@@ -988,7 +1004,9 @@ export const CalendarScreen: React.FC<any> = ({
       staff: staff || item.staff,
       date: dateStr,
     });
-    setNewEditType(item.type || '出勤');
+    const existingCustom = item.customType || item.details?.customType || (item.type === '特別出勤' ? '特別出勤' : '');
+    setEditCustomTitle(existingCustom);
+    setNewEditType(item.type === '特別出勤' ? 'カスタム' : (item.type || '出勤'));
     setNewEditHours(item.hours ?? item.details?.duration ?? 1.0);
     setNewEditSpecialHours(item.details?.specialHours ?? 1.0);
     setNewEditHourlyHours(item.details?.hourlyHours ?? (item.type === '振替＋時間休' && item.hours ? Math.max(0.25, item.hours - 4.0) : 1.0));
@@ -1031,11 +1049,16 @@ export const CalendarScreen: React.FC<any> = ({
       const staffName = staff?.name || selectedShiftToEdit.staffName;
       const dateStr = selectedShiftToEdit.date;
       const newType = newEditType;
+      const isCustom = newType === 'カスタム';
+      const cTitle = editCustomTitle.trim() || 'カスタム';
 
       let calcHours = null;
       let details: any = { note: '管理画面よりクイック変更', isManual: true };
 
-      if (newType === '特休＋時間休') {
+      if (isCustom) {
+        calcHours = 0;
+        details = { note: cTitle, customType: cTitle, isCustomWork: true, isManual: true };
+      } else if (newType === '特休＋時間休') {
         calcHours = newEditSpecialHours + newEditHourlyHours;
         details = { note: '管理画面よりクイック変更', specialHours: newEditSpecialHours, hourlyHours: newEditHourlyHours, isManual: true };
       } else if (newType === '振替＋時間休') {
@@ -1056,7 +1079,9 @@ export const CalendarScreen: React.FC<any> = ({
         staff_name: staffName,
         date: dateStr,
         type: newType,
+        customType: isCustom ? cTitle : undefined,
         status: 'approved',
+        reason: isCustom ? `カスタム出勤: ${cTitle}` : '管理者による変更',
         is_manual: true,
         hours: calcHours,
         details: details,
@@ -1101,6 +1126,7 @@ export const CalendarScreen: React.FC<any> = ({
       });
 
       // 4. 監査ログ記録
+      const newTypeDisplay = isCustom ? `${cTitle}（カスタム出勤）` : newType;
       await recordAuditLog({
         operatorId: profile?.id,
         operatorName: profile?.name || '管理者',
@@ -1108,7 +1134,7 @@ export const CalendarScreen: React.FC<any> = ({
         targetStaffName: staffName,
         actionType: 'SHIFT_UPDATE',
         targetDate: dateStr,
-        details: `${staffName}さんの ${dateStr} のシフトを「${selectedShiftToEdit.type || '未設定'}」から【${newType}】に変更しました`,
+        details: `${staffName}さんの ${dateStr} のシフトを「${selectedShiftToEdit.type || '未設定'}」から【${newTypeDisplay}】に変更しました`,
         beforeData: selectedShiftToEdit,
         afterData: updatedReq,
       });
@@ -1116,7 +1142,8 @@ export const CalendarScreen: React.FC<any> = ({
       // 5. 最新データ再取得
       if (fetchShifts) await fetchShifts();
       setSelectedShiftToEdit(null);
-      Alert.alert('完了', `${staffName}さんのシフトを「${newType}」に変更しました。`);
+      setEditCustomTitle('');
+      Alert.alert('完了', `${staffName}さんのシフトを「${isCustom ? cTitle : newType}」に変更しました。`);
 
     } catch (err: any) {
       console.error('Quick edit error:', err);
@@ -1273,6 +1300,7 @@ export const CalendarScreen: React.FC<any> = ({
         const getDisplayLabelObj = (item: any, isException = false) => {
           const name = item.staff.name;
           const type = item.type || item.details?.type || item.status || '';
+          const customName = item.customType || item.details?.customType;
           
           const isTarget = TARGET_UUID && item.staff?.id === TARGET_UUID;
           const isAs = item.isAssistant || item.staff?.jobType === '助手' || item.staff?.role === '助手';
@@ -1288,6 +1316,10 @@ export const CalendarScreen: React.FC<any> = ({
             label = ' 振＋時';
           } else if (type === '振替4' || type === '振4') {
             label = ' 振4';
+          } else if (type === 'カスタム' || customName) {
+            const cName = customName || 'カスタム';
+            const shortName = cName.length > 3 ? cName.slice(0, 3) : cName;
+            label = ` (${shortName})`;
           } else if (type === '特別出勤') {
             label = ' (特出)';
           } else {
@@ -1313,6 +1345,7 @@ export const CalendarScreen: React.FC<any> = ({
             isException,
             staff: item.staff,
             type: type,
+            customType: customName,
             hours: duration,
             details: item.details,
             requestId: item.requestId,
@@ -1373,6 +1406,12 @@ export const CalendarScreen: React.FC<any> = ({
           offWorkers = info.off
             .filter(o => (isAfterJune2026 || o.type !== '公休') && !isCellException(o))
             .map(o => getDisplayLabelObj(o));
+
+          // 平日でもカスタム出勤者（および特別出勤者）を表示
+          const customWorkers = info.working
+            .filter(w => (w.type === 'カスタム' || w.type === '特別出勤' || !!w.customType || !!w.details?.customType) && !isCellException(w))
+            .map(w => getDisplayLabelObj(w));
+          offWorkers = [...offWorkers, ...customWorkers];
         }
       }
 
@@ -1431,40 +1470,47 @@ export const CalendarScreen: React.FC<any> = ({
                       
                     return (
                       <>
-                        {displayList.slice(0, 3).map((itemObj, idx) => (
-                          <TouchableOpacity
-                            key={idx}
-                            disabled={!isAdmin}
-                            style={[
-                              styles.badgeItem,
-                              itemObj.isException 
-                                ? { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: COLORS.accent, borderWidth: 0.5 }
-                                : (dayType === 'weekday' 
-                                    ? { backgroundColor: 'rgba(239, 68, 68, 0.12)' }
-                                    : { backgroundColor: 'rgba(56, 189, 248, 0.12)' }),
-                              !isAdmin && { cursor: 'default' } as any
-                            ]}
-                            onPress={(e) => {
-                              e?.stopPropagation?.();
-                              if (isAdmin) {
-                                openQuickEditModal(itemObj, cellDateStr);
-                              }
-                            }}
-                          >
-                            <ThemeText 
+                        {displayList.slice(0, 3).map((itemObj, idx) => {
+                          const isCustom = itemObj.type === 'カスタム' || itemObj.type === '特別出勤' || !!itemObj.customType || !!itemObj.details?.customType;
+                          return (
+                            <TouchableOpacity
+                              key={idx}
+                              disabled={!isAdmin}
                               style={[
-                                styles.holidayWorkerName, 
+                                styles.badgeItem,
                                 itemObj.isException 
-                                  ? { color: COLORS.accent, fontWeight: 'bold' } 
-                                  : (dayType === 'weekday' ? { color: '#ef4444' } : { color: '#38bdf8' })
-                              ]} 
-                              numberOfLines={1}
-                              adjustsFontSizeToFit
+                                  ? { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: COLORS.accent, borderWidth: 0.5 }
+                                  : isCustom
+                                    ? { backgroundColor: 'rgba(56, 189, 248, 0.12)' }
+                                    : (dayType === 'weekday' 
+                                        ? { backgroundColor: 'rgba(239, 68, 68, 0.12)' }
+                                        : { backgroundColor: 'rgba(56, 189, 248, 0.12)' }),
+                                !isAdmin && { cursor: 'default' } as any
+                              ]}
+                              onPress={(e) => {
+                                e?.stopPropagation?.();
+                                if (isAdmin) {
+                                  openQuickEditModal(itemObj, cellDateStr);
+                                }
+                              }}
                             >
-                              {itemObj.name}{itemObj.label}
-                            </ThemeText>
-                          </TouchableOpacity>
-                        ))}
+                              <ThemeText 
+                                style={[
+                                  styles.holidayWorkerName, 
+                                  itemObj.isException 
+                                    ? { color: COLORS.accent, fontWeight: 'bold' } 
+                                    : isCustom
+                                      ? { color: '#38bdf8' }
+                                      : (dayType === 'weekday' ? { color: '#ef4444' } : { color: '#38bdf8' })
+                                ]} 
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                              >
+                                {itemObj.name}{itemObj.label}
+                              </ThemeText>
+                            </TouchableOpacity>
+                          );
+                        })}
                         {displayList.length > 3 && (
                           <View style={styles.moreWorkersBadge}>
                             <ThemeText style={styles.moreWorkersText}>
@@ -1619,8 +1665,13 @@ export const CalendarScreen: React.FC<any> = ({
                         dur = 0;
                       }
 
-                      if (dur > 0 || (item.type || '') === '振替4' || (item.type || '') === '振4' || (item.type || '') === '特別出勤') {
-                        const text = (item.type || '') === '特別出勤'
+                      const customName = item.customType || item.details?.customType;
+                      const isCustom = (item.type || '') === 'カスタム' || !!customName;
+
+                      if (dur > 0 || (item.type || '') === '振替4' || (item.type || '') === '振4' || (item.type || '') === '特別出勤' || isCustom) {
+                        const text = isCustom
+                          ? ` ${customName || 'カスタム'}`
+                          : (item.type || '') === '特別出勤'
                           ? ` 特別出勤`
                           : ((item.type || '') === '振替4' || (item.type || '') === '振4')
                           ? ` 振4`
@@ -1636,7 +1687,7 @@ export const CalendarScreen: React.FC<any> = ({
                                   ? ` 出張${dur}h`
                                   : ` 時間休${dur}h`;
                         return (
-                          <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
+                          <ThemeText variant="caption" style={{ color: isCustom ? '#38bdf8' : COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
                             {text}
                           </ThemeText>
                         );
@@ -1848,7 +1899,7 @@ export const CalendarScreen: React.FC<any> = ({
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-              {['出勤', '特別出勤', '時間休', '公休', '特休', '年休', '振替4', '特休＋時間休', '振替＋時間休', '出張', '空欄'].map(t => (
+              {['出勤', 'カスタム', '時間休', '公休', '特休', '年休', '振替4', '特休＋時間休', '振替＋時間休', '出張', '空欄'].map(t => (
                 <TouchableOpacity 
                   key={t}
                   style={[
@@ -1861,6 +1912,28 @@ export const CalendarScreen: React.FC<any> = ({
                 </TouchableOpacity>
               ))}
             </View>
+
+            {selectedType === 'カスタム' && (
+              <View style={{ marginBottom: 20 }}>
+                <ThemeText variant="label" style={{ marginBottom: 8 }}>項目名 (出勤扱い・時間計算なし)</ThemeText>
+                <TextInput
+                  style={{
+                    backgroundColor: 'rgba(255,255,255,0.08)',
+                    borderRadius: 12,
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    color: COLORS.text,
+                    borderWidth: 1,
+                    borderColor: COLORS.border,
+                    fontSize: 14,
+                  }}
+                  placeholder="項目名を入力 (例: 外部研修)"
+                  placeholderTextColor={COLORS.textSecondary}
+                  value={customTitle}
+                  onChangeText={setCustomTitle}
+                />
+              </View>
+            )}
 
             {(selectedType === '時間休' || selectedType === '特休' || selectedType === '特休＋時間休' || selectedType === '振替＋時間休' || selectedType === '出張') && (
               <View style={{ marginBottom: 20 }}>
@@ -2024,7 +2097,7 @@ export const CalendarScreen: React.FC<any> = ({
               <View style={{ marginTop: 16 }}>
                 <ThemeText variant="label" style={{ marginBottom: 10 }}>変更後の種別を選択</ThemeText>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                  {['出勤', '特別出勤', '年休', '公休', '特休', '時間休', '振替4', '夏季休暇', '特休＋時間休', '振替＋時間休', '出張'].map(t => (
+                  {['出勤', 'カスタム', '年休', '公休', '特休', '時間休', '振替4', '夏季休暇', '特休＋時間休', '振替＋時間休', '出張'].map(t => (
                     <TouchableOpacity 
                       key={t}
                       style={[
@@ -2037,6 +2110,28 @@ export const CalendarScreen: React.FC<any> = ({
                     </TouchableOpacity>
                   ))}
                 </View>
+
+                {newEditType === 'カスタム' && (
+                  <View style={{ marginBottom: 16 }}>
+                    <ThemeText variant="label" style={{ marginBottom: 8 }}>項目名 (出勤扱い・時間計算なし)</ThemeText>
+                    <TextInput
+                      style={{
+                        backgroundColor: 'rgba(255,255,255,0.08)',
+                        borderRadius: 10,
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        color: COLORS.text,
+                        borderWidth: 1,
+                        borderColor: COLORS.border,
+                        fontSize: 14,
+                      }}
+                      placeholder="項目名を入力 (例: 外部研修)"
+                      placeholderTextColor={COLORS.textSecondary}
+                      value={editCustomTitle}
+                      onChangeText={setEditCustomTitle}
+                    />
+                  </View>
+                )}
 
                 {/* 時間設定 */}
                 {(newEditType === '時間休' || newEditType === '特休' || newEditType === '特休＋時間休' || newEditType === '振替＋時間休' || newEditType === '出張') && (
