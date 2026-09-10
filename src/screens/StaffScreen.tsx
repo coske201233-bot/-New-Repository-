@@ -687,10 +687,17 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     const h = r.hours;
     const parsedH = parseFloat(String(h));
     
-    // [V76.0] ユーザー指示: 0時間として記録されている場合でも、特定の休暇タイプなら7.75時間をデフォルトとする
     const rType = (r.type || '').trim();
-    const isFullDayLeaveType = ['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給'].includes(rType);
+    const isFullDayLeaveType = ['年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給', '出張'].includes(rType);
     
+    if (rType === '出張') {
+      const dur = r.details?.duration ?? r.details?.hours;
+      const parsedDur = parseFloat(String(dur));
+      if (h !== undefined && h !== null && h !== '' && !isNaN(parsedH) && parsedH > 0) return parsedH;
+      if (dur !== undefined && dur !== null && !isNaN(parsedDur) && parsedDur > 0) return parsedDur;
+      return 7.75;
+    }
+
     if (h !== undefined && h !== null && h !== '' && !isNaN(parsedH)) {
       if (parsedH === 0 && isFullDayLeaveType) return 7.75;
       return parsedH;
@@ -789,10 +796,12 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       const isTrip = existing.type === '出張';
       const existingCustom = !isTrip ? (existing.customType || existing.details?.customType || (existing.type === '特別出勤' ? '特別出勤' : '')) : '';
       const existingTrip = isTrip ? (existing.customTitle || existing.customType || existing.details?.customTitle || existing.details?.customType || (existing.details?.note && !['出張', '手動割当', '管理画面よりクイック変更', '管理画面より更新'].includes(existing.details?.note) ? existing.details?.note : '')) : '';
+      const isAs = selectedStaff?.jobType === '助手' || selectedStaff?.role === '助手' || selectedStaff?.profession === '助手';
+      const defaultH = isAs ? 7.5 : 7.75;
       setStaffCustomTitle(existingCustom);
       setStaffTripTitle(existingTrip);
       setSelectedType(existing.type === '特別出勤' ? 'カスタム' : ((existing.type === '日勤' || existing.type === '出勤') ? '出勤' : existing.type));
-      setSelectedHours(getReqHours(existing) || 1.0);
+      setSelectedHours(getReqHours(existing) || (isTrip ? defaultH : 1.0));
       setSpecialHours(existing.details?.specialHours || 1.0);
       setHourlyHours(existing.details?.hourlyHours || (existing.type === '振替＋時間休' && existing.hours ? Math.max(0.25, existing.hours - 4.0) : 1.0));
     } else {
@@ -821,6 +830,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
       const customName = staffCustomTitle.trim() || 'カスタム';
       const isTrip = type === '出張';
       const tripTitle = staffTripTitle.trim();
+      const isAs = selectedStaff?.jobType === '助手' || selectedStaff?.role === '助手' || selectedStaff?.profession === '助手';
+      const defaultH = isAs ? 7.5 : 7.75;
+      const tripHours = (selectedHours && selectedHours > 0) ? selectedHours : defaultH;
 
       const newReq = {
         id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
@@ -833,17 +845,19 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         customTitle: isTrip ? (tripTitle || undefined) : undefined,
         hours: isCustom
           ? 0
-          : type === '特休＋時間休'
-            ? (specialHours + hourlyHours)
-            : type === '振替＋時間休'
-              ? (4.0 + hourlyHours)
-              : type === '振替4'
-                ? 4.0
-                : (HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : null),
+          : isTrip
+            ? tripHours
+            : type === '特休＋時間休'
+              ? (specialHours + hourlyHours)
+              : type === '振替＋時間休'
+                ? (4.0 + hourlyHours)
+                : type === '振替4'
+                  ? 4.0
+                  : (HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : null),
         details: isCustom
           ? { note: customName, customType: customName, isCustomWork: true, isManual: true }
           : isTrip
-            ? { note: tripTitle || '出張', customTitle: tripTitle, customType: tripTitle, duration: selectedHours, hours: selectedHours, isManual: true }
+            ? { note: tripTitle || '出張', customTitle: tripTitle, customType: tripTitle, duration: tripHours, hours: tripHours, isManual: true }
             : type === '特休＋時間休'
               ? { note: '管理画面より更新', specialHours, hourlyHours, isManual: true }
               : type === '振替＋時間休'
@@ -1112,11 +1126,13 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                   displayLabel = '出勤'; labelColor = '#38bdf8';
                 } else if (rType === '出張') {
                   const tripName = req.customTitle || req.customType || req.details?.customTitle || req.details?.customType || (req.details?.note && !['出張', '手動割当', '管理画面よりクイック変更', '管理画面より更新'].includes(req.details?.note) ? req.details?.note : '');
+                  const isAs = selectedStaff?.jobType === '助手' || selectedStaff?.role === '助手' || selectedStaff?.profession === '助手';
+                  const displayH = (h && h > 0) ? h : (req.details?.duration ?? req.details?.hours ?? (isAs ? 7.5 : 7.75));
                   if (tripName) {
                     const shortTrip = tripName.length > 3 ? tripName.slice(0, 3) : tripName;
-                    displayLabel = `${shortTrip}(${h}h)`;
+                    displayLabel = `${shortTrip}(${displayH}h)`;
                   } else {
-                    displayLabel = `出張(${h}h)`;
+                    displayLabel = `出張(${displayH}h)`;
                   }
                   labelColor = '#f97316';
                 } else if (rType === 'カスタム' || (rType !== '出張' && customName)) {
@@ -1443,7 +1459,21 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
               {selectedDay ? (
                 <View style={styles.editorSection}>
                   <ThemeText bold style={{ marginBottom: 12 }}>{selectedDay} の確定</ThemeText>
-                  <View style={styles.typeGrid}>{SHIFT_TYPES.map(type => ( <TouchableOpacity key={type} style={[styles.typeBtn, selectedType === type && styles.typeBtnActive]} onPress={() => setSelectedType(type)}><ThemeText bold={selectedType === type} color={selectedType === type ? 'white' : COLORS.textSecondary}>{type}</ThemeText></TouchableOpacity> ))}</View>
+                  <View style={styles.typeGrid}>{SHIFT_TYPES.map(type => ( 
+                    <TouchableOpacity 
+                      key={type} 
+                      style={[styles.typeBtn, selectedType === type && styles.typeBtnActive]} 
+                      onPress={() => {
+                        setSelectedType(type);
+                        if (type === '出張' && (!selectedHours || selectedHours <= 1.0)) {
+                          const isAs = selectedStaff?.jobType === '助手' || selectedStaff?.role === '助手' || selectedStaff?.profession === '助手';
+                          setSelectedHours(isAs ? 7.5 : 7.75);
+                        }
+                      }}
+                    >
+                      <ThemeText bold={selectedType === type} color={selectedType === type ? 'white' : COLORS.textSecondary}>{type}</ThemeText>
+                    </TouchableOpacity> 
+                  ))}</View>
                   {selectedType === 'カスタム' && (
                     <View style={{ marginTop: 12 }}>
                       <ThemeText variant="label" style={{ marginBottom: 6 }}>項目名 (出勤扱い・時間計算なし)</ThemeText>

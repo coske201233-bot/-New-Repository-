@@ -308,8 +308,9 @@ export const CalendarScreen: React.FC<any> = ({
         // 稼働としてカウントする種別の定義
         const isWorkType = (t: string) => {
           if (!t) return false;
+          if (t === '出張') return false;
           if (t === '出勤' || t === '日勤' || t === '特別出勤' || t === 'カスタム') return true; 
-          if (singleReq?.customType || singleReq?.details?.customType || singleReq?.details?.isCustomWork) return true;
+          if (t !== '出張' && (singleReq?.customType || singleReq?.details?.customType || singleReq?.details?.isCustomWork)) return true;
           // 🚨 【最終解決】「時」が含まれていても、承認済み(approved)または申請中(pending)でなければカウントしない
           if (t.includes('時')) {
             if (!singleReq) return false;
@@ -326,7 +327,7 @@ export const CalendarScreen: React.FC<any> = ({
         const isOffType = (t: string) => {
           if (!t) return false;
           // [V54.6] 研修も「出勤人数（分母）」に含めない休みとして扱う（ただしカスタム出勤の研修は除く）
-          if (singleReq?.type === 'カスタム' || singleReq?.customType || singleReq?.details?.customType || singleReq?.details?.isCustomWork) return false;
+          if (t !== '出張' && (singleReq?.type === 'カスタム' || singleReq?.customType || singleReq?.details?.customType || singleReq?.details?.isCustomWork)) return false;
           if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修'].includes(t)) return true;
           return false;
         };
@@ -344,7 +345,7 @@ export const CalendarScreen: React.FC<any> = ({
           }
 
           const rType = (r.type || '').trim();
-          if (rType === 'カスタム' || r.customType || r.details?.customType || r.details?.isCustomWork) return 0;
+          if (rType !== '出張' && (rType === 'カスタム' || r.customType || r.details?.customType || r.details?.isCustomWork)) return 0;
           if (rType === '振替＋時間休') return isAssistant ? 7.5 : 7.75;
           if (rType === '振替4') return 4.0;
           const isFullDayLeaveType = ['公休', '年休', '有給休暇', '夏季休暇', '特休', '全休', '休暇', '欠勤', '年給', '有給', '出張', '振替＋時間休'].includes(rType);
@@ -389,19 +390,28 @@ export const CalendarScreen: React.FC<any> = ({
 
           if (isFullDayLeave || (offReq && getLeaveHoursOfRequest(offReq) >= maxLimit)) {
             const displayReq = offReq || workReq || approvedReqs[0];
-            off.push({ staff, type: displayReq.type, customType: displayReq.customType || displayReq.details?.customType, requestId: displayReq.id, isManual: !!(displayReq.is_manual || displayReq.isManual), isHomeVisit, isAssistant, status: 'approved', hours: totalLeaveHours, details: displayReq.details });
+            const itemH = (displayReq.type === '出張')
+              ? (parseFloat(String(displayReq.hours ?? displayReq.details?.duration ?? displayReq.details?.hours)) || totalLeaveHours || (isAssistant ? 7.5 : 7.75))
+              : totalLeaveHours;
+            off.push({ staff, type: displayReq.type, customType: displayReq.customType || displayReq.details?.customType, requestId: displayReq.id, isManual: !!(displayReq.is_manual || displayReq.isManual), isHomeVisit, isAssistant, status: 'approved', hours: itemH, details: displayReq.details, rawItem: displayReq });
           } else if (workReq || offReq) {
             const displayReq = workReq || offReq || approvedReqs[0];
-            working.push({ staff, type: displayReq.type, customType: displayReq.customType || displayReq.details?.customType, requestId: displayReq.id, isManual: !!(displayReq.is_manual || displayReq.isManual), isHomeVisit, isAssistant, status: 'approved', hours: totalLeaveHours, details: displayReq.details });
+            const itemH = (displayReq.type === '出張')
+              ? (parseFloat(String(displayReq.hours ?? displayReq.details?.duration ?? displayReq.details?.hours)) || totalLeaveHours || (isAssistant ? 7.5 : 7.75))
+              : totalLeaveHours;
+            working.push({ staff, type: displayReq.type, customType: displayReq.customType || displayReq.details?.customType, requestId: displayReq.id, isManual: !!(displayReq.is_manual || displayReq.isManual), isHomeVisit, isAssistant, status: 'approved', hours: itemH, details: displayReq.details, rawItem: displayReq });
           } else {
             off.push({ staff, type: '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
           }
         } else if (pendingReq) {
           const isPendingOff = isOffType(pendingReq.type) || (pendingReq.type === '出張' && getLeaveHoursOfRequest(pendingReq) >= maxLimit);
+          const itemPendingH = (pendingReq.type === '出張')
+            ? (parseFloat(String(pendingReq.hours ?? pendingReq.details?.duration ?? pendingReq.details?.hours)) || totalLeaveHours || (isAssistant ? 7.5 : 7.75))
+            : totalLeaveHours;
           if (isFullDayLeave || isPendingOff) {
-            off.push({ staff, type: pendingReq.type, customType: pendingReq.customType || pendingReq.details?.customType, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: totalLeaveHours, details: pendingReq.details });
+            off.push({ staff, type: pendingReq.type, customType: pendingReq.customType || pendingReq.details?.customType, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: itemPendingH, details: pendingReq.details, rawItem: pendingReq });
           } else {
-            working.push({ staff, type: pendingReq.type, customType: pendingReq.customType || pendingReq.details?.customType, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: totalLeaveHours, details: pendingReq.details });
+            working.push({ staff, type: pendingReq.type, customType: pendingReq.customType || pendingReq.details?.customType, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: itemPendingH, details: pendingReq.details, rawItem: pendingReq });
           }
         } else {
           // [V54.9] デフォルトロジック：平日は出勤、休日は公休
@@ -630,19 +640,28 @@ export const CalendarScreen: React.FC<any> = ({
         is_manual: true,
         hours: isCustom
           ? 0
-          : selectedType === '特休＋時間休'
-            ? (adminSpecialHours + adminHourlyHours)
-            : selectedType === '振替＋時間休'
-              ? (4.0 + adminHourlyHours)
-              : selectedType === '振替4'
-                ? 4.0
-                : (['時間休', '時間給', '特休', '出張'].includes(selectedType))
-                  ? hourlyDuration
-                  : null,
+          : isTrip
+            ? (hourlyDuration && hourlyDuration > 0 ? hourlyDuration : (staff?.jobType === '助手' || staff?.role === '助手' ? 7.5 : 7.75))
+            : selectedType === '特休＋時間休'
+              ? (adminSpecialHours + adminHourlyHours)
+              : selectedType === '振替＋時間休'
+                ? (4.0 + adminHourlyHours)
+                : selectedType === '振替4'
+                  ? 4.0
+                  : (['時間休', '時間給', '特休'].includes(selectedType))
+                    ? hourlyDuration
+                    : null,
         details: isCustom
           ? { note: cTitle, customType: cTitle, isCustomWork: true, isManual: true }
           : isTrip
-            ? { note: tTitle || '出張', customTitle: tTitle, customType: tTitle, duration: hourlyDuration, hours: hourlyDuration, isManual: true }
+            ? { 
+                note: tTitle || '出張', 
+                customTitle: tTitle, 
+                customType: tTitle, 
+                duration: (hourlyDuration && hourlyDuration > 0 ? hourlyDuration : (staff?.jobType === '助手' || staff?.role === '助手' ? 7.5 : 7.75)), 
+                hours: (hourlyDuration && hourlyDuration > 0 ? hourlyDuration : (staff?.jobType === '助手' || staff?.role === '助手' ? 7.5 : 7.75)), 
+                isManual: true 
+              }
             : selectedType === '特休＋時間休'
               ? { note: '手動割当', specialHours: adminSpecialHours, hourlyHours: adminHourlyHours, isManual: true }
               : selectedType === '振替＋時間休'
@@ -1015,12 +1034,16 @@ export const CalendarScreen: React.FC<any> = ({
       staff: staff || item.staff,
       date: dateStr,
     });
+    const isAs = staff?.jobType === '助手' || staff?.role === '助手' || item.isAssistant;
+    const defaultHours = isAs ? 7.5 : 7.75;
     const existingCustom = item.customType || item.details?.customType || (item.type === '特別出勤' ? '特別出勤' : '');
     setEditCustomTitle(existingCustom);
     const existingTrip = item.type === '出張' ? (item.customTitle || item.customType || item.details?.customTitle || item.details?.customType || (item.details?.note && item.details?.note !== '出張' && item.details?.note !== '手動割当' && item.details?.note !== '管理画面よりクイック変更' ? item.details?.note : '')) : '';
     setEditTripTitle(existingTrip || '');
     setNewEditType(item.type === '特別出勤' ? 'カスタム' : (item.type || '出勤'));
-    setNewEditHours(item.hours ?? item.details?.duration ?? 1.0);
+    const itemHours = item.hours ?? item.details?.duration ?? item.details?.hours;
+    const initialHours = (itemHours !== undefined && itemHours !== null && itemHours > 0) ? itemHours : (item.type === '出張' ? defaultHours : 1.0);
+    setNewEditHours(initialHours);
     setNewEditSpecialHours(item.details?.specialHours ?? 1.0);
     setNewEditHourlyHours(item.details?.hourlyHours ?? (item.type === '振替＋時間休' && item.hours ? Math.max(0.25, item.hours - 4.0) : 1.0));
     setTargetMoveDate(dateStr);
@@ -1066,6 +1089,8 @@ export const CalendarScreen: React.FC<any> = ({
       const cTitle = editCustomTitle.trim() || 'カスタム';
       const isTrip = newType === '出張';
       const tTitle = editTripTitle.trim();
+      const isAs = staff?.jobType === '助手' || staff?.role === '助手' || selectedShiftToEdit.isAssistant;
+      const defaultH = isAs ? 7.5 : 7.75;
 
       let calcHours = null;
       let details: any = { note: '管理画面よりクイック変更', isManual: true };
@@ -1086,8 +1111,9 @@ export const CalendarScreen: React.FC<any> = ({
         calcHours = newEditHours;
         details = { note: '管理画面よりクイック変更', duration: newEditHours, isManual: true };
       } else if (newType === '出張') {
-        calcHours = newEditHours;
-        details = { note: tTitle || '出張', customTitle: tTitle, customType: tTitle, duration: newEditHours, hours: newEditHours, isManual: true };
+        const tripH = (newEditHours && newEditHours > 0) ? newEditHours : defaultH;
+        calcHours = tripH;
+        details = { note: tTitle || '出張', customTitle: tTitle, customType: tTitle, duration: tripH, hours: tripH, isManual: true };
       }
 
       const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
@@ -1330,6 +1356,10 @@ export const CalendarScreen: React.FC<any> = ({
           let duration = item.hours ?? item.partialLeaveHours ?? item.leaveHours ?? item.details?.partialLeaveHours ?? item.details?.duration ?? item.details?.hours ?? 0;
           if (isTarget && (type.includes('振替') || type.includes('振休'))) {
             duration = limit;
+          }
+          if (type === '出張' && (!duration || duration === 0)) {
+            const fallback = item.details?.duration ?? item.details?.hours ?? item.rawItem?.hours ?? item.rawItem?.details?.duration ?? item.rawItem?.details?.hours ?? limit;
+            duration = parseFloat(String(fallback)) || limit;
           }
           
           let label = '';
@@ -1935,7 +1965,12 @@ export const CalendarScreen: React.FC<any> = ({
                     { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, backgroundColor: 'rgba(255,255,255,0.05)' },
                     selectedType === t && { backgroundColor: COLORS.primary, borderColor: COLORS.primary }
                   ]}
-                  onPress={() => setSelectedType(t)}
+                  onPress={() => {
+                    setSelectedType(t);
+                    if (t === '出張' && (!hourlyDuration || hourlyDuration <= 1.0)) {
+                      setHourlyDuration(7.75);
+                    }
+                  }}
                 >
                   <ThemeText color={selectedType === t ? 'white' : COLORS.text} bold={selectedType === t}>{t}</ThemeText>
                 </TouchableOpacity>
@@ -2155,7 +2190,13 @@ export const CalendarScreen: React.FC<any> = ({
                         styles.typeChip,
                         newEditType === t && styles.typeChipActive
                       ]}
-                      onPress={() => setNewEditType(t)}
+                      onPress={() => {
+                        setNewEditType(t);
+                        if (t === '出張' && (!newEditHours || newEditHours <= 1.0)) {
+                          const isAs = selectedShiftToEdit?.staff?.jobType === '助手' || selectedShiftToEdit?.staff?.role === '助手' || selectedShiftToEdit?.isAssistant;
+                          setNewEditHours(isAs ? 7.5 : 7.75);
+                        }
+                      }}
                     >
                       <ThemeText variant="caption" bold={newEditType === t} color={newEditType === t ? 'white' : COLORS.text}>{t}</ThemeText>
                     </TouchableOpacity>
