@@ -6,6 +6,9 @@ import { checkIsAdmin, cleanupStaffSelectionStorage } from '../utils/authUtils';
 
 export const useAuthSession = () => {
   const [profile, setProfile] = useState<any>(null);
+  const profileRef = useRef<any>(null);
+  profileRef.current = profile;
+
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [sessionDuration, setSessionDuration] = useState(24);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -37,10 +40,11 @@ export const useAuthSession = () => {
     }
 
     // Skip if profile is already loaded or currently loading for this user to break loops
-    if ((profile?.email === userEmail || loadingProfileEmailRef.current === userEmail) && !nameHint) {
+    const currentProf = profileRef.current || profile;
+    if ((currentProf?.email === userEmail || loadingProfileEmailRef.current === userEmail) && !nameHint) {
       setIsCheckingProfile(false);
       setIsInitialized(true);
-      return profile;
+      return currentProf;
     }
 
     loadingProfileEmailRef.current = userEmail;
@@ -149,6 +153,12 @@ export const useAuthSession = () => {
       console.log('Auth event:', _event);
       
       if (session) {
+        // タブ切り替え等に伴うTOKEN_REFRESHED時、既にプロファイルが取得済みであれば再フェッチを行わない
+        if (_event === 'TOKEN_REFRESHED' && profileRef.current && session.user?.email === profileRef.current?.email) {
+          setUser(session.user);
+          return;
+        }
+
         setUser(session.user);
         await loadProfile(session);
       } else {

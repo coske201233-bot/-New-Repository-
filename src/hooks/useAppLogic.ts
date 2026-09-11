@@ -39,10 +39,18 @@ export const useAppLogic = () => {
     };
   }, [req.fetchRequests, shifts.fetchShifts]);
 
+  const loadedUserIdRef = React.useRef<string | null>(null);
+
   // 認証セッション解決時・ログイン成功（auth.user?.id変化）時のデータ取得フロー
   useEffect(() => {
     // 認証準備ができるまで待機
     if (!auth.isAuthReady) return;
+
+    // 既に同一ユーザーで初期データ取得が完了している場合は、タブ切り替え等による過剰フェッチを防ぐ
+    const currentUserId = auth.user?.id || 'guest';
+    if (isInitialized && loadedUserIdRef.current === currentUserId) {
+      return;
+    }
 
     let mounted = true;
     
@@ -116,6 +124,7 @@ export const useAppLogic = () => {
         console.warn('Initialization/Auth data load error:', error.message);
       } finally {
         if (mounted) {
+          loadedUserIdRef.current = currentUserId;
           setIsInitialized(true);
           clearTimeout(warningTimer);
         }
@@ -178,6 +187,7 @@ export const useAppLogic = () => {
     
     // 2. 初期化完了フラグをリセットし、次回ログイン時に再フェッチを走らせる
     setIsInitialized(false);
+    loadedUserIdRef.current = null;
     
     // 3. AsyncStorage に保存されている古いキャッシュを完全に焼き払う
     try {

@@ -108,8 +108,24 @@ export default function App() {
   // 共通判定ヘルパーおよびステートに基づく実効管理者権限（即時再描画トリガー）
   const isEffectiveAdmin = checkIsAdmin(logic.user, profile) || isAdminAuthenticated;
 
-  // 認証セッション復元および DB からの権限取得が完全に完了するまでメイン画面を描画させない強固なガード
-  const isAppLoading = !logic.isInitialized || !logic.isAuthReady || (!!logic.user && logic.isCheckingProfile);
+  // 初回ロード完了フラグ（タブ切り替えやバックグラウンド同期によるローディング画面への逆戻りを防止）
+  const [hasInitialLoaded, setHasInitialLoaded] = useState(false);
+  useEffect(() => {
+    if (logic.isInitialized && logic.isAuthReady && !logic.isCheckingProfile) {
+      setHasInitialLoaded(true);
+    }
+  }, [logic.isInitialized, logic.isAuthReady, logic.isCheckingProfile]);
+
+  // ログアウト時は未ロード状態にリセット（再ログイン時の初期ローディングを正常表示させるため）
+  useEffect(() => {
+    if (!logic.user && logic.isInitialized) {
+      setHasInitialLoaded(false);
+    }
+  }, [logic.user, logic.isInitialized]);
+
+  // 初回のみスピナー表示。以降はタブ切り替え等があっても既存画面を表示し続ける
+  const showFullLoading = !hasInitialLoaded && (!logic.isInitialized || !logic.isAuthReady || logic.isCheckingProfile);
+  const isAppLoading = showFullLoading;
 
   const renderContent = () => {
     const commonProps = {
