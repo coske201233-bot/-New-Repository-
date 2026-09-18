@@ -91,6 +91,7 @@ export default function App() {
     handleReject,
     shifts,
     fetchShifts,
+    fetchRequests,
     isLoadingShifts,
   } = logic;
 
@@ -157,6 +158,7 @@ export default function App() {
       // [V54.0] グローバルなシフトステートを全ての画面で共有
       shifts,
       fetchShifts,
+      fetchRequests,
       isLoadingShifts,
       onSubmitRequest,
     };

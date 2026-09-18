@@ -12,6 +12,7 @@ import { getMonthInfo, normalizeName, formatDate, getDayType, normalizeDateStr }
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
 import { recordAuditLog } from '../utils/auditLogger';
+import { approveShiftRequest } from '../utils/requestApi';
 import { AuditLogModal } from '../components/AuditLogModal';
 import * as Print from 'expo-print';
 import { generateMonthlyShifts } from '../utils/shiftEngine';
@@ -57,15 +58,20 @@ interface AdminScreenProps {
   updateStaffList: (update: any[] | ((prev: any[]) => any[])) => Promise<any>;
   patchStaff: (id: string, updates: any) => Promise<any>;
   fetchShifts?: () => Promise<void>;
+  fetchRequests?: () => Promise<void>;
+  approveRequest?: (id: string, status?: string) => Promise<void>;
   onNavigateToStaff?: () => void;
   shifts?: any[];
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
-  updateLimits, updatePassword, monthlyLimits = {}, adminPassword, onShareApp,
-  currentDate = new Date(), onAutoAssign, onUndoAutoAssign, canUndoAutoAssign, isAdminAuthenticated, setIsAdminAuthenticated, onLogout, requests = [], setRequests,
-  updateStaffList, patchStaff, fetchShifts, onNavigateToStaff, shifts = []
+  updateLimits, updatePassword, adminPassword,
+  isAdminAuthenticated, setIsAdminAuthenticated,
+  monthlyLimits, onShareApp, onLogout, currentDate = new Date(),
+  onAutoAssign, onUndoAutoAssign, canUndoAutoAssign,
+  requests = [], setRequests, updateStaffList, patchStaff,
+  fetchShifts, fetchRequests, approveRequest, onNavigateToStaff, shifts = []
 }) => {
 
   const [editStaff, setEditStaff] = useState<any>(null);
@@ -710,22 +716,17 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   const handleApproveRequest = async (req: any) => {
     try {
-      const updatedReq = { ...req, status: 'approved' };
-      setRequests(prev => prev.map(r => r.id === req.id ? updatedReq : r));
-      await cloudStorage.upsertRequests([updatedReq]);
-
-      // 監査ログ記録
-      await recordAuditLog({
-        operatorId: profile?.id,
-        operatorName: profile?.name || '管理者',
-        targetStaffId: req.staff_id || req.staffId,
-        targetStaffName: req.staff_name || req.staffName,
-        actionType: 'REQUEST_APPROVE',
-        targetDate: req.date,
-        details: `${req.staff_name || req.staffName || 'スタッフ'}さんの申請「${req.type || '申請'}」(${req.date}) を承認しました`,
-        beforeData: req,
-        afterData: updatedReq,
-      });
+      if (approveRequest) {
+        await approveRequest(req.id, 'approved');
+      } else {
+        const updated = await approveShiftRequest(req, 'approved', {
+          id: profile?.id,
+          name: profile?.name || '管理者',
+        });
+        setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
+        if (fetchShifts) await fetchShifts();
+        if (fetchRequests) await fetchRequests();
+      }
 
       Alert.alert('完了', '申請を承認しました。');
     } catch (error: any) {

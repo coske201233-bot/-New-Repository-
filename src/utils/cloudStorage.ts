@@ -329,6 +329,7 @@ export const cloudStorage = {
       
       // 2. shifts へのマッピングと保存（ペア変更は元日・希望日の両方のシフトへ自動反映）
       const shiftPayloads: any[] = [];
+      const datesToClear: { staffId?: string; staffName?: string; date: string }[] = [];
 
       requests.forEach(r => {
         const staffId = r.staff_id || r.staffId || r.userId || r.user_id;
@@ -336,8 +337,10 @@ export const cloudStorage = {
         const now = r.updatedAt || r.updated_at || new Date().toISOString();
 
         if (r.type === '公休変更' && r.details?.originalDate && r.details?.targetDate) {
+          datesToClear.push({ staffId, staffName, date: r.details.originalDate });
+          datesToClear.push({ staffId, staffName, date: r.details.targetDate });
           shiftPayloads.push({
-            id: `m-${staffId}-${r.details.originalDate}`,
+            id: `m-${staffId || staffName}-${r.details.originalDate}`,
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.originalDate,
@@ -347,7 +350,7 @@ export const cloudStorage = {
             updated_at: now
           });
           shiftPayloads.push({
-            id: `m-${staffId}-${r.details.targetDate}`,
+            id: `m-${staffId || staffName}-${r.details.targetDate}`,
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.targetDate,
@@ -357,8 +360,10 @@ export const cloudStorage = {
             updated_at: now
           });
         } else if (r.type === '休日出勤変更' && r.details?.originalDate && r.details?.targetDate) {
+          datesToClear.push({ staffId, staffName, date: r.details.originalDate });
+          datesToClear.push({ staffId, staffName, date: r.details.targetDate });
           shiftPayloads.push({
-            id: `m-${staffId}-${r.details.originalDate}`,
+            id: `m-${staffId || staffName}-${r.details.originalDate}`,
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.originalDate,
@@ -368,7 +373,7 @@ export const cloudStorage = {
             updated_at: now
           });
           shiftPayloads.push({
-            id: `m-${staffId}-${r.details.targetDate}`,
+            id: `m-${staffId || staffName}-${r.details.targetDate}`,
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.targetDate,
@@ -378,8 +383,12 @@ export const cloudStorage = {
             updated_at: now
           });
         } else if (r.type === '休日出勤＋公休変更' && r.details?.workOriginalDate && r.details?.workTargetDate && r.details?.offOriginalDate && r.details?.offTargetDate) {
+          datesToClear.push({ staffId, staffName, date: r.details.workOriginalDate });
+          datesToClear.push({ staffId, staffName, date: r.details.workTargetDate });
+          datesToClear.push({ staffId, staffName, date: r.details.offOriginalDate });
+          datesToClear.push({ staffId, staffName, date: r.details.offTargetDate });
           shiftPayloads.push({
-            id: `m-${staffId}-${r.details.workOriginalDate}`,
+            id: `m-${staffId || staffName}-${r.details.workOriginalDate}`,
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.workOriginalDate,
@@ -389,7 +398,7 @@ export const cloudStorage = {
             updated_at: now
           });
           shiftPayloads.push({
-            id: `m-${staffId}-${r.details.workTargetDate}`,
+            id: `m-${staffId || staffName}-${r.details.workTargetDate}`,
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.workTargetDate,
@@ -399,7 +408,7 @@ export const cloudStorage = {
             updated_at: now
           });
           shiftPayloads.push({
-            id: `m-${staffId}-${r.details.offOriginalDate}`,
+            id: `m-${staffId || staffName}-${r.details.offOriginalDate}`,
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.offOriginalDate,
@@ -409,7 +418,7 @@ export const cloudStorage = {
             updated_at: now
           });
           shiftPayloads.push({
-            id: `m-${staffId}-${r.details.offTargetDate}`,
+            id: `m-${staffId || staffName}-${r.details.offTargetDate}`,
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.offTargetDate,
@@ -419,6 +428,9 @@ export const cloudStorage = {
             updated_at: now
           });
         } else {
+          if (r.date) {
+            datesToClear.push({ staffId, staffName, date: r.date });
+          }
           const isMan = r.isManual !== undefined ? !!r.isManual : (r.is_manual !== undefined ? !!r.is_manual : !String(r.id || '').startsWith('auto-'));
           shiftPayloads.push({
             id: r.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined),
@@ -434,6 +446,18 @@ export const cloudStorage = {
           });
         }
       });
+
+      // 既存の古いシフト（公休など）を確実にDELETE
+      for (const item of datesToClear) {
+        if (item.date) {
+          if (item.staffId) {
+            await supabase.from('shifts').delete().eq('staff_id', item.staffId).eq('date', item.date);
+          }
+          if (item.staffName) {
+            await supabase.from('shifts').delete().eq('staff_name', item.staffName).eq('date', item.date);
+          }
+        }
+      }
       
       await this.upsertShifts(shiftPayloads);
     } catch (err) {

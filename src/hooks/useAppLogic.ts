@@ -7,7 +7,7 @@ import { useConfigData } from './useConfigData';
 import { useShiftData } from './useShiftData';
 import { cloudStorage } from '../utils/cloudStorage';
 import { supabase, isSupabaseAuthReady as isSupabaseConfigured } from '../utils/supabase';
-import { deleteShiftRequest, updateRequestStatus } from '../utils/requestApi';
+import { deleteShiftRequest, updateRequestStatus, approveShiftRequest, bulkApproveShiftRequests } from '../utils/requestApi';
 import { recordAuditLog } from '../utils/auditLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '../utils/storage';
@@ -361,33 +361,25 @@ export const useAppLogic = () => {
   const approveRequest = useCallback(async (requestId: string, status: string = 'approved') => {
     try {
       const updatedItem = req.requests.find(r => r.id === requestId);
-      if (!updatedItem) return;
+      if (!updatedItem && !requestId) return;
 
-      const newWithStatus = { ...updatedItem, status, updatedAt: new Date().toISOString() };
-      const newRequests = req.requests.map(r => r.id === requestId ? newWithStatus : r);
-      
-      req.setRequests(newRequests);
-      // V73.0: 統合保存関数を使用して両方のテーブルを更新
-      await cloudStorage.upsertRequestsAndShifts([newWithStatus]);
-      shifts.fetchShifts();
+      const operator = {
+        id: auth.profile?.id || auth.user?.id,
+        name: auth.profile?.name || '管理者'
+      };
 
-      const isReject = status === 'rejected' || status === '却下';
-      await recordAuditLog({
-        operatorId: auth.profile?.id || auth.user?.id,
-        operatorName: auth.profile?.name || '管理者',
-        targetStaffId: updatedItem.staff_id || updatedItem.staffId || updatedItem.user_id,
-        targetStaffName: updatedItem.staff_name || updatedItem.staffName,
-        actionType: isReject ? 'REQUEST_REJECT' : 'REQUEST_APPROVE',
-        targetDate: updatedItem.date,
-        details: `${updatedItem.staff_name || updatedItem.staffName || 'スタッフ'}さんの申請「${updatedItem.type || '申請'}」(${updatedItem.date}) を${isReject ? '却下' : '承認'}しました`,
-        beforeData: updatedItem,
-        afterData: newWithStatus
-      });
+      await approveShiftRequest(updatedItem || requestId, status, operator);
+
+      // フロントエンド状態（State）の即時同期
+      await Promise.all([
+        shifts.fetchShifts(),
+        req.fetchRequests()
+      ]);
     } catch (e) {
       console.error('Approve/Reject request error:', e);
       throw e;
     }
-  }, [req.requests, req.setRequests, auth.profile, auth.user]);
+  }, [req.requests, req.fetchRequests, shifts.fetchShifts, auth.profile, auth.user]);
 
   const handleBulkApprove = useCallback(async (ids: string[]) => {
     try {
@@ -395,48 +387,25 @@ export const useAppLogic = () => {
       const cleanIds = ids.filter(Boolean).map(id => String(id).replace(/['"]/g, '').trim()).filter(id => id.length > 0);
       if (cleanIds.length === 0) return;
 
-      const { error } = await supabase
-        .from('requests')
-        .update({ status: 'approved' })
-        .in('id', cleanIds);
+      const operator = {
+        id: auth.profile?.id || auth.user?.id,
+        name: auth.profile?.name || '管理者'
+      };
 
-      if (error) throw error;
+      await bulkApproveShiftRequests(cleanIds, operator);
+
+      // フロントエンド状態（State）の即時同期
+      await Promise.all([
+        shifts.fetchShifts(),
+        req.fetchRequests()
+      ]);
 
       Alert.alert('完了', '承認が完了しました');
-
-      const now = new Date().toISOString();
-      const newRequests = req.requests.map(r => {
-        if (cleanIds.includes(String(r.id).replace(/['"]/g, '').trim())) {
-          return { ...r, status: 'approved', updatedAt: now };
-        }
-        return r;
-      });
-      req.setRequests(newRequests);
-
-      // V73.0: shiftsテーブルも一括更新して不整合を防止
-      const approvedItems = newRequests.filter(r => cleanIds.includes(String(r.id).replace(/['"]/g, '').trim()));
-      await cloudStorage.upsertRequestsAndShifts(approvedItems);
-      shifts.fetchShifts();
-
-      // 監査ログの一括記録
-      for (const r of approvedItems) {
-        await recordAuditLog({
-          operatorId: auth.profile?.id || auth.user?.id,
-          operatorName: auth.profile?.name || '管理者',
-          targetStaffId: r.staff_id || r.staffId || r.user_id,
-          targetStaffName: r.staff_name || r.staffName,
-          actionType: 'REQUEST_APPROVE',
-          targetDate: r.date,
-          details: `${r.staff_name || r.staffName || 'スタッフ'}さんの申請「${r.type}」(${r.date}) を一括承認しました`,
-          beforeData: { status: 'pending' },
-          afterData: r
-        });
-      }
     } catch (e: any) {
       console.error('Bulk approve error:', e);
       Alert.alert('エラー', 'エラー: ' + e.message);
     }
-  }, [req.requests, req.setRequests, auth.profile, auth.user]);
+  }, [shifts.fetchShifts, req.fetchRequests, auth.profile, auth.user]);
 
   const cancelRequest = useCallback(async (requestId: string) => {
     if (!requestId) {
