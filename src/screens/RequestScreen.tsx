@@ -20,9 +20,10 @@ interface RequestScreenProps {
   isAdminAuthenticated: boolean;
   onForceCloudSync?: () => Promise<boolean>;
   onSubmitRequest?: (request: any) => Promise<boolean>;
+  shifts?: any[];
 }
 
-export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setRequests, onDeleteRequest, approveRequest, profile, isAdminAuthenticated, onForceCloudSync, onSubmitRequest }) => {
+export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setRequests, onDeleteRequest, approveRequest, profile, isAdminAuthenticated, onForceCloudSync, onSubmitRequest, shifts = [] }) => {
   const isManager = checkIsAdmin(undefined, profile) || isAdminAuthenticated;
   const [showForm, setShowForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -776,6 +777,17 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                 const dateObj = new Date(d.dateStr.replace(/-/g, '/'));
                 const isSat = dateObj.getDay() === 6;
 
+                // 現在のシフト状態（shiftsテーブル）を判定
+                const pId = profile?.id || profile?.userId || profile?.user_id;
+                const pName = profile?.name;
+                const currentShift = (shifts || []).find((s: any) => {
+                  if (s.date !== d.dateStr) return false;
+                  const sId = s.staff_id || s.staffId || s.userId || s.user_id;
+                  const sName = s.staff_name || s.staffName;
+                  return (pId && sId === pId) || (pName && sName === pName);
+                });
+                const isCurrentOff = currentShift ? (currentShift.type === '公休') : (d.isH || dateObj.getDay() === 0 || isSat);
+
                 return (
                   <TouchableOpacity
                     key={d.dateStr}
@@ -788,6 +800,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                       borderRadius: 8,
                       backgroundColor: isSelected ? COLORS.primary : 'transparent',
                       opacity: isAllowed ? 1 : 0.25,
+                      position: 'relative',
                     }}
                     onPress={() => {
                       if (!isAllowed) return;
@@ -808,6 +821,9 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                     >
                       {d.day}
                     </ThemeText>
+                    {isCurrentOff && !isSelected && (
+                      <View style={{ position: 'absolute', bottom: 3, width: 4, height: 4, borderRadius: 2, backgroundColor: '#f87171' }} />
+                    )}
                   </TouchableOpacity>
                 );
               })}

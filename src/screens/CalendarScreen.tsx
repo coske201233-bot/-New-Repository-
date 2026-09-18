@@ -125,10 +125,10 @@ export const CalendarScreen: React.FC<any> = ({
 
   // [V55.0] PERFECT DATA SYNC: 全てのスタッフで共通の重複排除・優先順位ロジック
   const requestMap = React.useMemo(() => {
-    // [STRICT FILTER] 真実のソースである requests テーブルから却下・削除済みのIDを抽出
+    // [STRICT FILTER] 真実のソースである requests テーブルから却下・削除・無効化（superseded）済みのIDを抽出
     const rejectedOrDeletedIds = new Set(
       (requests || [])
-        .filter(r => r && (r.status === 'rejected' || r.status === '却下' || r.status === 'deleted' || r.status === '削除'))
+        .filter(r => r && (r.status === 'rejected' || r.status === '却下' || r.status === 'deleted' || r.status === '削除' || r.status === 'superseded'))
         .map(r => String(r.id))
     );
 
@@ -145,9 +145,9 @@ export const CalendarScreen: React.FC<any> = ({
         return false;
       }
 
-      // 1. レコード自体のステータスが却下・削除の場合は除外
-      if (r.status === 'rejected' || r.status === '却下' || r.status === 'deleted' || r.status === '削除') return false;
-      // 2. requestsテーブル側で却下・削除されているIDを持つレコードは、shifts側の残骸であっても除外
+      // 1. レコード自体のステータスが却下・削除・無効化（superseded）の場合は除外
+      if (r.status === 'rejected' || r.status === '却下' || r.status === 'deleted' || r.status === '削除' || r.status === 'superseded') return false;
+      // 2. requestsテーブル側で却下・削除・無効化されているIDを持つレコードは、shifts側の残骸であっても除外
       if (rejectedOrDeletedIds.has(String(r.id))) return false;
       return true;
     });
@@ -165,7 +165,7 @@ export const CalendarScreen: React.FC<any> = ({
     };
 
     allData.forEach((r: any) => {
-      if (!r || !r.date || r.status === 'deleted' || r.status === '削除') return;
+      if (!r || !r.date || r.status === 'deleted' || r.status === '削除' || r.status === 'superseded') return;
       
       const dateKey = normalizeDate(String(r.date));
       if (!dateKey) return;

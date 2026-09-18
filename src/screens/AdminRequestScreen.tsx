@@ -91,6 +91,25 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
     }
   };
 
+  const handleUndoApprove = async (id: string) => {
+    if (Platform.OS === 'web') {
+      const confirmOk = window.confirm("この申請の承認を取り消しますか？\n（シフトが承認前の元の状態に復元されます）");
+      if (!confirmOk) return;
+    }
+
+    try {
+      await approveRequest(id, 'pending');
+      if (Platform.OS === 'web') {
+        window.alert("承認を取り消しました（シフトが元の状態に復元されました）");
+      } else {
+        Alert.alert("完了", "承認を取り消しました（シフトが元の状態に復元されました）");
+      }
+    } catch (err: any) {
+      if (Platform.OS === 'web') window.alert("取消エラー: " + err.message);
+      else Alert.alert("エラー", err.message);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -234,7 +253,7 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
                 ) : (
                   <TouchableOpacity 
                     style={[styles.actionBtn, styles.undoBtn]} 
-                    onPress={() => approveRequest(item.id, 'pending')}
+                    onPress={() => handleUndoApprove(item.id)}
                   >
                     <ThemeText variant="caption" color={COLORS.textSecondary}>承認を戻す</ThemeText>
                   </TouchableOpacity>
