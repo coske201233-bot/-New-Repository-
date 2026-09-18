@@ -336,11 +336,13 @@ export const cloudStorage = {
         const staffName = r.staff_name || r.staffName;
         const now = r.updatedAt || r.updated_at || new Date().toISOString();
 
+        const makeShiftId = () => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : undefined);
+
         if (r.type === '公休変更' && r.details?.originalDate && r.details?.targetDate) {
           datesToClear.push({ staffId, staffName, date: r.details.originalDate });
           datesToClear.push({ staffId, staffName, date: r.details.targetDate });
           shiftPayloads.push({
-            id: `m-${staffId || staffName}-${r.details.originalDate}`,
+            id: makeShiftId(),
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.originalDate,
@@ -350,7 +352,7 @@ export const cloudStorage = {
             updated_at: now
           });
           shiftPayloads.push({
-            id: `m-${staffId || staffName}-${r.details.targetDate}`,
+            id: makeShiftId(),
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.targetDate,
@@ -363,7 +365,7 @@ export const cloudStorage = {
           datesToClear.push({ staffId, staffName, date: r.details.originalDate });
           datesToClear.push({ staffId, staffName, date: r.details.targetDate });
           shiftPayloads.push({
-            id: `m-${staffId || staffName}-${r.details.originalDate}`,
+            id: makeShiftId(),
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.originalDate,
@@ -373,7 +375,7 @@ export const cloudStorage = {
             updated_at: now
           });
           shiftPayloads.push({
-            id: `m-${staffId || staffName}-${r.details.targetDate}`,
+            id: makeShiftId(),
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.targetDate,
@@ -388,7 +390,7 @@ export const cloudStorage = {
           datesToClear.push({ staffId, staffName, date: r.details.offOriginalDate });
           datesToClear.push({ staffId, staffName, date: r.details.offTargetDate });
           shiftPayloads.push({
-            id: `m-${staffId || staffName}-${r.details.workOriginalDate}`,
+            id: makeShiftId(),
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.workOriginalDate,
@@ -398,7 +400,7 @@ export const cloudStorage = {
             updated_at: now
           });
           shiftPayloads.push({
-            id: `m-${staffId || staffName}-${r.details.workTargetDate}`,
+            id: makeShiftId(),
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.workTargetDate,
@@ -408,7 +410,7 @@ export const cloudStorage = {
             updated_at: now
           });
           shiftPayloads.push({
-            id: `m-${staffId || staffName}-${r.details.offOriginalDate}`,
+            id: makeShiftId(),
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.offOriginalDate,
@@ -418,7 +420,7 @@ export const cloudStorage = {
             updated_at: now
           });
           shiftPayloads.push({
-            id: `m-${staffId || staffName}-${r.details.offTargetDate}`,
+            id: makeShiftId(),
             staff_id: staffId,
             staff_name: staffName,
             date: r.details.offTargetDate,
@@ -432,8 +434,9 @@ export const cloudStorage = {
             datesToClear.push({ staffId, staffName, date: r.date });
           }
           const isMan = r.isManual !== undefined ? !!r.isManual : (r.is_manual !== undefined ? !!r.is_manual : !String(r.id || '').startsWith('auto-'));
+          const isValidUuid = r.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(r.id);
           shiftPayloads.push({
-            id: r.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined),
+            id: isValidUuid ? r.id : makeShiftId(),
             staff_id: staffId,
             staff_name: staffName,
             date: r.date,

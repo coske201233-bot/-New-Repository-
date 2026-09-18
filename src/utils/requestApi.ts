@@ -145,9 +145,9 @@ export const approveShiftRequest = async (
     details?: any;
   }) => {
     if (!payload.date) return;
-    const shiftId = `m-${targetStaffId || targetStaffName}-${payload.date}`;
+
+    // UUIDエラーを避けるため、合成文字列IDは使わず有効なUUIDを生成またはDB自動生成に任せる
     const shiftData: any = {
-      id: shiftId,
       staff_id: targetStaffId,
       staff_name: targetStaffName,
       date: payload.date,
@@ -158,9 +158,18 @@ export const approveShiftRequest = async (
       details: payload.details,
       created_at: now
     };
-    const { error: shiftErr } = await supabase.from('shifts').upsert([shiftData], { onConflict: 'id' });
+
+    // 環境に応じて crypto.randomUUID() を設定、または insert 実行
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      shiftData.id = crypto.randomUUID();
+    }
+
+    const { error: shiftErr } = await supabase
+      .from('shifts')
+      .insert([shiftData]);
+
     if (shiftErr) {
-      console.error('shifts upsert error in approveShiftRequest:', shiftErr);
+      console.error('shifts insert error in approveShiftRequest:', shiftErr);
       throw shiftErr;
     }
   };
