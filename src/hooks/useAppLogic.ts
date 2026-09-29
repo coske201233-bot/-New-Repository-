@@ -294,7 +294,7 @@ export const useAppLogic = () => {
         status: newRequest.status
       });
 
-      // 直接Supabaseに挿入
+      // 直接Supabaseに挿入（未承認 status: 'pending'、is_manual: false）
       const { error } = await supabase.from('requests').insert([
         {
           id: newRequest.id,
@@ -304,6 +304,7 @@ export const useAppLogic = () => {
           date: newRequest.date,
           type: newRequest.type,
           status: newRequest.status,
+          is_manual: false,
           hours: newRequest.hours, // [STRICT REFACTOR] 専用カラムへ保存
           reason: newRequest.reason,
           details: newRequest.details,
@@ -313,28 +314,8 @@ export const useAppLogic = () => {
       
       if (error) throw error;
       
-      // 2. shiftsテーブルも更新（V73.0 整合性確保）
-      const shiftPayload = {
-        id: newRequest.id,
-        staff_id: trueStaffId, // [V76.3] Strict UUID
-        staff_name: officialName,
-        date: newRequest.date,
-        type: newRequest.type,
-        status: newRequest.status,
-        is_manual: true,
-        details: newRequest.details,
-        created_at: now
-      };
-      
-      // cloudStorage.upsertShifts 自体の中でエラーが throw されるため、
-      // ここで await するだけで失敗時は catch ブロックへ飛びます。
-      await cloudStorage.upsertShifts([shiftPayload]);
-
-      // 【重要】DB保存が成功した場合のみ、ローカルステートを更新
-      req.setRequests(prev => [...prev, newRequest]);
-      
-      // 非同期で再取得
-      shifts.fetchShifts(); 
+      // 【重要】DB保存が成功した場合のみ、ローカルステートを更新（shiftsテーブルへは管理者が承認した時のみ反映）
+      req.setRequests(prev => [...prev, newRequest]); 
 
       // 監査ログの記録
       await recordAuditLog({

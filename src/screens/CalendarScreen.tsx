@@ -125,10 +125,15 @@ export const CalendarScreen: React.FC<any> = ({
 
   // [V55.0] PERFECT DATA SYNC: 全てのスタッフで共通の重複排除・優先順位ロジック
   const requestMap = React.useMemo(() => {
-    // [STRICT FILTER] 真実のソースである requests テーブルから却下・削除・無効化（superseded）済みのIDを抽出
-    const rejectedOrDeletedIds = new Set(
+    // [STRICT FILTER] requests テーブルから却下・削除・無効化・未承認（pending）のIDを抽出
+    const pendingOrRejectedOrDeletedIds = new Set(
       (requests || [])
-        .filter(r => r && (r.status === 'rejected' || r.status === '却下' || r.status === 'deleted' || r.status === '削除' || r.status === 'superseded'))
+        .filter(r => r && (
+          r.status === 'pending' || r.status === '申請中' ||
+          r.status === 'rejected' || r.status === '却下' || 
+          r.status === 'deleted' || r.status === '削除' || 
+          r.status === 'superseded'
+        ))
         .map(r => String(r.id))
     );
 
@@ -145,10 +150,15 @@ export const CalendarScreen: React.FC<any> = ({
         return false;
       }
 
-      // 1. レコード自体のステータスが却下・削除・無効化（superseded）の場合は除外
-      if (r.status === 'rejected' || r.status === '却下' || r.status === 'deleted' || r.status === '削除' || r.status === 'superseded') return false;
-      // 2. requestsテーブル側で却下・削除・無効化されているIDを持つレコードは、shifts側の残骸であっても除外
-      if (rejectedOrDeletedIds.has(String(r.id))) return false;
+      // 1. レコード自体のステータスが申請中（pending）・却下・削除・無効化（superseded）の場合はカレンダーから除外
+      if (
+        r.status === 'pending' || r.status === '申請中' ||
+        r.status === 'rejected' || r.status === '却下' || 
+        r.status === 'deleted' || r.status === '削除' || 
+        r.status === 'superseded'
+      ) return false;
+      // 2. requestsテーブル側で申請中・却下・削除・無効化されているIDを持つレコードは、shifts側の残骸であっても除外
+      if (pendingOrRejectedOrDeletedIds.has(String(r.id))) return false;
       return true;
     });
 
@@ -165,7 +175,7 @@ export const CalendarScreen: React.FC<any> = ({
     };
 
     allData.forEach((r: any) => {
-      if (!r || !r.date || r.status === 'deleted' || r.status === '削除' || r.status === 'superseded') return;
+      if (!r || !r.date || r.status === 'pending' || r.status === '申請中' || r.status === 'deleted' || r.status === '削除' || r.status === 'superseded') return;
       
       const dateKey = normalizeDate(String(r.date));
       if (!dateKey) return;
@@ -311,12 +321,11 @@ export const CalendarScreen: React.FC<any> = ({
           if (t === '出張') return false;
           if (t === '出勤' || t === '日勤' || t === '特別出勤' || t === 'カスタム') return true; 
           if (t !== '出張' && (singleReq?.customType || singleReq?.details?.customType || singleReq?.details?.isCustomWork)) return true;
-          // 🚨 【最終解決】「時」が含まれていても、承認済み(approved)または申請中(pending)でなければカウントしない
+          // 🚨 「時」が含まれていても、承認済み(approved)でなければカウントしない
           if (t.includes('時')) {
             if (!singleReq) return false;
             const isApproved = singleReq.status === 'approved' || singleReq.status === '承認' || singleReq.is_manual === true || singleReq.isManual === true || singleReq.details?.status === 'approved' || singleReq.details?.status === '承認';
-            const isPending = !isApproved && (singleReq.status === 'pending' || singleReq.status === '申請中' || singleReq.details?.status === 'pending' || singleReq.details?.status === '申請中');
-            return isApproved || isPending;
+            return isApproved;
           }
           if (t.includes('振')) return true; 
           if (t.includes('午前休') || t.includes('午後休')) return true;
@@ -367,18 +376,12 @@ export const CalendarScreen: React.FC<any> = ({
         const approvedReqs = userRequests.filter(r => {
           return r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true || r.details?.status === 'approved' || r.details?.status === '承認';
         });
-        const pendingReq = userRequests.find(r => {
-          const isApp = r.status === 'approved' || r.status === '承認' || r.is_manual === true || r.isManual === true || r.details?.status === 'approved' || r.details?.status === '承認';
-          return !isApp && (r.status === 'pending' || r.status === '申請中' || r.details?.status === 'pending' || r.details?.status === '申請中');
-        });
 
         let totalLeaveHours = 0;
         if (approvedReqs.length > 0) {
           approvedReqs.forEach(r => {
             totalLeaveHours += getLeaveHoursOfRequest(r);
           });
-        } else if (pendingReq) {
-          totalLeaveHours = getLeaveHoursOfRequest(pendingReq);
         }
 
         const maxLimit = isAssistant ? 7.5 : 7.75;
@@ -403,18 +406,8 @@ export const CalendarScreen: React.FC<any> = ({
           } else {
             off.push({ staff, type: '公休', requestId: `auto-${staff.id}`, isManual: false, isHomeVisit, isAssistant, status: 'approved' });
           }
-        } else if (pendingReq) {
-          const isPendingOff = isOffType(pendingReq.type) || (pendingReq.type === '出張' && getLeaveHoursOfRequest(pendingReq) >= maxLimit);
-          const itemPendingH = (pendingReq.type === '出張')
-            ? (parseFloat(String(pendingReq.hours ?? pendingReq.details?.duration ?? pendingReq.details?.hours)) || totalLeaveHours || (isAssistant ? 7.5 : 7.75))
-            : totalLeaveHours;
-          if (isFullDayLeave || isPendingOff) {
-            off.push({ staff, type: pendingReq.type, customType: pendingReq.customType || pendingReq.details?.customType, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: itemPendingH, details: pendingReq.details, rawItem: pendingReq });
-          } else {
-            working.push({ staff, type: pendingReq.type, customType: pendingReq.customType || pendingReq.details?.customType, requestId: pendingReq.id, isManual: true, isHomeVisit, isAssistant, status: 'pending', hours: itemPendingH, details: pendingReq.details, rawItem: pendingReq });
-          }
         } else {
-          // [V54.9] デフォルトロジック：平日は出勤、休日は公休
+          // [V54.9] デフォルトロジック：未承認申請（pending）は反映せず、平日は出勤、休日は公休
           const isScheduledToWork = dayType === 'weekday';
           
           if (isScheduledToWork) {
@@ -425,17 +418,14 @@ export const CalendarScreen: React.FC<any> = ({
         }
       });
 
-      // 🚨 【完全勝利・最終防衛線】
-      // 画面にデータを引き渡す直前で、承認(approved)または申請中(pending)ではないゴミデータを配列から物理的に消去する
+      // 承認(approved)または確定済みのデータのみをカレンダーに渡す（未承認 pending は完全除外）
       const cleanWorking = working.filter((item: any) => {
         const isApp = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true || item.details?.status === 'approved' || item.details?.status === '承認';
-        const isPend = !isApp && (item.status === 'pending' || item.status === '申請中' || item.details?.status === 'pending' || item.details?.status === '申請中');
-        return isApp || isPend;
+        return isApp;
       });
       const cleanOff = off.filter((item: any) => {
         const isApp = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true || item.details?.status === 'approved' || item.details?.status === '承認';
-        const isPend = !isApp && (item.status === 'pending' || item.status === '申請中' || item.details?.status === 'pending' || item.details?.status === '申請中');
-        return isApp || isPend;
+        return isApp;
       });
 
       return { working: cleanWorking, off: cleanOff };

@@ -359,18 +359,18 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   </View>
                   <View style={[
                     styles.statusBadge, 
-                    { backgroundColor: (item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true) ? 'rgba(34, 197, 94, 0.1)' : 'rgba(234, 179, 8, 0.1)' }
+                    { backgroundColor: (item.status === 'approved' || item.status === '承認') ? 'rgba(34, 197, 94, 0.1)' : 'rgba(234, 179, 8, 0.1)' }
                   ]}>
-                    {(item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true) ? (
+                    {(item.status === 'approved' || item.status === '承認') ? (
                       <CheckCircle2 size={14} color="#22c55e" />
                     ) : (
                       <AlertCircle size={14} color="#eab308" />
                     )}
                     <ThemeText 
                       variant="caption" 
-                      style={{ color: (item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true) ? '#22c55e' : '#eab308', marginLeft: 4 }}
+                      style={{ color: (item.status === 'approved' || item.status === '承認') ? '#22c55e' : '#eab308', marginLeft: 4 }}
                     >
-                      {(item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true) ? '承認済み' : '承認待ち'}
+                      {(item.status === 'approved' || item.status === '承認') ? '承認済み' : '承認待ち'}
                     </ThemeText>
                   </View>
                 </View>
@@ -401,7 +401,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
 
                 <View style={styles.cardActions}>
                   {(() => {
-                    const isApproved = item.status === 'approved' || item.status === '承認' || item.is_manual === true || item.isManual === true;
+                    const isApproved = item.status === 'approved' || item.status === '承認';
                     const isPending = !isApproved && (item.status === 'pending' || item.status === '申請中' || !item.status);
                     return (
                       <>
