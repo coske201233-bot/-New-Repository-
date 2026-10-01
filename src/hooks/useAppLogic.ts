@@ -39,6 +39,11 @@ export const useAppLogic = () => {
     };
   }, [req.fetchRequests, shifts.fetchShifts]);
 
+  const isSyncingRef = React.useRef(isSyncing);
+  React.useEffect(() => {
+    isSyncingRef.current = isSyncing;
+  }, [isSyncing]);
+
   const loadedUserIdRef = React.useRef<string | null>(null);
 
   // 認証セッション解決時・ログイン成功（auth.user?.id変化）時のデータ取得フロー
@@ -608,7 +613,7 @@ export const useAppLogic = () => {
     handleForceSave
   }), [handleForceCloudSync, handleForceSave]);
 
-  // [V76.6] リアルタイム同期設定（ループ防止ガード付き）
+  // [V76.6] リアルタイム同期設定（常時接続・ループ防止ガード付き）
   useEffect(() => {
     if (!isInitialized) return;
     
@@ -617,7 +622,7 @@ export const useAppLogic = () => {
       const { eventType, table } = payload;
       
       // 保存処理中（自分が更新中）は再取得をスキップしてループを防止
-      if (isSyncing) {
+      if (isSyncingRef.current) {
         return;
       }
 
@@ -626,7 +631,7 @@ export const useAppLogic = () => {
         debounceTimer = setTimeout(() => {
           fetchersRef.current.fetchRequests();
           fetchersRef.current.fetchShifts();
-        }, 500);
+        }, 300);
       }
     });
     
@@ -634,7 +639,7 @@ export const useAppLogic = () => {
       clearTimeout(debounceTimer);
       cloudStorage.unsubscribe(channel);
     };
-  }, [isInitialized, isSyncing]);
+  }, [isInitialized]);
 
   const isAppReady = isInitialized && auth.isAuthReady;
 

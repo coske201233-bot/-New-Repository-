@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, ScrollView, SafeAreaView, TouchableOpacity, Modal, Platform, ActivityIndicator, Animated } from 'react-native';
+import { StyleSheet, View, ScrollView, SafeAreaView, TouchableOpacity, Modal, Platform, ActivityIndicator, Animated, AppState, AppStateStatus } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
@@ -31,13 +31,14 @@ interface HomeScreenProps {
   shifts?: any[];
   isSyncing?: boolean;
   isLoadingShifts?: boolean;
+  fetchRequests?: () => Promise<void>;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ 
   onNavigateToStaff, staffList, requests, weekdayLimit,
   saturdayLimit, sundayLimit, publicHolidayLimit, monthlyLimits, staffViewMode = false,
   onForceCloudSync, profile, isAdminAuthenticated, onOpenRequests, onLogout,
-  isInitialized, shifts, isSyncing, isLoadingShifts
+  isInitialized, shifts, isSyncing, isLoadingShifts, fetchRequests
 }) => {
   const isUserAdmin = checkIsAdmin(undefined, profile) || !!isAdminAuthenticated;
 
@@ -54,6 +55,44 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       useNativeDriver: true,
     }).start();
   }, []);
+
+  // 💡 ホーム画面表示時、および定期・フォーカス復帰時にサイレントで requests データをリフェッチ（鮮度保証）
+  useEffect(() => {
+    if (!fetchRequests) return;
+
+    // 1. マウント時にサイレント取得
+    fetchRequests().catch(err => console.warn('[HomeScreen] Initial fetchRequests error:', err));
+
+    // 2. 定期同期（60秒ごと）
+    const interval = setInterval(() => {
+      fetchRequests().catch(err => console.warn('[HomeScreen] Interval fetchRequests error:', err));
+    }, 60000);
+
+    // 3. ブラウザタブのフォーカス復帰（Web環境）
+    const handleVisibilityChange = () => {
+      if (Platform.OS === 'web' && typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchRequests().catch(err => console.warn('[HomeScreen] Visibility fetchRequests error:', err));
+      }
+    };
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
+    // 4. アプリのアクティブ復帰（ネイティブ環境）
+    const appStateSub = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active') {
+        fetchRequests().catch(err => console.warn('[HomeScreen] AppState active fetchRequests error:', err));
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      appStateSub.remove();
+    };
+  }, [fetchRequests]);
 
   // シニアアーキテクト指令: 厳格な配列検証と防弾レンダリング (VERSION 43.0)
   const safeStaff = Array.isArray(staffList) ? staffList : [];

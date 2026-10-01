@@ -178,7 +178,7 @@ export default function App() {
       case 'requests': return <RequestScreen {...commonProps} />;
       case 'staff': return <StaffScreen {...commonProps} isPrivileged={isEffectiveAdmin} isAdminAuthenticated={isEffectiveAdmin} />;
       case 'admin': return <AdminScreen onNavigateToStaff={() => setCurrentTab('staff')} {...commonProps} />;
-      case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={approveRequest} handleBulkApprove={handleBulkApprove} deleteRequest={onDeleteRequest} handleReject={handleReject} />;
+      case 'adminRequests': return <AdminRequestScreen onBack={() => setCurrentTab('admin')} requests={requests} approveRequest={approveRequest} handleBulkApprove={handleBulkApprove} deleteRequest={onDeleteRequest} handleReject={handleReject} fetchRequests={fetchRequests} />;
       case 'qrShare': return <QrShareScreen onBack={() => setCurrentTab('admin')} />;
       default: return <HomeScreen onNavigateToStaff={handleNavigateToStaff} {...commonProps} />;
     }

@@ -1,9 +1,9 @@
-import React, { useState, useMemo } from 'react';
-import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { StyleSheet, View, SafeAreaView, ScrollView, TouchableOpacity, Alert, Platform, ActivityIndicator } from 'react-native';
 import { ThemeText } from '../components/ThemeText';
 import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
-import { ClipboardList, CheckCircle2, AlertCircle, Clock, Calendar, User, Search, Filter, ChevronLeft } from 'lucide-react-native';
+import { ClipboardList, CheckCircle2, AlertCircle, Clock, Calendar, User, Search, Filter, ChevronLeft, RefreshCw } from 'lucide-react-native';
 import { formatDate } from '../utils/dateUtils';
 import { supabase } from '../utils/supabase';
 
@@ -14,12 +14,34 @@ interface AdminRequestScreenProps {
   deleteRequest: (id: string) => void;
   handleReject: (id: string) => Promise<void>;
   onBack: () => void;
+  fetchRequests?: () => Promise<void>;
 }
 
 export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({ 
-  requests, approveRequest, handleBulkApprove, deleteRequest, handleReject, onBack 
+  requests, approveRequest, handleBulkApprove, deleteRequest, handleReject, onBack, fetchRequests 
 }) => {
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved'>('pending');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // 画面表示時にサイレントで最新データを取得（データ鮮度保証）
+  useEffect(() => {
+    if (fetchRequests) {
+      fetchRequests().catch(err => console.warn('[AdminRequestScreen] Auto fetchRequests error:', err));
+    }
+  }, [fetchRequests]);
+
+  const handleRefresh = async () => {
+    if (!fetchRequests || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await fetchRequests();
+    } catch (err: any) {
+      console.error('[AdminRequestScreen] Manual refresh error:', err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   
   const filteredRequests = useMemo(() => {
     let list = requests.filter(r => r && r.type !== '出勤' && r.type !== '公休' && r.status !== 'deleted' && r.status !== '削除' && r.status !== 'rejected' && r.status !== '却下');
@@ -117,7 +139,18 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
           <ChevronLeft color={COLORS.text} size={24} />
         </TouchableOpacity>
         <ThemeText variant="h1" style={{ flex: 1, textAlign: 'center' }}>申請一覧・承認</ThemeText>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity 
+          onPress={handleRefresh} 
+          disabled={isRefreshing}
+          style={styles.refreshBtn}
+          activeOpacity={0.7}
+        >
+          {isRefreshing ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : (
+            <RefreshCw size={20} color={COLORS.primary} />
+          )}
+        </TouchableOpacity>
       </View>
 
       <View style={styles.filterBar}>
@@ -318,4 +351,12 @@ const styles = StyleSheet.create({
   rejectBtn: { backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)' },
   undoBtn: { backgroundColor: 'rgba(255,255,255,0.05)' },
   emptyState: { padding: 80, alignItems: 'center', justifyContent: 'center' },
+  refreshBtn: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20,
+    backgroundColor: 'rgba(56, 189, 248, 0.1)',
+  },
 });
