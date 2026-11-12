@@ -3,6 +3,124 @@ import { createClient } from '@supabase/supabase-js';
 export const config = { maxDuration: 60 };
 
 /**
+ * スタッフが休日出勤ローテーション対象かどうかを判定
+ * - 無効（退職・停止）、土日祝休み設定 (no_holiday)、訪問リハ、助手、事務 はローテーション対象外 (null)
+ * - 長期休暇・入職前・常勤・時短勤務 はローテーション順リストの対象（自動生成時は期間に応じてスキップ）
+ */
+function isStaffRotationTarget(s: any): boolean {
+  if (!s) return false;
+  const status = String(s.status || '').trim();
+  if (status === '無効') return false;
+  const noHoliday =
+    s.no_holiday === true ||
+    s.no_holiday === 'true' ||
+    s.noHoliday === true ||
+    s.holidaySetting === true;
+  if (noHoliday) return false;
+
+  const placement = String(s.placement || '').trim();
+  const profession = String(s.profession || s.jobType || s.job_type || '').trim();
+  const role = String(s.role || s.position || '').trim();
+
+  if (placement.includes('訪問リハ') || placement.includes('事務') || placement.includes('助手')) return false;
+  if (profession.includes('助手') || profession.includes('事務')) return false;
+  if (role.includes('助手')) return false;
+  return true;
+}
+
+/**
+ * ローテーション対象スタッフの rotation_order を 1, 2, 3... と歯抜けなく連番再採番し、
+ * 対象外・無効スタッフの rotation_order を null に設定して DB を更新するヘルパー
+ */
+async function reindexStaffRotationOrder(supabaseAdmin: any, preferredOrderIds?: string[]) {
+  const { data: allStaff, error: fetchErr } = await supabaseAdmin
+    .from('staff')
+    .select('*')
+    .order('rotation_order', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true });
+
+  if (fetchErr || !allStaff) {
+    console.warn('[reindexStaffRotationOrder] スタッフ一覧の取得に失敗:', fetchErr?.message);
+    return [];
+  }
+
+  const eligible: any[] = [];
+  const excluded: any[] = [];
+
+  for (const s of allStaff) {
+    if (isStaffRotationTarget(s)) {
+      eligible.push(s);
+    } else {
+      excluded.push(s);
+    }
+  }
+
+  const cleanOrderIds = Array.isArray(preferredOrderIds)
+    ? preferredOrderIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+
+  eligible.sort((a, b) => {
+    if (cleanOrderIds.length > 0) {
+      const idxA = cleanOrderIds.indexOf(String(a.id));
+      const idxB = cleanOrderIds.indexOf(String(b.id));
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+    }
+    const roA =
+      a.rotation_order !== null && a.rotation_order !== undefined && a.rotation_order !== ''
+        ? Number(a.rotation_order)
+        : 999999;
+    const roB =
+      b.rotation_order !== null && b.rotation_order !== undefined && b.rotation_order !== ''
+        ? Number(b.rotation_order)
+        : 999999;
+    if (roA !== roB) return roA - roB;
+    const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return tA - tB;
+  });
+
+  // 1. ローテーション対象スタッフを 1, 2, 3... に更新
+  for (let i = 0; i < eligible.length; i++) {
+    const desiredOrder = i + 1;
+    const staff = eligible[i];
+    if (Number(staff.rotation_order) !== desiredOrder) {
+      const { error: upErr } = await supabaseAdmin
+        .from('staff')
+        .update({ rotation_order: desiredOrder })
+        .eq('id', staff.id);
+      if (!upErr) {
+        staff.rotation_order = desiredOrder;
+      } else {
+        console.warn(`[reindexStaffRotationOrder] ${staff.name} の rotation_order 更新警告:`, upErr.message);
+      }
+    } else {
+      staff.rotation_order = desiredOrder;
+    }
+  }
+
+  // 2. ローテーション対象外・無効スタッフの rotation_order を null にクリア
+  for (const staff of excluded) {
+    if (staff.rotation_order !== null && staff.rotation_order !== undefined) {
+      const { error: upErr } = await supabaseAdmin
+        .from('staff')
+        .update({ rotation_order: null })
+        .eq('id', staff.id);
+      if (!upErr) {
+        staff.rotation_order = null;
+      } else {
+        console.warn(`[reindexStaffRotationOrder] 対象外 ${staff.name} の rotation_order クリア警告:`, upErr.message);
+      }
+    } else {
+      staff.rotation_order = null;
+    }
+  }
+
+  return [...eligible, ...excluded];
+}
+
+/**
  * 管理者専用スタッフ管理 API
  * POST /api/admin/staff
  * GET /api/admin/staff
@@ -56,7 +174,12 @@ export default async function handler(req: any, res: any) {
       : req.body || {};
   const requestedAction = String(parsedBody.action || '').toUpperCase();
 
-  if (!supabaseUrl || (!supabaseServiceKey && requestedAction !== 'UPSERT_CONFIG')) {
+  if (
+    !supabaseUrl ||
+    (!supabaseServiceKey &&
+      requestedAction !== 'UPSERT_CONFIG' &&
+      requestedAction !== 'UPDATE_ROTATION_ORDER')
+  ) {
     console.error('❌ Supabase credentials missing: Service Role Key が設定されていません。');
     return res.status(500).json({
       error: 'サーバー設定エラー: SUPABASE_SERVICE_ROLE_KEY が設定されていません。',
@@ -141,12 +264,13 @@ export default async function handler(req: any, res: any) {
       const { data: staffList, error: staffError } = await supabaseAdmin
         .from('staff')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('rotation_order', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true });
 
       if (staffError) throw staffError;
 
       // Auth ユーザー一覧も取得
-      const { data: authData, error: authListError } =
+      const { data: authData } =
         await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
 
       const authUserMap = new Map();
@@ -210,6 +334,7 @@ export default async function handler(req: any, res: any) {
             role,
             no_holiday,
             holidaySetting,
+            initial_leave_days,
           } = effectivePayload;
 
           if (!name || !email || !password) {
@@ -274,6 +399,30 @@ export default async function handler(req: any, res: any) {
           if (jobType || profession) {
             baseStaffPayload.profession = jobType || profession;
           }
+          if (initial_leave_days !== undefined && !isNaN(Number(initial_leave_days))) {
+            baseStaffPayload.initial_leave_days = Number(initial_leave_days);
+          }
+
+          // 1-3. 新規スタッフのローテーション順番 (rotation_order) を自動採番
+          // ローテーション対象スタッフの場合は現在の最大値 + 1（末尾）、対象外職種・設定の場合は null
+          const isTarget = isStaffRotationTarget(baseStaffPayload);
+          if (isTarget) {
+            const { data: currentStaffRows } = await supabaseAdmin
+              .from('staff')
+              .select('id, status, no_holiday, placement, profession, role, rotation_order');
+            let maxOrder = 0;
+            (currentStaffRows || []).forEach((row: any) => {
+              if (isStaffRotationTarget(row)) {
+                const ro = Number(row.rotation_order);
+                if (!isNaN(ro) && ro > maxOrder) {
+                  maxOrder = ro;
+                }
+              }
+            });
+            baseStaffPayload.rotation_order = maxOrder + 1;
+          } else {
+            baseStaffPayload.rotation_order = null;
+          }
 
           // 挿入試行 (カラム差異への柔軟な対応)
           let newStaff: any = null;
@@ -286,9 +435,10 @@ export default async function handler(req: any, res: any) {
             .single();
 
           if (insertErr) {
-            // もし profession カラム起因等の場合は job_type を付与または調整して再試行
+            // もし profession / initial_leave_days カラム起因等の場合は調整して再試行
             console.warn('Initial insert attempt error:', insertErr.message);
             const fallbackPayload = { ...baseStaffPayload };
+            delete fallbackPayload.initial_leave_days;
             if (jobType || profession) {
               fallbackPayload.job_type = jobType || profession;
             }
@@ -318,10 +468,16 @@ export default async function handler(req: any, res: any) {
             });
           }
 
+          // 全体の連番（1, 2, 3...）を再整備して歯抜けを防止
+          const reindexedList = await reindexStaffRotationOrder(supabaseAdmin);
+          const refreshedNewStaff =
+            reindexedList.find((s: any) => s.id === newStaff?.id) || newStaff;
+
           return res.status(201).json({
             success: true,
             message: 'スタッフおよび認証アカウントを正常に作成しました。',
-            staff: newStaff,
+            staff: refreshedNewStaff,
+            staffList: reindexedList,
             user: newAuthData.user,
           });
         }
@@ -347,6 +503,7 @@ export default async function handler(req: any, res: any) {
             leave_end_date,
             leaveStartDate,
             leaveEndDate,
+            rotation_order,
           } = effectivePayload;
 
           const targetStaffId = staffId || userId;
@@ -424,6 +581,9 @@ export default async function handler(req: any, res: any) {
           } else if (holidaySetting !== undefined) {
             staffUpdatePayload.no_holiday = !!holidaySetting;
           }
+          if (rotation_order !== undefined) {
+            staffUpdatePayload.rotation_order = rotation_order;
+          }
 
           let { data: updatedStaff, error: staffUpdateErr } = await supabaseAdmin
             .from('staff')
@@ -452,10 +612,16 @@ export default async function handler(req: any, res: any) {
             return res.status(500).json({ error: staffUpdateErr.message });
           }
 
+          // 職種・所属・土日祝休み・ステータスの変更に伴いローテーション対象状態が変わった場合も含め、連番を再整備
+          const reindexedList = await reindexStaffRotationOrder(supabaseAdmin);
+          const refreshedStaff =
+            reindexedList.find((s: any) => s.id === targetStaffId) || updatedStaff;
+
           return res.status(200).json({
             success: true,
             message: 'スタッフ情報を更新しました。',
-            staff: updatedStaff,
+            staff: refreshedStaff,
+            staffList: reindexedList,
           });
         }
 
@@ -582,9 +748,13 @@ export default async function handler(req: any, res: any) {
               }
             }
 
+            // 3. 残ったスタッフの rotation_order を 1, 2, 3... に連番再採番
+            const reindexedList = await reindexStaffRotationOrder(supabaseAdmin);
+
             return res.status(200).json({
               success: true,
-              message: 'スタッフおよび認証アカウントを完全に削除しました。',
+              message: 'スタッフおよび認証アカウントを完全に削除し、ローテーション順を再採番しました。',
+              staffList: reindexedList,
             });
 
           } else {
@@ -608,6 +778,7 @@ export default async function handler(req: any, res: any) {
               .update({
                 status: '無効',
                 is_approved: false,
+                rotation_order: null,
               })
               .or(`id.eq.${targetId},user_id.eq.${targetId}`)
               .select()
@@ -618,16 +789,40 @@ export default async function handler(req: any, res: any) {
               return res.status(500).json({ error: deactErr.message });
             }
 
+            // 残ったスタッフの rotation_order を 1, 2, 3... に連番再採番
+            const reindexedList = await reindexStaffRotationOrder(supabaseAdmin);
+
             return res.status(200).json({
               success: true,
-              message: 'スタッフを無効化（ログイン停止）しました。',
+              message: 'スタッフを無効化（ログイン停止）し、ローテーション順を再採番しました。',
               staff: updatedStaff,
+              staffList: reindexedList,
             });
           }
         }
 
         // ==========================================
-        // 5. アプリ設定の保存 (action: 'UPSERT_CONFIG')
+        // 5. ローテーション順の一括更新・再採番 (action: 'UPDATE_ROTATION_ORDER')
+        // ==========================================
+        case 'UPDATE_ROTATION_ORDER': {
+          const { orderedStaffIds } = effectivePayload || {};
+          if (!Array.isArray(orderedStaffIds)) {
+            return res.status(400).json({
+              error: 'orderedStaffIds（スタッフIDの配列）が必要です。',
+            });
+          }
+
+          const reindexedList = await reindexStaffRotationOrder(supabaseAdmin, orderedStaffIds);
+
+          return res.status(200).json({
+            success: true,
+            message: 'ローテーション順を更新しました。',
+            staffList: reindexedList,
+          });
+        }
+
+        // ==========================================
+        // 6. アプリ設定の保存 (action: 'UPSERT_CONFIG')
         // ==========================================
         case 'UPSERT_CONFIG': {
           const { key, value } = effectivePayload || {};
@@ -658,7 +853,7 @@ export default async function handler(req: any, res: any) {
 
         default:
           return res.status(400).json({
-            error: `不明なアクションです: ${currentAction}。有効なアクション: CREATE, UPDATE_INFO, UPDATE_PASSWORD, DELETE, UPSERT_CONFIG`,
+            error: `不明なアクションです: ${currentAction}。有効なアクション: CREATE, UPDATE_INFO, UPDATE_PASSWORD, DELETE, UPDATE_ROTATION_ORDER, UPSERT_CONFIG`,
           });
       }
     } catch (err: any) {

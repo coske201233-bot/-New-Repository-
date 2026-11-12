@@ -46,7 +46,9 @@ export const STAFF_MAP = {
   pin: 'pin', 
   userId: 'user_id', 
   isLocked: 'is_locked', 
-  lockedMonths: 'locked_months' 
+  lockedMonths: 'locked_months',
+  rotationOrder: 'rotation_order',
+  rotation_order: 'rotation_order'
 };
 const REQ_MAP = { staffName: 'staff_name', staffId: 'staff_id', staff_id: 'staff_id', userId: 'user_id', createdAt: 'created_at' };
 const MSG_MAP = { fromId: 'from_id', fromName: 'from_name', toId: 'to_id', createdAt: 'created_at' };
@@ -101,6 +103,8 @@ export const cloudStorage = {
           leaveStartDate: lStart,
           leave_end_date: lEnd,
           leaveEndDate: lEnd,
+          rotation_order: s.rotation_order ?? mapped.rotation_order ?? mapped.rotationOrder ?? null,
+          rotationOrder: s.rotation_order ?? mapped.rotation_order ?? mapped.rotationOrder ?? null,
         };
       });
       if (typeof window !== 'undefined' && result.length > 0) {
@@ -122,7 +126,8 @@ export const cloudStorage = {
       'id', 'name', 'placement', 'role', 'status', 'jobType', 'permissions', 
       'noHoliday', 'phone', 'password', 'createdAt', 'isApproved', 'pin',
       'isLocked', 'lockedMonths', 'initialLeaveDays', 'initial_leave_days',
-      'leaveStartDate', 'leaveEndDate', 'leave_start_date', 'leave_end_date'
+      'leaveStartDate', 'leaveEndDate', 'leave_start_date', 'leave_end_date',
+      'rotationOrder', 'rotation_order'
     ];
     const filtered = staff.map(s => {
       const obj: any = {};
@@ -147,7 +152,8 @@ export const cloudStorage = {
       'id', 'name', 'email', 'placement', 'role', 'jobType', 'status', 
       'noHoliday', 'isApproved', 'permissions', 'password', 'isLocked', 
       'lockedMonths', 'initialLeaveDays', 'initial_leave_days',
-      'leaveStartDate', 'leaveEndDate', 'leave_start_date', 'leave_end_date'
+      'leaveStartDate', 'leaveEndDate', 'leave_start_date', 'leave_end_date',
+      'rotationOrder', 'rotation_order'
     ];
     const obj: any = {};
     validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });

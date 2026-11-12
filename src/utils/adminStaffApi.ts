@@ -15,6 +15,7 @@ export interface CreateStaffParams {
   holidaySetting?: boolean;
   leave_start_date?: string | null;
   leave_end_date?: string | null;
+  rotation_order?: number | null;
 }
 
 export interface UpdateStaffParams {
@@ -33,6 +34,155 @@ export interface UpdateStaffParams {
   initial_leave_days?: number;
   no_holiday?: boolean;
   holidaySetting?: boolean;
+  rotation_order?: number | null;
+}
+
+/**
+ * スタッフが休日出勤ローテーション対象かどうかを判定
+ */
+export function isStaffRotationTarget(s: any): boolean {
+  if (!s) return false;
+  const status = String(s.status || '').trim();
+  if (status === '無効') return false;
+
+  const noHoliday =
+    s.no_holiday === true ||
+    s.no_holiday === 'true' ||
+    s.noHoliday === true ||
+    s.holidaySetting === true;
+  if (noHoliday) return false;
+
+  const placement = String(s.placement || '').trim();
+  const profession = String(s.profession || s.jobType || s.job_type || '').trim();
+  const role = String(s.role || s.position || '').trim();
+
+  if (placement.includes('訪問リハ') || placement.includes('事務') || placement.includes('助手')) return false;
+  if (profession.includes('助手') || profession.includes('事務')) return false;
+  if (role.includes('助手')) return false;
+
+  return true;
+}
+
+/**
+ * ローテーション対象外となる理由ラベルを取得（対象内の場合は null）
+ */
+export function getStaffRotationExclusionReason(s: any): string | null {
+  if (!s) return 'データなし';
+  const status = String(s.status || '').trim();
+  if (status === '無効') return '無効（退職・停止）';
+
+  const placement = String(s.placement || '').trim();
+  const profession = String(s.profession || s.jobType || s.job_type || '').trim();
+  const role = String(s.role || s.position || '').trim();
+
+  if (placement.includes('訪問リハ')) return '訪問リハ（専従・対象外）';
+  if (profession.includes('助手') || placement.includes('助手') || role.includes('助手')) return '助手（対象外）';
+  if (placement.includes('事務') || profession.includes('事務')) return '事務（対象外）';
+
+  const noHoliday =
+    s.no_holiday === true ||
+    s.no_holiday === 'true' ||
+    s.noHoliday === true ||
+    s.holidaySetting === true;
+  if (noHoliday) return '土日祝休み設定';
+
+  return null;
+}
+
+/**
+ * Supabase 上の staff テーブルの rotation_order を 1, 2, 3... と歯抜けなく再採番して同期する
+ */
+export async function reindexStaffRotationOrderInDb(preferredOrderIds?: string[]): Promise<any[]> {
+  try {
+    const { data: allStaff, error: fetchErr } = await supabase
+      .from('staff')
+      .select('*')
+      .order('rotation_order', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true });
+
+    if (fetchErr || !allStaff) {
+      console.warn('[adminStaffApi] reindexStaffRotationOrderInDb fetch warning:', fetchErr?.message);
+      return [];
+    }
+
+    const eligible: any[] = [];
+    const excluded: any[] = [];
+
+    for (const s of allStaff) {
+      if (isStaffRotationTarget(s)) {
+        eligible.push(s);
+      } else {
+        excluded.push(s);
+      }
+    }
+
+    const cleanOrderIds = Array.isArray(preferredOrderIds)
+      ? preferredOrderIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
+
+    eligible.sort((a, b) => {
+      if (cleanOrderIds.length > 0) {
+        const idxA = cleanOrderIds.indexOf(String(a.id));
+        const idxB = cleanOrderIds.indexOf(String(b.id));
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+      }
+      const roA =
+        a.rotation_order !== null && a.rotation_order !== undefined && a.rotation_order !== ''
+          ? Number(a.rotation_order)
+          : 999999;
+      const roB =
+        b.rotation_order !== null && b.rotation_order !== undefined && b.rotation_order !== ''
+          ? Number(b.rotation_order)
+          : 999999;
+      if (roA !== roB) return roA - roB;
+      const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return tA - tB;
+    });
+
+    // 1. ローテーション対象スタッフを 1, 2, 3... に連番更新
+    for (let i = 0; i < eligible.length; i++) {
+      const desiredOrder = i + 1;
+      const staff = eligible[i];
+      if (Number(staff.rotation_order) !== desiredOrder) {
+        const { error: upErr } = await supabase
+          .from('staff')
+          .update({ rotation_order: desiredOrder })
+          .eq('id', staff.id);
+        if (!upErr) {
+          staff.rotation_order = desiredOrder;
+        } else {
+          console.warn(`[adminStaffApi] Failed to update rotation_order for ${staff.name}:`, upErr.message);
+        }
+      } else {
+        staff.rotation_order = desiredOrder;
+      }
+    }
+
+    // 2. ローテーション対象外スタッフの rotation_order を null にクリア
+    for (const staff of excluded) {
+      if (staff.rotation_order !== null && staff.rotation_order !== undefined) {
+        const { error: upErr } = await supabase
+          .from('staff')
+          .update({ rotation_order: null })
+          .eq('id', staff.id);
+        if (!upErr) {
+          staff.rotation_order = null;
+        } else {
+          console.warn(`[adminStaffApi] Failed to clear rotation_order for ${staff.name}:`, upErr.message);
+        }
+      } else {
+        staff.rotation_order = null;
+      }
+    }
+
+    return [...eligible, ...excluded];
+  } catch (err) {
+    console.warn('[adminStaffApi] reindexStaffRotationOrderInDb exception:', err);
+    return [];
+  }
 }
 
 /**
@@ -48,7 +198,7 @@ export const getAuthToken = async (): Promise<string | null> => {
 
     // 2. セッション未取得または期限切れの場合は自動リフレッシュを試行
     console.warn('[adminStaffApi] Session null or expired, attempting refreshSession()...', sessionError?.message);
-    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+    const { data: refreshData } = await supabase.auth.refreshSession();
     if (refreshData?.session?.access_token) {
       console.log('✅ [adminStaffApi] Successfully refreshed auth session');
       return refreshData.session.access_token;
@@ -108,6 +258,7 @@ export async function directStaffDbUpdate(params: UpdateStaffParams) {
   if (fields.no_holiday !== undefined) updateObj.no_holiday = !!fields.no_holiday;
   else if (fields.holidaySetting !== undefined) updateObj.no_holiday = !!fields.holidaySetting;
   if (fields.initial_leave_days !== undefined) updateObj.initial_leave_days = fields.initial_leave_days;
+  if (fields.rotation_order !== undefined) updateObj.rotation_order = fields.rotation_order;
 
   console.log('🔄 [adminStaffApi] Executing direct DB update fallback for staff:', targetId, updateObj);
 
@@ -217,26 +368,37 @@ async function callAdminStaffApi(action: string, payload: any = {}, method: 'POS
 }
 
 /**
- * 1. 新規スタッフ登録 (Auth ユーザー & public.staff 同時作成)
+ * 1. 新規スタッフ登録 (Auth ユーザー & public.staff 同時作成 + ローテーション順末尾への自動追加)
  */
 export async function createStaffApi(params: CreateStaffParams) {
   console.log('🚀 [adminStaffApi] createStaffApi 呼び出し:', params);
-  return await callAdminStaffApi('CREATE', params);
+  const res = await callAdminStaffApi('CREATE', params);
+  const reindexedList = await reindexStaffRotationOrderInDb();
+  return {
+    ...res,
+    staffList: reindexedList.length > 0 ? reindexedList : res?.staffList,
+  };
 }
 
 /**
- * 2. スタッフ情報・メールアドレス変更 (Auth & staff 連動更新 + 直接DB更新フォールバック)
+ * 2. スタッフ情報・メールアドレス変更 (Auth & staff 連動更新 + ローテーション順自動再整備)
  */
 export async function updateStaffInfoApi(params: UpdateStaffParams) {
   console.log('🚀 [adminStaffApi] updateStaffInfoApi 呼び出し:', params);
   try {
-    return await callAdminStaffApi('UPDATE_INFO', params);
+    const res = await callAdminStaffApi('UPDATE_INFO', params);
+    const reindexedList = await reindexStaffRotationOrderInDb();
+    return {
+      ...res,
+      staffList: reindexedList.length > 0 ? reindexedList : res?.staffList,
+    };
   } catch (err: any) {
     console.warn('⚠️ [adminStaffApi] API call failed, attempting direct DB update fallback...', err.message);
     try {
       const res = await directStaffDbUpdate(params);
+      const reindexedList = await reindexStaffRotationOrderInDb();
       console.log('✅ [adminStaffApi] Direct DB update fallback succeeded:', res);
-      return { success: true, staff: res?.[0], isDirectUpdate: true };
+      return { success: true, staff: res?.[0], staffList: reindexedList, isDirectUpdate: true };
     } catch (dbErr: any) {
       console.error('❌ [adminStaffApi] Direct DB update also failed:', dbErr);
       throw err;
@@ -257,20 +419,50 @@ export async function updateStaffPasswordApi(staffId: string, newPassword: strin
 }
 
 /**
- * 4. スタッフの無効化（論理削除）または完全削除（物理削除）
+ * 4. スタッフの無効化（論理削除）または完全削除（物理削除） + 残りスタッフのローテーション順再採番
  */
 export async function deleteStaffApi(staffId: string, permanent: boolean = false, userId?: string) {
   const effectiveUserId = userId || staffId;
   console.log('🚀 [adminStaffApi] deleteStaffApi 呼び出し:', { staffId, permanent, userId: effectiveUserId });
-  return await callAdminStaffApi('DELETE', {
+  const res = await callAdminStaffApi('DELETE', {
     staffId,
     userId: effectiveUserId,
     permanent,
   });
+  // 無効化の場合も確実に rotation_order を null にした上で残りのスタッフを 1, 2, 3... に再採番
+  if (!permanent && staffId) {
+    try {
+      await supabase.from('staff').update({ rotation_order: null }).eq('id', staffId);
+    } catch {}
+  }
+  const reindexedList = await reindexStaffRotationOrderInDb();
+  return {
+    ...res,
+    staffList: reindexedList.length > 0 ? reindexedList : res?.staffList,
+  };
 }
 
 /**
- * 5. スタッフ一覧（Auth連携状態付き）の取得
+ * 5. ローテーション順番の一括変更・連番保存 (1, 2, 3...)
+ */
+export async function updateRotationOrderApi(orderedStaffIds: string[]) {
+  console.log('🚀 [adminStaffApi] updateRotationOrderApi 呼び出し:', orderedStaffIds);
+  // 1. まず Admin API 経由で更新を試行（未デプロイ環境等の場合はフォールバックへ）
+  try {
+    await callAdminStaffApi('UPDATE_ROTATION_ORDER', { orderedStaffIds });
+  } catch (apiErr: any) {
+    console.warn('[adminStaffApi] UPDATE_ROTATION_ORDER API fallback to direct DB reindex:', apiErr?.message);
+  }
+  // 2. 直接 Supabase の staff.rotation_order カラムを 1, 2, 3... に確実に同期更新
+  const reindexedList = await reindexStaffRotationOrderInDb(orderedStaffIds);
+  return {
+    success: true,
+    staffList: reindexedList,
+  };
+}
+
+/**
+ * 6. スタッフ一覧（Auth連携状態付き）の取得
  */
 export async function fetchAdminStaffListApi() {
   console.log('🚀 [adminStaffApi] fetchAdminStaffListApi 呼び出し');

@@ -187,8 +187,9 @@ export const generateMonthlyShifts = async (
       const start = (staff.leave_start_date || staff.leaveStartDate || '').slice(0, 7).trim();
       const end = (staff.leave_end_date || staff.leaveEndDate || '').slice(0, 7).trim();
       const isLeavePeriod = (start && end) ? (start <= monthPrefix && monthPrefix <= end) : start ? (start <= monthPrefix) : end ? (monthPrefix <= end) : true;
+      if (status === '無効' || status === '入職前') return false;
       if (status.includes('長期休暇') && isLeavePeriod) return false;
-      if (placement.includes('訪問リハ')) return false;
+      if (placement.includes('訪問リハ') || placement.includes('事務') || profession.includes('事務')) return false;
       if (profession.includes('助手')) return false;
       if (placement.includes('助手')) return false;
       if (role.includes('助手')) return false;

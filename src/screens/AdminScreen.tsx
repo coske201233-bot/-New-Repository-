@@ -18,6 +18,11 @@ import * as Print from 'expo-print';
 import { generateMonthlyShifts } from '../utils/shiftEngine';
 import { forceAppUpdate } from '../utils/appReloader';
 import { checkIsAdmin } from '../utils/authUtils';
+import {
+  isStaffRotationTarget,
+  getStaffRotationExclusionReason,
+  updateRotationOrderApi
+} from '../utils/adminStaffApi';
 import { 
   calculateRemainingLeaveHours, 
   formatRemainingLeave, 
@@ -98,6 +103,7 @@ interface AdminScreenProps {
   fetchRequests?: () => Promise<void>;
   approveRequest?: (id: string, status?: string) => Promise<void>;
   onNavigateToStaff?: () => void;
+  onForceCloudSync?: () => Promise<any>;
   shifts?: any[];
 }
 
@@ -108,7 +114,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   monthlyLimits, onShareApp, onLogout, currentDate = new Date(),
   onAutoAssign, onUndoAutoAssign, canUndoAutoAssign,
   requests = [], setRequests, updateStaffList, patchStaff,
-  fetchShifts, fetchRequests, approveRequest, onNavigateToStaff, shifts = []
+  fetchShifts, fetchRequests, approveRequest, onNavigateToStaff, onForceCloudSync, shifts = []
 }) => {
 
   const [editStaff, setEditStaff] = useState<any>(null);
@@ -142,6 +148,36 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const [selectedWeeklyMonth, setSelectedWeeklyMonth] = useState<number>((currentDate || new Date()).getMonth() + 1);
   const [selectedWeekIndex, setSelectedWeekIndex] = useState<number>(1);
   const [expandedWeeklyStaffId, setExpandedWeeklyStaffId] = useState<string | null>(null);
+
+  // 🔄 休日出勤ローテーション順番管理用ステート（すべてトップレベルに配置）
+  const [isSavingRotation, setIsSavingRotation] = useState<boolean>(false);
+  const [rotationSaveMsg, setRotationSaveMsg] = useState<string>('');
+  const [numberPickerTargetStaff, setNumberPickerTargetStaff] = useState<any>(null);
+  const [showExcludedRotationStaff, setShowExcludedRotationStaff] = useState<boolean>(true);
+
+  // 🔄 ローテーション対象スタッフ一覧（rotation_order 昇順・1始まりの連番）
+  const rotationTargetList = React.useMemo(() => {
+    if (!Array.isArray(staffList)) return [];
+    return [...staffList]
+      .filter(s => s && isStaffRotationTarget(s))
+      .sort((a, b) => {
+        const roA = a.rotation_order !== null && a.rotation_order !== undefined && a.rotation_order !== '' ? Number(a.rotation_order) : 999999;
+        const roB = b.rotation_order !== null && b.rotation_order !== undefined && b.rotation_order !== '' ? Number(b.rotation_order) : 999999;
+        if (roA !== roB) return roA - roB;
+        const tA = a.createdAt || a.created_at ? new Date(a.createdAt || a.created_at).getTime() : 0;
+        const tB = b.createdAt || b.created_at ? new Date(b.createdAt || b.created_at).getTime() : 0;
+        if (tA !== tB) return tA - tB;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+  }, [staffList]);
+
+  // 🔄 ローテーション対象外（自動割当除外）スタッフ一覧
+  const rotationExcludedList = React.useMemo(() => {
+    if (!Array.isArray(staffList)) return [];
+    return [...staffList]
+      .filter(s => s && !isStaffRotationTarget(s))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  }, [staffList]);
 
   // 全シフト＋リクエストデータ
   const allCalendarData = React.useMemo(() => {
@@ -751,6 +787,111 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   // --- Handlers ---
 
+  // 🔄 ローテーション順の連番再採番・DB保存処理
+  const persistRotationOrder = async (newOrderedTargets: any[], actionLabel?: string) => {
+    const orderedIds = newOrderedTargets.map(s => String(s.id));
+    const orderMap = new Map<string, number>();
+    orderedIds.forEach((id, idx) => orderMap.set(id, idx + 1));
+
+    // 1. ローカルステートを即時更新（1始まりの歯抜けなし連番 + 対象外は null）
+    setStaffList((prev: any[]) => {
+      if (!Array.isArray(prev)) return [];
+      const updated = prev.map(s => {
+        if (!s) return s;
+        const newOrder = orderMap.has(String(s.id)) ? orderMap.get(String(s.id))! : null;
+        return {
+          ...s,
+          rotation_order: newOrder,
+          rotationOrder: newOrder,
+        };
+      });
+      return updated.sort((a, b) => {
+        const roA = a.rotation_order !== null && a.rotation_order !== undefined ? Number(a.rotation_order) : 999999;
+        const roB = b.rotation_order !== null && b.rotation_order !== undefined ? Number(b.rotation_order) : 999999;
+        if (roA !== roB) return roA - roB;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+    });
+
+    setIsSavingRotation(true);
+    setRotationSaveMsg('🔄 ローテーション順を保存中...');
+
+    try {
+      await updateRotationOrderApi(orderedIds);
+
+      // app_config / localStorage にもバックアップ保存
+      await cloudStorage.upsertConfig('rotation_order_ids', orderedIds).catch(() => {});
+
+      if (actionLabel) {
+        await recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          actionType: 'STAFF_UPDATE',
+          details: actionLabel,
+          afterData: newOrderedTargets.map((s, idx) => ({ id: s.id, name: s.name, rotation_order: idx + 1 })),
+        });
+      }
+
+      if (onForceCloudSync) {
+        await onForceCloudSync().catch(() => {});
+      }
+
+      setRotationSaveMsg(`✅ ローテーション順（1〜${orderedIds.length}番）を保存しました`);
+      setTimeout(() => {
+        setRotationSaveMsg(prev => (prev.startsWith('✅') ? '' : prev));
+      }, 3000);
+    } catch (err: any) {
+      console.error('[AdminScreen] ローテーション順保存エラー:', err);
+      setRotationSaveMsg(`❌ 保存エラー: ${err?.message || '通信に失敗しました'}`);
+    } finally {
+      setIsSavingRotation(false);
+    }
+  };
+
+  // 🔄 上下ボタン（↑ / ↓）による順番移動
+  const handleMoveRotationStaff = async (currentIndex: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= rotationTargetList.length) return;
+
+    const newList = [...rotationTargetList];
+    const movedStaff = newList[currentIndex];
+    const swappedStaff = newList[targetIndex];
+    newList[currentIndex] = swappedStaff;
+    newList[targetIndex] = movedStaff;
+
+    await persistRotationOrder(
+      newList,
+      `休日ローテーション順を変更しました（${movedStaff?.name}: #${currentIndex + 1} → #${targetIndex + 1}）`
+    );
+  };
+
+  // 🔄 番号指定による順番変更（1始まり）
+  const handleChangeStaffRotationNumber = async (staff: any, targetOneBasedNumber: number) => {
+    if (!staff) return;
+    const currentIndex = rotationTargetList.findIndex(s => String(s.id) === String(staff.id));
+    const targetIndex = Math.max(0, Math.min(rotationTargetList.length - 1, targetOneBasedNumber - 1));
+    setNumberPickerTargetStaff(null);
+
+    if (currentIndex === -1 || currentIndex === targetIndex) return;
+
+    const newList = [...rotationTargetList];
+    const [removed] = newList.splice(currentIndex, 1);
+    newList.splice(targetIndex, 0, removed);
+
+    await persistRotationOrder(
+      newList,
+      `休日ローテーション順を番号指定で変更しました（${staff?.name}: #${currentIndex + 1} → #${targetIndex + 1}）`
+    );
+  };
+
+  // 🔄 手動での連番再採番＆クラウド同期ボタン
+  const handleSyncAndReindexRotation = async () => {
+    await persistRotationOrder(
+      rotationTargetList,
+      `休日ローテーション順（全${rotationTargetList.length}名）を再採番・同期しました`
+    );
+  };
+
   const handleApproveRequest = async (req: any) => {
     try {
       if (approveRequest) {
@@ -1231,6 +1372,277 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   )}
                 </TouchableOpacity>
               </ThemeCard>
+
+              {/* 🔄 管理者専用: 休日出勤ローテーション順番管理セクション */}
+              <View style={{ marginTop: 24 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <RefreshCw size={20} color="#38bdf8" />
+                    <ThemeText bold variant="h2">🔄 休日出勤ローテーション順番管理</ThemeText>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.rotationSyncBtn,
+                        isSavingRotation && { opacity: 0.6 },
+                      ]}
+                      onPress={handleSyncAndReindexRotation}
+                      disabled={isSavingRotation}
+                    >
+                      {isSavingRotation ? (
+                        <ActivityIndicator size="small" color="#38bdf8" />
+                      ) : (
+                        <>
+                          <Save size={14} color="#38bdf8" />
+                          <ThemeText variant="caption" bold color="#38bdf8" style={{ marginLeft: 5 }}>
+                            順番を保存・再採番
+                          </ThemeText>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                    {onNavigateToStaff && (
+                      <TouchableOpacity
+                        style={styles.rotationStaffLinkBtn}
+                        onPress={onNavigateToStaff}
+                      >
+                        <UserPlus size={14} color="#34d399" />
+                        <ThemeText variant="caption" bold color="#34d399" style={{ marginLeft: 4 }}>
+                          新規登録・削除
+                        </ThemeText>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+
+                <ThemeCard style={styles.rotationSectionCard}>
+                  <ThemeText variant="caption" color={COLORS.textSecondary} style={{ lineHeight: 18, marginBottom: 10 }}>
+                    土曜・日曜・祝日の自動割り当ては、このリストの番号順（#1 → #{rotationTargetList.length}）で前月の最終休日出勤者の直後から引き継がれます。{"\n"}
+                    番号バッジ（#1 等）をタップすると直接番号を指定して移動でき、右側の ↑ / ↓ ボタンで上下に入れ替えられます。スタッフの新規登録時は自動的に末尾へ追加され、削除・無効化時は自動的に詰められます。
+                  </ThemeText>
+
+                  {rotationSaveMsg ? (
+                    <View
+                      style={[
+                        styles.rotationMsgBanner,
+                        rotationSaveMsg.startsWith('❌')
+                          ? { backgroundColor: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.35)' }
+                          : { backgroundColor: 'rgba(16, 185, 129, 0.12)', borderColor: 'rgba(16, 185, 129, 0.35)' },
+                      ]}
+                    >
+                      <ThemeText
+                        variant="caption"
+                        bold
+                        color={rotationSaveMsg.startsWith('❌') ? '#ef4444' : '#34d399'}
+                      >
+                        {rotationSaveMsg}
+                      </ThemeText>
+                    </View>
+                  ) : null}
+
+                  {/* ローテーション対象スタッフ一覧（1〜N番） */}
+                  <View style={{ gap: 8 }}>
+                    {rotationTargetList.map((staff, idx) => {
+                      const orderNum = idx + 1;
+                      const statusStr = String(staff.status || '常勤').trim();
+                      const lStart = String(staff.leave_start_date || staff.leaveStartDate || '').slice(0, 10).trim();
+                      const lEnd = String(staff.leave_end_date || staff.leaveEndDate || '').slice(0, 10).trim();
+                      const lStartMonth = lStart.slice(0, 7);
+                      const lEndMonth = lEnd.slice(0, 7);
+                      const isCurrentMonthLeave =
+                        statusStr.includes('長期休暇') &&
+                        (lStartMonth && lEndMonth
+                          ? lStartMonth <= currentMonthStr && currentMonthStr <= lEndMonth
+                          : lStartMonth
+                          ? lStartMonth <= currentMonthStr
+                          : lEndMonth
+                          ? currentMonthStr <= lEndMonth
+                          : true);
+                      const isPreJoin = statusStr === '入職前';
+                      const isSkippedThisMonth = isCurrentMonthLeave || isPreJoin;
+
+                      return (
+                        <View
+                          key={`rot_target_${staff.id || staff.name}_${idx}`}
+                          style={[
+                            styles.rotationRow,
+                            isSkippedThisMonth && { opacity: 0.75, borderColor: 'rgba(245, 158, 11, 0.25)' },
+                          ]}
+                        >
+                          {/* 番号バッジ（タップで番号直接指定モーダルを開く） */}
+                          <TouchableOpacity
+                            style={[
+                              styles.rotationNumberBtn,
+                              isSkippedThisMonth && {
+                                backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                                borderColor: 'rgba(245, 158, 11, 0.4)',
+                              },
+                            ]}
+                            onPress={() => setNumberPickerTargetStaff({ staff, currentOrder: orderNum })}
+                            disabled={isSavingRotation}
+                          >
+                            <ThemeText
+                              bold
+                              color={isSkippedThisMonth ? '#f59e0b' : '#38bdf8'}
+                              style={{ fontSize: 13 }}
+                            >
+                              #{orderNum}
+                            </ThemeText>
+                            <ChevronDown size={11} color={isSkippedThisMonth ? '#f59e0b' : '#38bdf8'} />
+                          </TouchableOpacity>
+
+                          {/* スタッフ氏名・職種・所属・ステータスバッジ */}
+                          <View style={{ flex: 1, marginLeft: 10, marginRight: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                              <ThemeText bold style={{ fontSize: 15, color: 'white' }}>
+                                {staff.name}
+                              </ThemeText>
+                              <View style={styles.rotationMetaChip}>
+                                <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>
+                                  {staff.jobType || staff.profession || '-'}
+                                </ThemeText>
+                              </View>
+                              {staff.placement ? (
+                                <View style={styles.rotationMetaChip}>
+                                  <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>
+                                    {staff.placement}
+                                  </ThemeText>
+                                </View>
+                              ) : null}
+
+                              {/* ステータスバッジ */}
+                              {statusStr.includes('長期休暇') ? (
+                                <View style={[styles.rotationStatusBadge, { backgroundColor: 'rgba(245, 158, 11, 0.16)', borderColor: '#f59e0b' }]}>
+                                  <ThemeText variant="caption" bold color="#f59e0b" style={{ fontSize: 10 }}>
+                                    🏖️ 長期休暇{lStart || lEnd ? ` (${lStart || ''}〜${lEnd || ''})` : ''}{isCurrentMonthLeave ? '・当月スキップ' : ''}
+                                  </ThemeText>
+                                </View>
+                              ) : isPreJoin ? (
+                                <View style={[styles.rotationStatusBadge, { backgroundColor: 'rgba(168, 85, 247, 0.16)', borderColor: '#a855f7' }]}>
+                                  <ThemeText variant="caption" bold color="#a855f7" style={{ fontSize: 10 }}>
+                                    🌱 入職前（自動割当スキップ）
+                                  </ThemeText>
+                                </View>
+                              ) : statusStr === '時短勤務' ? (
+                                <View style={[styles.rotationStatusBadge, { backgroundColor: 'rgba(56, 189, 248, 0.14)', borderColor: '#38bdf8' }]}>
+                                  <ThemeText variant="caption" bold color="#38bdf8" style={{ fontSize: 10 }}>
+                                    ⏱️ 時短勤務
+                                  </ThemeText>
+                                </View>
+                              ) : (
+                                <View style={[styles.rotationStatusBadge, { backgroundColor: 'rgba(52, 211, 153, 0.12)', borderColor: 'rgba(52, 211, 153, 0.35)' }]}>
+                                  <ThemeText variant="caption" bold color="#34d399" style={{ fontSize: 10 }}>
+                                    稼働中 ({statusStr})
+                                  </ThemeText>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+
+                          {/* 上下移動ボタン (↑ / ↓) */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <TouchableOpacity
+                              style={[
+                                styles.rotationArrowBtn,
+                                (idx === 0 || isSavingRotation) && { opacity: 0.25 },
+                              ]}
+                              onPress={() => handleMoveRotationStaff(idx, 'up')}
+                              disabled={idx === 0 || isSavingRotation}
+                            >
+                              <ChevronUp size={18} color="#38bdf8" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                styles.rotationArrowBtn,
+                                (idx === rotationTargetList.length - 1 || isSavingRotation) && { opacity: 0.25 },
+                              ]}
+                              onPress={() => handleMoveRotationStaff(idx, 'down')}
+                              disabled={idx === rotationTargetList.length - 1 || isSavingRotation}
+                            >
+                              <ChevronDown size={18} color="#38bdf8" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+
+                  {/* ローテーション対象外（除外）スタッフ一覧 */}
+                  {rotationExcludedList.length > 0 && (
+                    <View style={{ marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' }}>
+                      <TouchableOpacity
+                        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}
+                        onPress={() => setShowExcludedRotationStaff(prev => !prev)}
+                        activeOpacity={0.7}
+                      >
+                        <ThemeText variant="caption" bold color={COLORS.textSecondary}>
+                          🚫 ローテーション対象外スタッフ（自動割当除外: {rotationExcludedList.length}名）
+                        </ThemeText>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11, marginRight: 4 }}>
+                            {showExcludedRotationStaff ? '閉じる' : '表示する'}
+                          </ThemeText>
+                          {showExcludedRotationStaff ? (
+                            <ChevronUp size={14} color={COLORS.textSecondary} />
+                          ) : (
+                            <ChevronDown size={14} color={COLORS.textSecondary} />
+                          )}
+                        </View>
+                      </TouchableOpacity>
+
+                      {showExcludedRotationStaff && (
+                        <View style={{ gap: 6 }}>
+                          {rotationExcludedList.map((staff, idx) => {
+                            const reason = getStaffRotationExclusionReason(staff) || '対象外';
+                            const isInactive = String(staff.status || '').trim() === '無効';
+                            return (
+                              <View
+                                key={`rot_excl_${staff.id || staff.name}_${idx}`}
+                                style={[
+                                  styles.rotationExcludedRow,
+                                  isInactive && { opacity: 0.5, borderColor: 'rgba(239, 68, 68, 0.25)' },
+                                ]}
+                              >
+                                <View style={styles.rotationExcludedBadge}>
+                                  <ThemeText variant="caption" bold color={COLORS.textSecondary} style={{ fontSize: 10 }}>
+                                    除外
+                                  </ThemeText>
+                                </View>
+                                <View style={{ flex: 1, marginLeft: 10, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                                  <ThemeText bold style={{ fontSize: 13, color: isInactive ? '#94a3b8' : 'white' }}>
+                                    {staff.name}
+                                  </ThemeText>
+                                  <View style={styles.rotationMetaChip}>
+                                    <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 10 }}>
+                                      {staff.jobType || staff.profession || '-'} / {staff.placement || '-'}
+                                    </ThemeText>
+                                  </View>
+                                </View>
+                                <View
+                                  style={[
+                                    styles.rotationStatusBadge,
+                                    isInactive
+                                      ? { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#ef4444' }
+                                      : { backgroundColor: 'rgba(148, 163, 184, 0.12)', borderColor: 'rgba(148, 163, 184, 0.35)' },
+                                  ]}
+                                >
+                                  <ThemeText
+                                    variant="caption"
+                                    bold
+                                    color={isInactive ? '#ef4444' : '#94a3b8'}
+                                    style={{ fontSize: 10 }}
+                                  >
+                                    {reason}
+                                  </ThemeText>
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </ThemeCard>
+              </View>
 
               {/* 🏢 管理者専用: 週別（平日5日間）フロア別「勤務を要しない時間」集計セクション */}
               <View style={{ marginTop: 24 }}>
@@ -2008,6 +2420,72 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         </View>
       </Modal>
 
+      {/* 🔄 ローテーション番号指定モーダル */}
+      <Modal
+        visible={!!numberPickerTargetStaff}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNumberPickerTargetStaff(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setNumberPickerTargetStaff(null)}
+        >
+          <View style={styles.pickerContainer}>
+            <View style={styles.pickerHeader}>
+              <View>
+                <ThemeText bold variant="h2">
+                  ローテーション順番の番号指定
+                </ThemeText>
+                <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 2 }}>
+                  {numberPickerTargetStaff?.staff?.name || ''} さんの移動先番号を選択（現在: #{numberPickerTargetStaff?.currentOrder || '-'}）
+                </ThemeText>
+              </View>
+              <TouchableOpacity onPress={() => setNumberPickerTargetStaff(null)}>
+                <X size={24} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {rotationTargetList.map((occupant, idx) => {
+                const targetNum = idx + 1;
+                const isCurrent = targetNum === numberPickerTargetStaff?.currentOrder;
+                return (
+                  <TouchableOpacity
+                    key={`num_pick_${targetNum}`}
+                    style={[styles.pickerItem, isCurrent && styles.pickerItemActive]}
+                    onPress={() =>
+                      handleChangeStaffRotationNumber(numberPickerTargetStaff?.staff, targetNum)
+                    }
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <View
+                        style={{
+                          backgroundColor: isCurrent ? '#38bdf8' : 'rgba(56, 189, 248, 0.12)',
+                          paddingHorizontal: 10,
+                          paddingVertical: 4,
+                          borderRadius: 8,
+                        }}
+                      >
+                        <ThemeText bold color={isCurrent ? '#0f172a' : '#38bdf8'} style={{ fontSize: 14 }}>
+                          #{targetNum}
+                        </ThemeText>
+                      </View>
+                      <ThemeText bold={isCurrent} color={isCurrent ? '#38bdf8' : 'white'} style={{ fontSize: 15 }}>
+                        {isCurrent
+                          ? `${occupant?.name}（現在の位置）`
+                          : `${targetNum}番目へ移動（現在: ${occupant?.name}）`}
+                      </ThemeText>
+                    </View>
+                    {isCurrent && <Check size={20} color="#38bdf8" />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* 操作履歴（監査ログ）モーダル */}
       <AuditLogModal
         visible={showAuditLogModal}
@@ -2090,5 +2568,18 @@ const styles = StyleSheet.create({
   tableHeaderRow: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.08)', alignItems: 'center' },
   tableDataRow: { flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.04)', alignItems: 'center' },
   tableDataRowSelected: { backgroundColor: 'rgba(56, 189, 248, 0.08)', borderRadius: 8 },
-  tableTotalRow: { flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 6, borderTopWidth: 1.5, borderTopColor: 'rgba(255, 255, 255, 0.15)', backgroundColor: 'rgba(255, 255, 255, 0.03)', alignItems: 'center', marginTop: 4, borderRadius: 8 }
+  tableTotalRow: { flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 6, borderTopWidth: 1.5, borderTopColor: 'rgba(255, 255, 255, 0.15)', backgroundColor: 'rgba(255, 255, 255, 0.03)', alignItems: 'center', marginTop: 4, borderRadius: 8 },
+
+  // 🔄 休日出勤ローテーション順番管理用スタイル
+  rotationSectionCard: { padding: 14, marginBottom: 12, backgroundColor: 'rgba(255, 255, 255, 0.02)', borderColor: 'rgba(56, 189, 248, 0.18)', borderWidth: 1, borderRadius: 16, width: '100%' },
+  rotationSyncBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(56, 189, 248, 0.14)', borderColor: 'rgba(56, 189, 248, 0.35)', borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  rotationStaffLinkBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(52, 211, 153, 0.12)', borderColor: 'rgba(52, 211, 153, 0.35)', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  rotationMsgBanner: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, marginBottom: 10, alignItems: 'center' },
+  rotationRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 10, backgroundColor: 'rgba(255, 255, 255, 0.025)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.06)' },
+  rotationNumberBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2, minWidth: 52, height: 34, paddingHorizontal: 8, borderRadius: 8, backgroundColor: 'rgba(56, 189, 248, 0.14)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.35)' },
+  rotationMetaChip: { backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  rotationStatusBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
+  rotationArrowBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.25)', justifyContent: 'center', alignItems: 'center' },
+  rotationExcludedRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 10, backgroundColor: 'rgba(255, 255, 255, 0.015)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.04)' },
+  rotationExcludedBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(148, 163, 184, 0.12)', borderWidth: 1, borderColor: 'rgba(148, 163, 184, 0.25)' }
 });

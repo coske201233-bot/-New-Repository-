@@ -191,22 +191,6 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const activeDate = currentDate || new Date();
   const setActiveDate = setCurrentDate;
 
-  // --- [CRITICAL: FALLBACK UI FOR WSOD PREVENTION] ---
-  if (!staffList || !requests) {
-    return (
-      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <ThemeText style={{ marginTop: 24, marginBottom: 8 }} variant="h2">データを読み込み中...</ThemeText>
-        <TouchableOpacity 
-          style={{ marginTop: 40, backgroundColor: 'rgba(239, 68, 68, 0.1)', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#ef4444' }}
-          onPress={() => props.onLogout ? props.onLogout() : supabase.auth.signOut()}
-        >
-          <ThemeText color="#ef4444" bold>ログアウトして戻る</ThemeText>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
-
   const isUserAdmin = checkIsAdmin(undefined, profile) || props.isAdminAuthenticated || isPrivileged;
   const isAdminAuthenticated = !!isUserAdmin;
   const userRole = isUserAdmin ? 'admin' : 'staff';
@@ -222,7 +206,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   // --- [CRITICAL: FORCE RE-FETCH ON FOCUS & DEBUG] ---
   const runDebugFetch = async () => {
     try {
-      const { data, error } = await supabase.from('staff').select('*');
+      const { data, error } = await supabase.from('staff').select('*').order('rotation_order', { ascending: true, nullsFirst: false });
       if (error) {
         console.error("FETCH ERROR:", error);
       } else if (data) {
@@ -287,6 +271,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           };
         });
         setDebugStaffList(mappedData);
+        if (props.setStaffList) {
+          props.setStaffList(mappedData);
+        }
       }
     } catch (e) {
       console.error("DEBUG FETCH EXCEPTION:", e);
@@ -843,6 +830,21 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     if (!selectedStaff) return { workDays: 0, holidayWorkDays: 0, leaveHours: '0.00' };
     return calculateMonthlyStats(selectedStaff, activeDate, requestMap);
   }, [selectedStaff, activeDate, requestMap]);
+
+  if (!staffList || !requests) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <ThemeText style={{ marginTop: 24, marginBottom: 8 }} variant="h2">データを読み込み中...</ThemeText>
+        <TouchableOpacity 
+          style={{ marginTop: 40, backgroundColor: 'rgba(239, 68, 68, 0.1)', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#ef4444' }}
+          onPress={() => props.onLogout ? props.onLogout() : supabase.auth.signOut()}
+        >
+          <ThemeText color="#ef4444" bold>ログアウトして戻る</ThemeText>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
