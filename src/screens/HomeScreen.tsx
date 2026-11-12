@@ -113,103 +113,104 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   }
   */
   
-  try {
-    // ---------------------------------------------------------
-    // 1. 正規化データアクセスヘルパー (日英両対応)
-    // ---------------------------------------------------------
-    const todayStr = getDateStr(new Date());
-    const getStaffData = (s: any) => {
-      return {
-        job: s?.職種 || s?.jobType || s?.profession || s?.job_type || '',
-        role: s?.役割 || s?.role || s?.position || '',
-        placement: s?.配置 || s?.placement || '',
-        status: s?.ステータス || s?.status || '通常',
-        leave_start_date: s?.leave_start_date || s?.leaveStartDate || '',
-        leave_end_date: s?.leave_end_date || s?.leaveEndDate || '',
-      };
+  // ---------------------------------------------------------
+  // 1. 正規化データアクセスヘルパー (日英両対応)
+  // ---------------------------------------------------------
+  const todayStr = getDateStr(new Date());
+  const getStaffData = (s: any) => {
+    return {
+      job: s?.職種 || s?.jobType || s?.profession || s?.job_type || '',
+      role: s?.役割 || s?.role || s?.position || '',
+      placement: s?.配置 || s?.placement || '',
+      status: s?.ステータス || s?.status || '通常',
+      leave_start_date: s?.leave_start_date || s?.leaveStartDate || '',
+      leave_end_date: s?.leave_end_date || s?.leaveEndDate || '',
     };
+  };
 
-    const isStaffOnLeave = (data: any, dStr: string = todayStr) => {
-      if (data.status !== '長期休暇') return false;
-      const start = (data.leave_start_date || data.leaveStartDate || '').trim();
-      const end = (data.leave_end_date || data.leaveEndDate || '').trim();
-      if (start && end) return start <= dStr && dStr <= end;
-      if (start) return start <= dStr;
-      if (end) return dStr <= end;
-      return true;
-    };
+  const isStaffOnLeave = (data: any, dStr: string = todayStr) => {
+    if (data.status !== '長期休暇') return false;
+    const start = (data.leave_start_date || data.leaveStartDate || '').trim();
+    const end = (data.leave_end_date || data.leaveEndDate || '').trim();
+    if (start && end) return start <= dStr && dStr <= end;
+    if (start) return start <= dStr;
+    if (end) return dStr <= end;
+    return true;
+  };
 
-    const isExcluded = (s: any) => {
+  const isExcluded = (s: any) => {
+    const data = getStaffData(s);
+    // 訪問リハ、包括、排尿、長期休暇/入職前、そして助手は通常のPT/OT/ST集計から除外（優先して別カウント）
+    const isVisit = data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ';
+    const isHokatsu = data.role === '包括' || data.placement === '包括' || data.job === '包括';
+    const isHainyo = data.role === '排尿' || data.role === '排尿支援' || data.placement === '排尿' || data.placement === '排尿支援';
+    const isInactive = isStaffOnLeave(data) || data.status === '入職前';
+    const isAssistant = data.job === '助手' || data.role === '助手' || data.placement === '助手';
+    return isVisit || isHokatsu || isHainyo || isInactive || isAssistant;
+  };
+
+  // ---------------------------------------------------------
+  // 2. 統計情報の計算 (トップレベルでReact.useMemoを実行)
+  // ---------------------------------------------------------
+  const stats = React.useMemo(() => {
+    // isApprovedがデフォルトfalseの場合があるため、ダッシュボードの集計にはすべてsafeStaffを使用
+    
+    const ptCount = safeStaff.filter(s => {
       const data = getStaffData(s);
-      // 訪問リハ、包括、排尿、長期休暇/入職前、そして助手は通常のPT/OT/ST集計から除外（優先して別カウント）
-      const isVisit = data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ';
-      const isHokatsu = data.role === '包括' || data.placement === '包括' || data.job === '包括';
-      const isHainyo = data.role === '排尿' || data.role === '排尿支援' || data.placement === '排尿' || data.placement === '排尿支援';
-      const isInactive = isStaffOnLeave(data) || data.status === '入職前';
+      return data.job === 'PT' && !isExcluded(s);
+    }).length;
+
+    const otCount = safeStaff.filter(s => {
+      const data = getStaffData(s);
+      return data.job === 'OT' && !isExcluded(s);
+    }).length;
+
+    const stCount = safeStaff.filter(s => {
+      const data = getStaffData(s);
+      return data.job === 'ST' && !isExcluded(s);
+    }).length;
+
+    const hospital = safeStaff.filter(s => {
+      const data = getStaffData(s);
       const isAssistant = data.job === '助手' || data.role === '助手' || data.placement === '助手';
-      return isVisit || isHokatsu || isHainyo || isInactive || isAssistant;
-    };
+      const isVisit = data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ';
+      const isInactive = isStaffOnLeave(data) || data.status === '入職前';
+      return !isAssistant && !isVisit && !isInactive;
+    }).length;
 
-    // ---------------------------------------------------------
-    // 2. 統計情報の計算 (React.useMemoで最適化)
-    // ---------------------------------------------------------
-    const stats = React.useMemo(() => {
-      // isApprovedがデフォルトfalseの場合があるため、ダッシュボードの集計にはすべてsafeStaffを使用
-      
-      const ptCount = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return data.job === 'PT' && !isExcluded(s);
-      }).length;
+    const visit = safeStaff.filter(s => {
+      const data = getStaffData(s);
+      return !isStaffOnLeave(data) && data.status !== '入職前' && 
+             (data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ');
+    }).length;
 
-      const otCount = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return data.job === 'OT' && !isExcluded(s);
-      }).length;
+    const assistant = safeStaff.filter(s => {
+      const data = getStaffData(s);
+      return !isStaffOnLeave(data) && data.status !== '入職前' && 
+             (data.job === '助手' || data.role === '助手' || data.placement === '助手');
+    }).length;
 
-      const stCount = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return data.job === 'ST' && !isExcluded(s);
-      }).length;
+    const inactive = safeStaff.filter(s => {
+      const data = getStaffData(s);
+      return isStaffOnLeave(data);
+    }).length;
 
-      const hospital = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        const isAssistant = data.job === '助手' || data.role === '助手' || data.placement === '助手';
-        const isVisit = data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ';
-        const isInactive = isStaffOnLeave(data) || data.status === '入職前';
-        return !isAssistant && !isVisit && !isInactive;
-      }).length;
+    const hokatsuCount = safeStaff.filter(s => {
+      const data = getStaffData(s);
+      return !isStaffOnLeave(data) && data.status !== '入職前' && 
+             (data.role === '包括' || data.placement === '包括' || data.job === '包括');
+    }).length;
 
-      const visit = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return !isStaffOnLeave(data) && data.status !== '入職前' && 
-               (data.role === '訪問リハ' || data.placement === '訪問' || data.placement === '訪問リハ');
-      }).length;
+    const hainyoCount = safeStaff.filter(s => {
+      const data = getStaffData(s);
+      return !isStaffOnLeave(data) && data.status !== '入職前' && 
+             (data.role === '排尿' || data.role === '排尿支援' || data.placement === '排尿' || data.placement === '排尿支援');
+    }).length;
+    
+    return { inactive, assistant, visit, hospital, ptCount, otCount, stCount, hokatsuCount, hainyoCount };
+  }, [safeStaff]);
 
-      const assistant = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return !isStaffOnLeave(data) && data.status !== '入職前' && 
-               (data.job === '助手' || data.role === '助手' || data.placement === '助手');
-      }).length;
-
-      const inactive = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return isStaffOnLeave(data);
-      }).length;
-
-      const hokatsuCount = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return !isStaffOnLeave(data) && data.status !== '入職前' && 
-               (data.role === '包括' || data.placement === '包括' || data.job === '包括');
-      }).length;
-
-      const hainyoCount = safeStaff.filter(s => {
-        const data = getStaffData(s);
-        return !isStaffOnLeave(data) && data.status !== '入職前' && 
-               (data.role === '排尿' || data.role === '排尿支援' || data.placement === '排尿' || data.placement === '排尿支援');
-      }).length;
-      
-      return { inactive, assistant, visit, hospital, ptCount, otCount, stCount, hokatsuCount, hainyoCount };
-    }, [safeStaff]);
+  try {
 
     // ---------------------------------------------------------
     // 3. 部署別集計 (院内内訳)

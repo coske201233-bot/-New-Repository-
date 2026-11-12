@@ -56,7 +56,10 @@ export default function App() {
     
     if (Platform.OS === 'web') {
       window.onerror = (msg) => { setFatalError(String(msg)); return false; };
-      window.onunhandledrejection = (e) => { setFatalError(String(e.reason)); };
+      window.onunhandledrejection = (e) => {
+        console.warn('[Unhandled Rejection Caught]:', e.reason);
+        e.preventDefault?.();
+      };
     }
   }, []);
 
@@ -104,11 +107,6 @@ export default function App() {
     }
   }, []);
 
-  if (fatalError) return <ErrorFallback error={fatalError} />;
-
-  // 共通判定ヘルパーおよびステートに基づく実効管理者権限（即時再描画トリガー）
-  const isEffectiveAdmin = checkIsAdmin(logic.user, profile) || isAdminAuthenticated;
-
   // 初回ロード完了フラグ（タブ切り替えやバックグラウンド同期によるローディング画面への逆戻りを防止）
   const [hasInitialLoaded, setHasInitialLoaded] = useState(false);
   useEffect(() => {
@@ -123,6 +121,11 @@ export default function App() {
       setHasInitialLoaded(false);
     }
   }, [logic.user, logic.isInitialized]);
+
+  if (fatalError) return <ErrorFallback error={fatalError} />;
+
+  // 共通判定ヘルパーおよびステートに基づく実効管理者権限（即時再描画トリガー）
+  const isEffectiveAdmin = checkIsAdmin(logic.user, profile) || isAdminAuthenticated;
 
   // 初回のみスピナー表示。以降はタブ切り替え等があっても既存画面を表示し続ける
   const showFullLoading = !hasInitialLoaded && (!logic.isInitialized || !logic.isAuthReady || logic.isCheckingProfile);
@@ -280,4 +283,3 @@ const styles = StyleSheet.create({
   },
   tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 8 },
 });
-

@@ -24,6 +24,12 @@ export const useConfigData = () => {
 
   const refreshConfigs = useCallback(async () => {
     try {
+      // ローカルストレージの値を先に読み込んでおく
+      const localMonthly = await loadData(STORAGE_KEYS.MONTHLY_LIMITS);
+      if (localMonthly && typeof localMonthly === 'object') {
+        setMonthlyLimits(prev => ({ ...localMonthly, ...prev }));
+      }
+
       const cloudConfigs = await cloudStorage.fetchConfigs();
       if (!cloudConfigs) return;
 
@@ -36,7 +42,9 @@ export const useConfigData = () => {
       if (cloudConfigs[STORAGE_KEYS.SATURDAY_LIMIT] !== undefined) setSaturdayLimit(safeNumber(cloudConfigs[STORAGE_KEYS.SATURDAY_LIMIT], 1));
       if (cloudConfigs[STORAGE_KEYS.SUNDAY_LIMIT] !== undefined) setSundayLimit(safeNumber(cloudConfigs[STORAGE_KEYS.SUNDAY_LIMIT], 0));
       if (cloudConfigs[STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT] !== undefined) setPublicHolidayLimit(safeNumber(cloudConfigs[STORAGE_KEYS.PUBLIC_HOLIDAY_LIMIT], 1));
-      if (cloudConfigs[STORAGE_KEYS.MONTHLY_LIMITS] !== undefined) setMonthlyLimits(cloudConfigs[STORAGE_KEYS.MONTHLY_LIMITS]);
+      if (cloudConfigs[STORAGE_KEYS.MONTHLY_LIMITS] !== undefined && cloudConfigs[STORAGE_KEYS.MONTHLY_LIMITS] !== null) {
+        setMonthlyLimits(prev => ({ ...(localMonthly || {}), ...prev, ...cloudConfigs[STORAGE_KEYS.MONTHLY_LIMITS] }));
+      }
       if (cloudConfigs[STORAGE_KEYS.ADMIN_PASSWORD] !== undefined) setAdminPassword(String(cloudConfigs[STORAGE_KEYS.ADMIN_PASSWORD]));
       if (cloudConfigs[STORAGE_KEYS.STAFF_VIEW_MODE] !== undefined) setStaffViewMode(Boolean(cloudConfigs[STORAGE_KEYS.STAFF_VIEW_MODE]));
       
@@ -67,8 +75,7 @@ export const useConfigData = () => {
       await saveData(key, val);
       await cloudStorage.upsertConfig(key, val);
     } catch (e) {
-      console.error('Config update error:', e);
-      throw e;
+      console.warn('Config update handled locally:', e);
     }
   }, []);
 

@@ -598,9 +598,30 @@ export default async function handler(req: any, res: any) {
           }
         }
 
+        // ==========================================
+        // 5. アプリ設定の保存 (action: 'UPSERT_CONFIG')
+        // ==========================================
+        case 'UPSERT_CONFIG': {
+          const { key, value } = effectivePayload;
+          if (!key) {
+            return res.status(400).json({ error: '設定キー (key) が必要です。' });
+          }
+          const { data: configData, error: configErr } = await supabaseAdmin
+            .from('app_config')
+            .upsert({ key: String(key), value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+            .select()
+            .maybeSingle();
+
+          if (configErr) {
+            console.error('Upsert Config API Error:', configErr);
+            return res.status(500).json({ error: configErr.message });
+          }
+          return res.status(200).json({ success: true, config: configData });
+        }
+
         default:
           return res.status(400).json({
-            error: `不明なアクションです: ${currentAction}。有効なアクション: CREATE, UPDATE_INFO, UPDATE_PASSWORD, DELETE`,
+            error: `不明なアクションです: ${currentAction}。有効なアクション: CREATE, UPDATE_INFO, UPDATE_PASSWORD, DELETE, UPSERT_CONFIG`,
           });
       }
     } catch (err: any) {

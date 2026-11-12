@@ -35,6 +35,43 @@ import {
   WeeklyFloorSummaryResult
 } from '../utils/leaveUtils';
 
+const DropdownSelector = ({ label, value, options, onSelect, style }: any) => {
+  const [isVisible, setIsVisible] = useState(false);
+  const displayValue = typeof value === 'boolean' 
+    ? (options.find((o: any) => o.value === value)?.label || 'なし')
+    : (Array.isArray(value) ? (options.find((o: any) => JSON.stringify(o.value) === JSON.stringify(value))?.label || value[0]) : value);
+  const isSimpleArray = options.length > 0 && typeof options[0] !== 'object';
+  return (
+    <View style={[{ marginBottom: 16 }, style]}>
+      <ThemeText bold style={{ marginBottom: 8, fontSize: 13, color: COLORS.textSecondary }}>{label}</ThemeText>
+      <TouchableOpacity style={styles.dropdownBtn} onPress={() => setIsVisible(true)}>
+        <ThemeText bold color="white">{typeof value === 'number' ? value : (displayValue || '未選択')}</ThemeText>
+        <ChevronRight size={18} color={COLORS.textSecondary} />
+      </TouchableOpacity>
+      <Modal visible={isVisible} transparent animationType="fade">
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setIsVisible(false)}>
+          <View style={styles.pickerContainer}>
+            <View style={styles.pickerHeader}>
+              <ThemeText bold variant="h2">{label}</ThemeText>
+              <TouchableOpacity onPress={() => setIsVisible(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity>
+            </View>
+            <ScrollView>{options.map((opt: any) => {
+              const optVal = isSimpleArray ? opt : (typeof opt === 'number' ? opt : opt.value);
+              const optLabel = isSimpleArray ? (typeof opt === 'number' ? `${opt}人` : opt) : opt.label;
+              const isActive = typeof optVal === 'object' ? JSON.stringify(optVal) === JSON.stringify(value) : (typeof value === 'number' ? optVal === value : optVal === value);
+              return (
+                <TouchableOpacity key={String(optLabel)} style={[styles.pickerItem, isActive && styles.pickerItemActive]} onPress={() => { onSelect(optVal); setIsVisible(false); }}>
+                  <ThemeText bold={isActive} color={isActive ? '#38bdf8' : 'white'} style={{ fontSize: 18 }}>{optLabel}</ThemeText>
+                  {isActive && <Check size={20} color="#38bdf8" />}
+                </TouchableOpacity>
+              );
+            })}</ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </View>
+  );
+};
 
 interface AdminScreenProps {
   profile: any;
@@ -1006,47 +1043,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     }
   };
 
-  const DropdownSelector = ({ label, value, options, onSelect, style }: any) => {
-    const [isVisible, setIsVisible] = useState(false);
-    const displayValue = typeof value === 'boolean' 
-      ? (options.find((o:any) => o.value === value)?.label || 'なし')
-      : (Array.isArray(value) ? (options.find((o:any) => JSON.stringify(o.value) === JSON.stringify(value))?.label || value[0]) : value);
-    const isSimpleArray = options.length > 0 && typeof options[0] !== 'object';
-    return (
-      <View style={[{ marginBottom: 16 }, style]}>
-        <ThemeText bold style={{ marginBottom: 8, fontSize: 13, color: COLORS.textSecondary }}>{label}</ThemeText>
-        <TouchableOpacity style={styles.dropdownBtn} onPress={() => setIsVisible(true)}><ThemeText bold color="white">{typeof value === 'number' ? value : (displayValue || '未選択')}</ThemeText><ChevronRight size={18} color={COLORS.textSecondary} /></TouchableOpacity>
-        <Modal visible={isVisible} transparent animationType="fade">
-          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setIsVisible(false)}>
-            <View style={styles.pickerContainer}>
-              <View style={styles.pickerHeader}><ThemeText bold variant="h2">{label}</ThemeText><TouchableOpacity onPress={() => setIsVisible(false)}><X size={24} color={COLORS.textSecondary} /></TouchableOpacity></View>
-              <ScrollView>{options.map((opt: any) => {
-                const optVal = isSimpleArray ? opt : (typeof opt === 'number' ? opt : opt.value);
-                const optLabel = isSimpleArray ? (typeof opt === 'number' ? `${opt}人` : opt) : opt.label;
-                const isActive = typeof optVal === 'object' ? JSON.stringify(optVal) === JSON.stringify(value) : (typeof value === 'number' ? optVal === value : optVal === value);
-                return (
-                  <TouchableOpacity key={String(optLabel)} style={[styles.pickerItem, isActive && styles.pickerItemActive]} onPress={() => { onSelect(optVal); setIsVisible(false); }}>
-                    <ThemeText bold={isActive} color={isActive ? '#38bdf8' : 'white'} style={{ fontSize: 18 }}>{optLabel}</ThemeText>
-                    {isActive && <Check size={20} color="#38bdf8" />}
-                  </TouchableOpacity>
-                );
-              })}</ScrollView>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      </View>
-    );
-  };
-
-
-
-
-
-
-
-
-
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}><ThemeText variant="h1">設定 [V76.6]</ThemeText><ThemeText variant="caption" style={{ fontSize: 9, opacity: 0.3, color: COLORS.textSecondary }}>[BUILD: VERSION 76.6 - BULLETPROOF SYNC]</ThemeText></View>
@@ -1749,11 +1745,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 <View style={styles.limitGrid}>
                   {/* [V60.4] 平日の上限設定を廃止 */}
                   <View style={{ flex: 1 }} />
-                  <DropdownSelector label="土曜" value={limits.sat} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('sat', v, currentMonthStr)} style={{flex:1}} />
+                  <DropdownSelector label="土曜" value={limits.sat} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>Promise.resolve(updateLimits('sat', v, currentMonthStr)).catch(err => console.warn('updateLimits error:', err))} style={{flex:1}} />
                 </View>
                 <View style={styles.limitGrid}>
-                  <DropdownSelector label="日曜" value={limits.sun} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('sun', v, currentMonthStr)} style={{flex:1}} />
-                  <DropdownSelector label="祝日" value={limits.pub} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>updateLimits('pub', v, currentMonthStr)} style={{flex:1}} />
+                  <DropdownSelector label="日曜" value={limits.sun} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>Promise.resolve(updateLimits('sun', v, currentMonthStr)).catch(err => console.warn('updateLimits error:', err))} style={{flex:1}} />
+                  <DropdownSelector label="祝日" value={limits.pub} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>Promise.resolve(updateLimits('pub', v, currentMonthStr)).catch(err => console.warn('updateLimits error:', err))} style={{flex:1}} />
                 </View>
               </View>
             </View>
