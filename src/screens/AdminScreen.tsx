@@ -50,7 +50,7 @@ const DropdownSelector = ({ label, value, options, onSelect, style }: any) => {
     <View style={[{ marginBottom: 16 }, style]}>
       <ThemeText bold style={{ marginBottom: 8, fontSize: 13, color: COLORS.textSecondary }}>{label}</ThemeText>
       <TouchableOpacity style={styles.dropdownBtn} onPress={() => setIsVisible(true)}>
-        <ThemeText bold color="white">{typeof value === 'number' ? value : (displayValue || '未選択')}</ThemeText>
+        <ThemeText bold color="white">{typeof value === 'number' ? `${value}人` : (displayValue || '未選択')}</ThemeText>
         <ChevronRight size={18} color={COLORS.textSecondary} />
       </TouchableOpacity>
       <Modal visible={isVisible} transparent animationType="fade">
@@ -92,6 +92,7 @@ interface AdminScreenProps {
   onShareApp: () => void;
   onLogout: () => void;
   currentDate: Date;
+  setCurrentDate?: (d: Date) => void;
   onAutoAssign: (year: number, month: number, limits: any) => Promise<void>;
   onUndoAutoAssign: () => Promise<void>;
   canUndoAutoAssign: boolean;
@@ -111,7 +112,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   profile, setProfile, staffList = [], setStaffList,
   updateLimits, updatePassword, adminPassword,
   isAdminAuthenticated, setIsAdminAuthenticated,
-  monthlyLimits, onShareApp, onLogout, currentDate = new Date(),
+  monthlyLimits, onShareApp, onLogout, currentDate = new Date(), setCurrentDate,
   onAutoAssign, onUndoAutoAssign, canUndoAutoAssign,
   requests = [], setRequests, updateStaffList, patchStaff,
   fetchShifts, fetchRequests, approveRequest, onNavigateToStaff, onForceCloudSync, shifts = []
@@ -154,6 +155,19 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const [rotationSaveMsg, setRotationSaveMsg] = useState<string>('');
   const [numberPickerTargetStaff, setNumberPickerTargetStaff] = useState<any>(null);
   const [showExcludedRotationStaff, setShowExcludedRotationStaff] = useState<boolean>(true);
+
+  // 📅 必要人数設定＆シフト自動割り当て用の対象月ステート（トップレベル配置）
+  const [targetAssignDate, setTargetAssignDate] = useState<Date>(() => currentDate || new Date());
+  const propYear = (currentDate || new Date()).getFullYear();
+  const propMonth = (currentDate || new Date()).getMonth();
+  React.useEffect(() => {
+    setTargetAssignDate(prev => {
+      if (prev && prev.getFullYear() === propYear && prev.getMonth() === propMonth) {
+        return prev;
+      }
+      return new Date(propYear, propMonth, 1);
+    });
+  }, [propYear, propMonth]);
 
   // 🔄 ローテーション対象スタッフ一覧（rotation_order 昇順・1始まりの連番）
   const rotationTargetList = React.useMemo(() => {
@@ -763,12 +777,25 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     }
   }, [profile, isAdminAuthenticated]);
 
-  // Safeguard: Ensure currentDate exists
-  const safeDate = currentDate || new Date();
+  // Safeguard: Ensure targetAssignDate / currentDate exists
+  const safeDate = targetAssignDate || currentDate || new Date();
   const currentYear = safeDate.getFullYear();
   const currentMonth = safeDate.getMonth();
   const currentMonthStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
   const limits = (monthlyLimits && monthlyLimits[currentMonthStr]) || { weekday: 12, sat: 1, sun: 0, pub: 1 };
+
+  // 📅 統合カードの対象月切り替えハンドラー（前月・次月）
+  const handlePrevTargetMonth = () => {
+    const nextDate = new Date(currentYear, currentMonth - 1, 1);
+    setTargetAssignDate(nextDate);
+    if (setCurrentDate) setCurrentDate(nextDate);
+  };
+
+  const handleNextTargetMonth = () => {
+    const nextDate = new Date(currentYear, currentMonth + 1, 1);
+    setTargetAssignDate(nextDate);
+    if (setCurrentDate) setCurrentDate(nextDate);
+  };
 
   // --- Approvals Filtering with safeguards and logical fixes ---
   const pendingRequests = Array.isArray(requests) ? requests.filter(r => {
@@ -1245,74 +1272,170 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </TouchableOpacity>
               </ThemeCard>
 
-              <ThemeCard style={styles.itemRow}>
-                <View style={styles.iconCircle}><Clock size={20} color="#38bdf8" /></View>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <ThemeText bold>シフト自動割り当て</ThemeText>
-                  <ThemeText variant="caption" color={COLORS.textSecondary}>{currentMonth + 1}月の残り枠を自動的に埋めます</ThemeText>
-                </View>
-                <TouchableOpacity 
-                  style={[styles.inlineBtn, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }, isAssigning && { opacity: 0.5 }]} 
-                  onPress={async () => {
-                    console.log('[AdminScreen] 「自動生成」ボタンが押されました。');
-                    setIsAssigning(true);
-                    try {
-                      console.log('[AdminScreen] シフト生成開始: ' + currentYear + '年' + (currentMonth + 1) + '月');
-                      
-                      const result = await generateMonthlyShifts(currentYear, currentMonth + 1, {
-                        weekdayCap: limits.weekday,
-                        satCap: limits.sat,
-                        sunCap: limits.sun,
-                        holidayCap: limits.pub
-                      });
-                      
-                      console.log('[AdminScreen] シフト生成完了。レコード数: ' + (result?.length || 0));
-                      Alert.alert('完了', 'シフトの自動割り当てが完了しました。');
-
-                      // グローバルなシフトステートを最新化
-                      if (fetchShifts) {
-                        console.log('[AdminScreen] 全体ステートをリフレッシュ中...');
-                        await fetchShifts();
-                      }
-                      
-                      // ターゲット月の旧自動生成リクエスト（UI用）をパージ
-                      const monthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-                      setRequests((prev: any[]) => prev.filter(
-                        r => !(String(r.id || '').startsWith('auto-') && r.date && r.date.startsWith(monthPrefix))
-                      ));
-
-                    } catch (e: any) {
-                      console.error('[AdminScreen] 自動割り当てエラー:', e);
-                      Alert.alert(
-                        'エラーが発生しました',
-                        'シフト生成中に問題が発生しました。\n\n' + (e.message || '不明なエラー')
-                      );
-                    } finally {
-                      setIsAssigning(false);
-                      console.log('[AdminScreen] 処理終了 (Loading state cleared)');
-                    }
-                  }}
-                  disabled={isAssigning}
-                >
-                  {isAssigning ? (
-                    <ActivityIndicator size="small" color="#38bdf8" />
-                  ) : (
-                    <>
-                      <Database size={18} color="#38bdf8" />
-                      <ThemeText bold color="#38bdf8" style={{marginLeft:6}}>実行</ThemeText>
-                    </>
-                  )}
-                </TouchableOpacity>
-
-
-                {canUndoAutoAssign && !isAssigning && (
-                  <TouchableOpacity 
-                    style={[styles.inlineBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)', marginLeft: 8 }]} 
-                    onPress={onUndoAutoAssign}
+              {/* ⚡ 統合カード: 対象月切り替え ＆ 必要人数設定（3列横並び） ＆ シフト自動割り当て実行 */}
+              <ThemeCard style={styles.unifiedAssignCard}>
+                {/* 1. 最上部: 対象月（年月）切り替えセレクター */}
+                <View style={styles.unifiedMonthSelector}>
+                  <TouchableOpacity
+                    style={styles.monthNavBtn}
+                    onPress={handlePrevTargetMonth}
+                    disabled={isAssigning}
                   >
-                    <ThemeText bold color="#ef4444">1つ戻す</ThemeText>
+                    <ChevronLeft size={18} color="#38bdf8" />
+                    <ThemeText variant="caption" bold color="#38bdf8">◀ 前月</ThemeText>
                   </TouchableOpacity>
-                )}
+
+                  <View style={{ alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Calendar size={18} color="#38bdf8" />
+                      <ThemeText bold variant="h2" color="#38bdf8">
+                        {currentYear}年 {currentMonth + 1}月
+                      </ThemeText>
+                    </View>
+                    <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11, marginTop: 2 }}>
+                      休日出勤の必要人数設定 ＆ シフト自動割り当て
+                    </ThemeText>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.monthNavBtn}
+                    onPress={handleNextTargetMonth}
+                    disabled={isAssigning}
+                  >
+                    <ThemeText variant="caption" bold color="#38bdf8">次月 ▶</ThemeText>
+                    <ChevronRight size={18} color="#38bdf8" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* 2. 中段: 土曜・日曜・祝日の必要人数設定（横並び3列均等グリッド） */}
+                <View style={{ marginBottom: 14 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <ThemeText bold style={{ fontSize: 14, color: 'white' }}>
+                      📈 {currentMonth + 1}月の必要人数設定（休日出勤枠）
+                    </ThemeText>
+                    <ThemeText variant="caption" color={COLORS.textSecondary} style={{ fontSize: 11 }}>
+                      対象月: {currentMonthStr}
+                    </ThemeText>
+                  </View>
+
+                  <View style={styles.threeColLimitGrid}>
+                    <DropdownSelector
+                      label="土曜"
+                      value={limits.sat}
+                      options={Array.from({ length: 21 }, (_, i) => i)}
+                      onSelect={(v: number) =>
+                        Promise.resolve(updateLimits('sat', v, currentMonthStr)).catch(err =>
+                          console.warn('updateLimits error:', err)
+                        )
+                      }
+                      style={{ flex: 1, marginBottom: 0 }}
+                    />
+                    <DropdownSelector
+                      label="日曜"
+                      value={limits.sun}
+                      options={Array.from({ length: 21 }, (_, i) => i)}
+                      onSelect={(v: number) =>
+                        Promise.resolve(updateLimits('sun', v, currentMonthStr)).catch(err =>
+                          console.warn('updateLimits error:', err)
+                        )
+                      }
+                      style={{ flex: 1, marginBottom: 0 }}
+                    />
+                    <DropdownSelector
+                      label="祝日"
+                      value={limits.pub}
+                      options={Array.from({ length: 21 }, (_, i) => i)}
+                      onSelect={(v: number) =>
+                        Promise.resolve(updateLimits('pub', v, currentMonthStr)).catch(err =>
+                          console.warn('updateLimits error:', err)
+                        )
+                      }
+                      style={{ flex: 1, marginBottom: 0 }}
+                    />
+                  </View>
+                </View>
+
+                {/* 3. 下段: シフト自動割り当て実行ボタン */}
+                <View style={styles.unifiedAssignFooter}>
+                  <View style={{ marginBottom: 10 }}>
+                    <ThemeText bold style={{ fontSize: 14, color: 'white' }}>
+                      ⚡ シフト自動割り当て（{currentYear}年{currentMonth + 1}月）
+                    </ThemeText>
+                    <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 2 }}>
+                      {currentMonth + 1}月の残り枠（土曜:{limits.sat}人 / 日曜:{limits.sun}人 / 祝日:{limits.pub}人）をローテーション順で自動的に埋めます
+                    </ThemeText>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.unifiedExecuteBtn,
+                        isAssigning && { opacity: 0.5 },
+                      ]}
+                      onPress={async () => {
+                        console.log('[AdminScreen] 「自動生成」ボタンが押されました。');
+                        setIsAssigning(true);
+                        try {
+                          console.log('[AdminScreen] シフト生成開始: ' + currentYear + '年' + (currentMonth + 1) + '月');
+
+                          const result = await generateMonthlyShifts(currentYear, currentMonth + 1, {
+                            weekdayCap: limits.weekday,
+                            satCap: limits.sat,
+                            sunCap: limits.sun,
+                            holidayCap: limits.pub,
+                          });
+
+                          console.log('[AdminScreen] シフト生成完了。レコード数: ' + (result?.length || 0));
+                          Alert.alert('完了', `${currentYear}年${currentMonth + 1}月のシフト自動割り当てが完了しました。`);
+
+                          // グローバルなシフトステートを最新化
+                          if (fetchShifts) {
+                            console.log('[AdminScreen] 全体ステートをリフレッシュ中...');
+                            await fetchShifts();
+                          }
+
+                          // ターゲット月の旧自動生成リクエスト（UI用）をパージ
+                          const monthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+                          setRequests((prev: any[]) =>
+                            prev.filter(
+                              r => !(String(r.id || '').startsWith('auto-') && r.date && r.date.startsWith(monthPrefix))
+                            )
+                          );
+                        } catch (e: any) {
+                          console.error('[AdminScreen] 自動割り当てエラー:', e);
+                          Alert.alert(
+                            'エラーが発生しました',
+                            'シフト生成中に問題が発生しました。\n\n' + (e.message || '不明なエラー')
+                          );
+                        } finally {
+                          setIsAssigning(false);
+                          console.log('[AdminScreen] 処理終了 (Loading state cleared)');
+                        }
+                      }}
+                      disabled={isAssigning}
+                    >
+                      {isAssigning ? (
+                        <ActivityIndicator size="small" color="white" />
+                      ) : (
+                        <>
+                          <Database size={18} color="white" />
+                          <ThemeText bold color="white" style={{ marginLeft: 8, fontSize: 15 }}>
+                            {currentYear}年{currentMonth + 1}月のシフト自動割り当てを実行
+                          </ThemeText>
+                        </>
+                      )}
+                    </TouchableOpacity>
+
+                    {canUndoAutoAssign && !isAssigning && (
+                      <TouchableOpacity
+                        style={styles.unifiedUndoBtn}
+                        onPress={onUndoAutoAssign}
+                      >
+                        <ThemeText bold color="#ef4444">1つ戻す</ThemeText>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
               </ThemeCard>
 
 
@@ -2151,19 +2274,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   })}
                 </View>
               </View>
-
-              <View style={{ marginTop: 24, paddingBottom: 40 }}>
-                <ThemeText bold variant="h2" style={{ marginBottom: 16 }}>📈 {currentMonth + 1}月の必要人数設定</ThemeText>
-                <View style={styles.limitGrid}>
-                  {/* [V60.4] 平日の上限設定を廃止 */}
-                  <View style={{ flex: 1 }} />
-                  <DropdownSelector label="土曜" value={limits.sat} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>Promise.resolve(updateLimits('sat', v, currentMonthStr)).catch(err => console.warn('updateLimits error:', err))} style={{flex:1}} />
-                </View>
-                <View style={styles.limitGrid}>
-                  <DropdownSelector label="日曜" value={limits.sun} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>Promise.resolve(updateLimits('sun', v, currentMonthStr)).catch(err => console.warn('updateLimits error:', err))} style={{flex:1}} />
-                  <DropdownSelector label="祝日" value={limits.pub} options={Array.from({length:21}, (_,i)=>i)} onSelect={(v:number)=>Promise.resolve(updateLimits('pub', v, currentMonthStr)).catch(err => console.warn('updateLimits error:', err))} style={{flex:1}} />
-                </View>
-              </View>
             </View>
           ) : null}
           <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}><LogOut size={20} color="#ef4444" /><ThemeText bold color="#ef4444" style={{ marginLeft: 10 }}>アプリからログアウト</ThemeText></TouchableOpacity>
@@ -2581,5 +2691,13 @@ const styles = StyleSheet.create({
   rotationStatusBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
   rotationArrowBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.25)', justifyContent: 'center', alignItems: 'center' },
   rotationExcludedRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 10, backgroundColor: 'rgba(255, 255, 255, 0.015)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.04)' },
-  rotationExcludedBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(148, 163, 184, 0.12)', borderWidth: 1, borderColor: 'rgba(148, 163, 184, 0.25)' }
+  rotationExcludedBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(148, 163, 184, 0.12)', borderWidth: 1, borderColor: 'rgba(148, 163, 184, 0.25)' },
+
+  // ⚡ シフト自動割り当て＆必要人数設定 統合カード用スタイル
+  unifiedAssignCard: { padding: 16, marginBottom: 12, backgroundColor: 'rgba(56, 189, 248, 0.04)', borderColor: 'rgba(56, 189, 248, 0.22)', borderWidth: 1, borderRadius: 16, width: '100%' },
+  unifiedMonthSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 14, marginBottom: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.08)' },
+  threeColLimitGrid: { flexDirection: 'row', gap: 10, width: '100%', alignItems: 'flex-start' },
+  unifiedAssignFooter: { paddingTop: 14, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.08)' },
+  unifiedExecuteBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0284c7', height: 48, borderRadius: 12, paddingHorizontal: 16 },
+  unifiedUndoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.35)', borderWidth: 1, height: 48, borderRadius: 12, paddingHorizontal: 16 }
 });
