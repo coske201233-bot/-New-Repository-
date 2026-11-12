@@ -238,6 +238,16 @@ export const cloudStorage = {
       }
 
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const genUuid = () => {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          return crypto.randomUUID();
+        }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          const v = c === 'x' ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        });
+      };
 
       const filtered = requests.filter(r => {
         const clientTime = r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
@@ -258,7 +268,8 @@ export const cloudStorage = {
         if (r.priority !== undefined) details.priority = r.priority;
         if (r.hours !== undefined) obj.hours = r.hours; // [STRICT REFACTOR] カラムへ直接セット
         if (r.locked !== undefined) details.locked = r.locked;
-        const validId = r.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined);
+        const rawId = String(r.id || '').trim();
+        const validId = uuidRegex.test(rawId) ? rawId : genUuid();
         const payload = { 
           ...r,
           id: validId,
@@ -292,11 +303,36 @@ export const cloudStorage = {
   },
   async upsertShifts(shifts: any[]) {
     if (!shifts || shifts.length === 0) return;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const genUuid = () => {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === 'x' ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    };
+
     const filtered = shifts.map(s => {
       const obj: any = {};
       // [V75.2] shiftsテーブルには updated_at カラムがないため除外する
       const validKeys = ['id', 'staff_id', 'staff_name', 'date', 'type', 'status', 'is_manual', 'hours', 'details', 'created_at'];
       validKeys.forEach(k => { if (s[k] !== undefined) obj[k] = s[k]; });
+      // id が UUID 形式でない場合 ("auto-..." 等) は正規の UUID を生成して 22P02 (400 Bad Request) を防止
+      const rawId = String(obj.id || '').trim();
+      obj.id = uuidRegex.test(rawId) ? rawId : genUuid();
+      // staff_id も UUID 形式か検証し、非UUIDなら抽出または null に正規化
+      if (obj.staff_id !== undefined && obj.staff_id !== null) {
+        const rawStaffId = String(obj.staff_id).trim();
+        if (!uuidRegex.test(rawStaffId)) {
+          const matched = rawStaffId.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+          obj.staff_id = matched ? matched[0] : null;
+        } else {
+          obj.staff_id = rawStaffId;
+        }
+      }
       if (obj.staff_name) obj.staff_name = normalizeName(obj.staff_name);
       return obj;
     });

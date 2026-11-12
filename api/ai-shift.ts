@@ -3,6 +3,17 @@ export const config = { maxDuration: 60 };
 const toDateStr = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+const makeUuid = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 const normalize = (name: string) => {
   if (!name || typeof name !== 'string') return '';
   let n = name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/條/g, '条');
@@ -452,14 +463,14 @@ export default async function handler(req: any, res: any) {
           const cId = String(chosen.id);
           const cKey = normalize(chosen.name);
           console.log(`DEBUG: Assigning ${chosen.name} to ${dStr}`);
-          // 修正: ID体系を統一
+          // 修正: ID体系をUUIDに統一
           autoAssigned.push({ 
-            id: `auto-${cId}-${dStr}`,
+            id: makeUuid(),
             staffId: cId, 
             staffName: chosen.name, 
             date: dStr, 
             type: '出勤', 
-            details: { note: '自動割当(休日)' } 
+            details: { note: '自動割当(休日)', isAuto: true, isManual: false } 
           });
           currentWorkers.add(cKey);
           if (!staffWorkDays[cId]) staffWorkDays[cId] = new Set();

@@ -26,6 +26,25 @@ interface StaffTracker {
   forcedOffDates: Set<string>;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const generateValidUuid = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
+const ensureValidUuid = (val: any): string => {
+  const str = String(val ?? '').trim();
+  if (UUID_REGEX.test(str)) return str;
+  return generateValidUuid();
+};
+
 const extractUuid = (id: string) => {
   if (!id) return '';
   const parts = id.split('-');
@@ -84,7 +103,6 @@ export const generateMonthlyShifts = async (
 
     if (deleteError) {
       console.error('[ShiftEngine] 自動シフトの削除に失敗 (is_manual filter):', deleteError.message);
-      await supabase.from('shifts').delete().like('id', 'auto-%').gte('date', startDate).lte('date', endDateStr);
     }
 
     // Step 0.2: 前月末シフトをロード（連勤防止用）
@@ -226,7 +244,7 @@ export const generateMonthlyShifts = async (
     const generatedShifts: any[] = [];
 
     const assignOffShift = (tracker: StaffTracker, dateStr: string, type: string, phase: string) => {
-      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `auto-off-${tracker.id}-${dateStr}-${Math.random().toString(36).substr(2, 6)}`;
+      const newId = generateValidUuid();
       generatedShifts.push({
         id: newId,
         staff_name: tracker.name, staff_id: tracker.id, date: dateStr, type,
@@ -238,7 +256,7 @@ export const generateMonthlyShifts = async (
     };
 
     const assignShift = (tracker: StaffTracker, dateStr: string, dayType: string, phase: string) => {
-      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `auto-${tracker.id}-${dateStr}-${Math.random().toString(36).substr(2, 6)}`;
+      const newId = generateValidUuid();
       generatedShifts.push({
         id: newId,
         staff_name: tracker.name, staff_id: tracker.id, date: dateStr, type: '出勤',
@@ -310,7 +328,6 @@ export const generateMonthlyShifts = async (
       console.log("[ShiftEngine] Current Rotation Array:", sortedStaffList.map((s, i) => `[${i}] ${s.name} (order: ${s.rotation_order})`));
       console.log(`[ShiftEngine] Rotation List (${sortedStaffList.length}名):`, sortedStaffList.map((s, i) => `${i}:${s.name}(RO:${s.rotation_order})`).join(', '));
 
-      const sanitize = (str: any) => String(str || '').replace(/[\s\u3000]/g, '');
       let currentStaffIndex = 0;
 
       try {
@@ -411,12 +428,13 @@ export const generateMonthlyShifts = async (
 
           if (!tracker.workedDates.has(dateStr) && !tracker.forcedOffDates.has(dateStr) && !hasLeave(tracker, dateStr)) {
             generatedShifts.push({
-              id: `auto-${tracker.id}-${dateStr}-${Math.random().toString(36).substr(2, 6)}`,
+              id: generateValidUuid(),
               staff_name: tracker.name, staff_id: tracker.id, date: dateStr, type: '出勤',
               status: 'approved',
+              is_manual: false,
               details: {
                 isManual: false, phase: 'holiday_strict_sequence', dayType,
-                isHolidayWork: true, staffName: tracker.name, note: 'V72.2 ID Match'
+                isHolidayWork: true, staffName: tracker.name, note: 'V72.2 ID Match', isAuto: true
               }
             });
             tracker.totalWorkCount++;
@@ -510,17 +528,25 @@ export const generateMonthlyShifts = async (
       const chunkSize = 200;
       for (let i = 0; i < generatedShifts.length; i += chunkSize) {
         const chunk = generatedShifts.slice(i, i + chunkSize);
-        const cleanChunk = chunk.map((s: any) => ({
-          id: String(s.id ?? ''),
-          staff_id: s.staff_id ?? null,
-          staff_name: s.staff_name ?? null,
-          date: String(s.date ?? ''),
-          type: String(s.type ?? '出勤'),
-          status: String(s.status ?? 'approved'),
-          is_manual: false,
-          details: s.details ? JSON.parse(JSON.stringify(s.details)) : null,
-        }));
-        await supabase.from('shifts').upsert(cleanChunk, { onConflict: 'id' });
+        const cleanChunk = chunk.map((s: any) => {
+          const rawStaffId = String(s.staff_id ?? '').trim();
+          const validStaffId = UUID_REGEX.test(rawStaffId) ? rawStaffId : null;
+          return {
+            id: ensureValidUuid(s.id),
+            staff_id: validStaffId,
+            staff_name: s.staff_name ?? null,
+            date: String(s.date ?? ''),
+            type: String(s.type ?? '出勤'),
+            status: String(s.status ?? 'approved'),
+            is_manual: false,
+            details: s.details ? JSON.parse(JSON.stringify(s.details)) : null,
+          };
+        });
+        const { error: upsertError } = await supabase.from('shifts').upsert(cleanChunk, { onConflict: 'id' });
+        if (upsertError) {
+          console.error('[ShiftEngine] shifts テーブルへの保存エラー:', upsertError);
+          throw new Error(`シフトのDB保存に失敗しました (${upsertError.code || 'ERROR'}): ${upsertError.message}`);
+        }
       }
       console.log(`[ShiftEngine] 保存成功: ${generatedShifts.length}件`);
     }
