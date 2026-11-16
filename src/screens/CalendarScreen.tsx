@@ -218,7 +218,7 @@ export const CalendarScreen: React.FC<any> = ({
         return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
       };
 
-      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '出張', '振替＋時間休', '振替4', '振替3.75', '振3.75', '全休', '年給', '有給', '午前休', '午後休'].includes(t);
+      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '出張', '振替＋時間休', '振替4', '振4', '振替3.75', '振3.75', '時間休', '時間給', '全休', '年給', '有給', '午前休', '午後休'].includes(t);
 
       const getTime = (i: any) => {
         const t = i.updatedAt || i.updated_at || i.createdAt || i.created_at || 0;
@@ -320,6 +320,7 @@ export const CalendarScreen: React.FC<any> = ({
           if (!t) return false;
           if (t === '出張') return false;
           if (t === '出勤' || t === '日勤' || t === '特別出勤' || t === 'カスタム') return true; 
+          if (t === '振替4' || t === '振4' || t === '振替3.75' || t === '振3.75') return true;
           if (t !== '出張' && (singleReq?.customType || singleReq?.details?.customType || singleReq?.details?.isCustomWork)) return true;
           // 🚨 「時」が含まれていても、承認済み(approved)でなければカウントしない
           if (t.includes('時')) {
@@ -335,6 +336,7 @@ export const CalendarScreen: React.FC<any> = ({
         // 休暇系種別の定義
         const isOffType = (t: string) => {
           if (!t) return false;
+          if (t === '振替4' || t === '振4' || t === '振替3.75' || t === '振3.75' || t === '午前休' || t === '午後休' || t === '時間休' || t === '時間給') return false;
           // [V54.6] 研修も「出勤人数（分母）」に含めない休みとして扱う（ただしカスタム出勤の研修は除く）
           if (t !== '出張' && (singleReq?.type === 'カスタム' || singleReq?.customType || singleReq?.details?.customType || singleReq?.details?.isCustomWork)) return false;
           if (['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修'].includes(t)) return true;
@@ -440,12 +442,15 @@ export const CalendarScreen: React.FC<any> = ({
   // 振替＋時間休でかつ最大制限に達しているスタッフを特定するヘルパー (UUIDを利用)
   const isTargetException = (item: any) => {
     if (!item || !item.staff) return false;
+    const itemType = String(item.type || item.details?.type || '').trim();
+    // 振替4・振替3.75・午前休・午後休・時間休は半日勤務なので絶対に終日休み(Exception)にしない
+    if (['振替4', '振4', '振替3.75', '振3.75', '午前休', '午後休', '時間休', '時間給'].includes(itemType)) {
+      return false;
+    }
     const isTarget = TARGET_UUID && item.staff.id === TARGET_UUID;
-    const isTransferType = (item.type || '').includes('振替') || 
-                           (item.details?.type || '').includes('振替') || 
+    const isTransferType = itemType.includes('振替') || 
                            (item.status || '').includes('振替') || 
-                           (item.type || '').includes('振休') || 
-                           (item.details?.type || '').includes('振休') || 
+                           itemType.includes('振休') || 
                            (item.status || '').includes('振休');
     
     const isAs = item.isAssistant || item.staff?.jobType === '助手' || item.staff?.role === '助手';
@@ -459,7 +464,7 @@ export const CalendarScreen: React.FC<any> = ({
                    item.details?.hours ?? 0;
     
     // 振替タイプ（振替4・振替3.75・振替＋時間休を除く）であれば、無条件で1日休み（最大制限値）とみなす
-    if (isTransferType && item.type !== '振替4' && item.type !== '振4' && item.type !== '振替3.75' && item.type !== '振3.75' && item.type !== '振替＋時間休') {
+    if (isTransferType && itemType !== '振替4' && itemType !== '振4' && itemType !== '振替3.75' && itemType !== '振3.75' && itemType !== '振替＋時間休') {
       duration = limit;
     }
 
@@ -1352,7 +1357,7 @@ export const CalendarScreen: React.FC<any> = ({
           const limit = isAs ? 7.5 : 7.75;
 
           let duration = item.hours ?? item.partialLeaveHours ?? item.leaveHours ?? item.details?.partialLeaveHours ?? item.details?.duration ?? item.details?.hours ?? 0;
-          if (isTarget && (type.includes('振替') || type.includes('振休')) && type !== '振替4' && type !== '振4' && type !== '振替3.75' && type !== '振3.75') {
+          if (isTarget && (type.includes('振替') || type.includes('振休')) && type !== '振替4' && type !== '振4' && type !== '振替3.75' && type !== '振3.75' && type !== '振替＋時間休') {
             duration = limit;
           }
           if (type === '出張' && (!duration || duration === 0)) {
@@ -1416,12 +1421,14 @@ export const CalendarScreen: React.FC<any> = ({
         // 例外スタッフ（振替＋時間休7.75h / 7.5h）を検出するヘルパー
         const isCellException = (item: any) => {
           if (!item || !item.staff) return false;
+          const itemType = String(item.type || item.details?.type || '').trim();
+          if (['振替4', '振4', '振替3.75', '振3.75', '午前休', '午後休', '時間休', '時間給'].includes(itemType)) {
+            return false;
+          }
           const isTarget = TARGET_UUID && item.staff.id === TARGET_UUID;
-          const isTransferType = (item.type || '').includes('振替') || 
-                                 (item.details?.type || '').includes('振替') || 
+          const isTransferType = itemType.includes('振替') || 
                                  (item.status || '').includes('振替') || 
-                                 (item.type || '').includes('振休') || 
-                                 (item.details?.type || '').includes('振休') || 
+                                 itemType.includes('振休') || 
                                  (item.status || '').includes('振休');
           
           const isAs = item.isAssistant || item.staff?.jobType === '助手' || item.staff?.role === '助手';
@@ -1429,7 +1436,7 @@ export const CalendarScreen: React.FC<any> = ({
 
           let duration = item.hours ?? item.partialLeaveHours ?? item.leaveHours ?? item.details?.partialLeaveHours ?? item.details?.duration ?? item.details?.hours ?? 0;
           // 振替タイプ（振替4・振替3.75・振替＋時間休を除く）であれば、無条件で1日休み（最大制限値）とみなす
-          if (isTransferType && item.type !== '振替4' && item.type !== '振4' && item.type !== '振替3.75' && item.type !== '振3.75' && item.type !== '振替＋時間休') {
+          if (isTransferType && itemType !== '振替4' && itemType !== '振4' && itemType !== '振替3.75' && itemType !== '振3.75' && itemType !== '振替＋時間休') {
             duration = limit;
           }
 
@@ -1465,9 +1472,9 @@ export const CalendarScreen: React.FC<any> = ({
             .filter(o => (isAfterJune2026 || o.type !== '公休') && !isCellException(o))
             .map(o => getDisplayLabelObj(o));
 
-          // 平日でもカスタム出勤者（および特別出勤者・半日振休等）を表示
+          // 平日でもカスタム出勤者（および特別出勤者）を表示
           const customWorkers = info.working
-            .filter(w => (w.type === 'カスタム' || w.type === '特別出勤' || w.type === '振替4' || w.type === '振4' || w.type === '振替3.75' || w.type === '振3.75' || !!w.customType || !!w.details?.customType) && !isCellException(w))
+            .filter(w => (w.type === 'カスタム' || w.type === '特別出勤' || !!w.customType || !!w.details?.customType) && !isCellException(w))
             .map(w => getDisplayLabelObj(w));
           offWorkers = [...offWorkers, ...customWorkers];
         }
@@ -1699,7 +1706,7 @@ export const CalendarScreen: React.FC<any> = ({
                 duration = limit;
               }
 
-              if (isTransferType && duration >= limit) {
+              if (isTransferType && duration >= limit && item.type !== '振替4' && item.type !== '振4' && item.type !== '振替3.75' && item.type !== '振3.75') {
                 return null;
               }
               return (
@@ -1739,7 +1746,7 @@ export const CalendarScreen: React.FC<any> = ({
                           : ((item.type || '') === '振替4' || (item.type || '') === '振4')
                           ? ` 振4`
                           : ((item.type || '') === '振替3.75' || (item.type || '') === '振3.75')
-                          ? ` 振替3.75 (3.75h)`
+                          ? ` 振3.75 (3.75h)`
                           : (item.type || '') === '特休＋時間休'
                             ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
                             : (item.type || '') === '振替＋時間休'
