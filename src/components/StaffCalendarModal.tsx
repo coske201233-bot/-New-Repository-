@@ -535,9 +535,9 @@ export const StaffCalendarModal: React.FC<StaffCalendarModalProps> = React.memo(
           const hrHrs = r?.details?.hourlyHours ?? (r?.hours ? Math.max(0, r.hours - 4) : 0);
           shiftDisplay = `振替4h＋時間休${hrHrs}h`;
         } else if (type === '振替3.75' || type === '振3.75') {
-          shiftDisplay = '振替3.75(3.75h)';
+          shiftDisplay = '振替3.75';
         } else if (type === '振替4' || type === '振4') {
-          shiftDisplay = '振替4(4.0h)';
+          shiftDisplay = '振替4';
         } else if (HOUR_SELECTOR_TYPES.includes(type) && h > 0) {
           shiftDisplay = `${type}(${h}h)`;
         }

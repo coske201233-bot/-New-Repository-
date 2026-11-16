@@ -1746,7 +1746,7 @@ export const CalendarScreen: React.FC<any> = ({
                           : ((item.type || '') === '振替4' || (item.type || '') === '振4')
                           ? ` 振4`
                           : ((item.type || '') === '振替3.75' || (item.type || '') === '振3.75')
-                          ? ` 振3.75 (3.75h)`
+                          ? ` 振3.75`
                           : (item.type || '') === '特休＋時間休'
                             ? ` 特休${item.details?.specialHours ?? 0}h＋時間休${item.details?.hourlyHours ?? 0}h`
                             : (item.type || '') === '振替＋時間休'
@@ -1843,7 +1843,7 @@ export const CalendarScreen: React.FC<any> = ({
                        </ThemeText>
                      ) : (item.type === '振替3.75' || item.type === '振3.75') ? (
                        <ThemeText variant="caption" style={{ color: COLORS.accent, fontWeight: 'bold', marginLeft: 8 }}>
-                         {' 振替3.75 (3.75h)'}
+                         {' 振3.75'}
                        </ThemeText>
                      ) : (
                       <ThemeText 
