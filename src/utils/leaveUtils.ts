@@ -659,6 +659,7 @@ export interface NonWorkingHoursBreakdown {
   hourlyLeaveHours: number;    // 3. 時間休 (登録時間)
   summerLeaveHours: number;    // 4. 夏季休暇 (常勤: 7.75h, 会計年度: 0h)
   furikae4Hours: number;       // 5. 振替4 (4.0h)
+  furikae375Hours: number;     // 5-2. 振替3.75 (3.75h)
   furikaeHourlyHours: number;  // 6. 振替＋時間休 (4.0h ＋ 登録された時間休の時間数)
   specialHourlyHours: number;  // 7. 特休＋時間休 (特休時間数 ＋ 時間休時間数)
   weekdayTripHours: number;    // 8. 平日の出張 (平日の出張のみ登録時間、終日は 7.75h / 7.5h)
@@ -705,6 +706,7 @@ export function calculateStaffMonthlyNonWorkingHours(
     hourlyLeaveHours: 0,
     summerLeaveHours: 0,
     furikae4Hours: 0,
+    furikae375Hours: 0,
     furikaeHourlyHours: 0,
     specialHourlyHours: 0,
     weekdayTripHours: 0,
@@ -872,6 +874,15 @@ export function calculateStaffMonthlyNonWorkingHours(
       breakdown.furikae4Hours += 4.0;
       counted = true;
     }
+    // 6-2. 振替3.75 (3.75h)
+    else if (['振替3.75', '振3.75'].includes(rawType)) {
+      const rawH = resolvedShift.hours ?? resolvedShift.details?.furikaeHours ?? resolvedShift.details?.duration ?? resolvedShift.details?.hours;
+      const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? parseFloat(String(rawH)) : null;
+      const h = (parsedH !== null && !isNaN(parsedH) && parsedH > 0) ? parsedH : 3.75;
+      addedHours = h;
+      breakdown.furikae375Hours += h;
+      counted = true;
+    }
     // 7. 振替＋時間休 (4.0h ＋ 登録された時間休の時間数)
     else if (rawType === '振替＋時間休') {
       const hrHours = Number(resolvedShift.details?.hourlyHours ?? resolvedShift.hourlyHours ?? (resolvedShift.hours && resolvedShift.hours > 4 ? resolvedShift.hours - 4 : 0));
@@ -935,6 +946,7 @@ export function calculateStaffMonthlyNonWorkingHours(
     breakdown.hourlyLeaveHours +
     breakdown.summerLeaveHours +
     breakdown.furikae4Hours +
+    breakdown.furikae375Hours +
     breakdown.furikaeHourlyHours +
     breakdown.specialHourlyHours +
     breakdown.weekdayTripHours;
@@ -1230,6 +1242,12 @@ export function calculateStaffDailyNonWorkingHours(
   // 6. 振替4 (4.0h)
   else if (['振替4', '振4'].includes(rawType)) {
     addedHours = 4.0;
+  }
+  // 6-2. 振替3.75 (3.75h)
+  else if (['振替3.75', '振3.75'].includes(rawType)) {
+    const rawH = resolvedShift.hours ?? resolvedShift.details?.furikaeHours ?? resolvedShift.details?.duration ?? resolvedShift.details?.hours;
+    const parsedH = (rawH !== undefined && rawH !== null && rawH !== '') ? parseFloat(String(rawH)) : null;
+    addedHours = (parsedH !== null && !isNaN(parsedH) && parsedH > 0) ? parsedH : 3.75;
   }
   // 7. 振替＋時間休 (4.0h ＋ 登録された時間休の時間数)
   else if (rawType === '振替＋時間休') {

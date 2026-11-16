@@ -510,7 +510,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
           <div class="rules-box">
             <b>【集計および按分ルール】</b><br/>
-            ・対象期間: 月曜日〜金曜日の平日5日間に発生した勤務を要しない時間（年休、特休、時間休、夏季休暇、振替4、振替＋時間休、特休＋時間休、平日の出張）。<br/>
+            ・対象期間: 月曜日〜金曜日の平日5日間に発生した勤務を要しない時間（年休、特休、時間休、夏季休暇、振替4、振替3.75、振替＋時間休、特休＋時間休、平日の出張）。<br/>
             ・除外基準: 役職・職種・所属等に「事務」が含まれるスタッフのみ除外（管理職は2F/4F/フォロー該当の場合は集計対象）。<br/>
             ・フロア按分比率:<br/>
             　- SC（包括）: 全て「2F」へ加算（2F: 1.0）<br/>
@@ -585,6 +585,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             <td>${b.hourlyLeaveHours > 0 ? safeFormatHours(b.hourlyLeaveHours) : '-'}</td>
             <td>${b.summerLeaveHours > 0 ? safeFormatHours(b.summerLeaveHours) : '-'}</td>
             <td>${b.furikae4Hours > 0 ? safeFormatHours(b.furikae4Hours) : '-'}</td>
+            <td>${b.furikae375Hours > 0 ? safeFormatHours(b.furikae375Hours) : '-'}</td>
             <td>${b.furikaeHourlyHours > 0 ? safeFormatHours(b.furikaeHourlyHours) : '-'}</td>
             <td>${b.specialHourlyHours > 0 ? safeFormatHours(b.specialHourlyHours) : '-'}</td>
             <td>${b.weekdayTripHours > 0 ? safeFormatHours(b.weekdayTripHours) : '-'}</td>
@@ -635,6 +636,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   <th style="width: 45px;">時間休</th>
                   <th style="width: 45px;">夏季</th>
                   <th style="width: 45px;">振4</th>
+                  <th style="width: 45px;">振3.75</th>
                   <th style="width: 50px;">振+時</th>
                   <th style="width: 50px;">特+時</th>
                   <th style="width: 50px;">平日出張</th>
@@ -645,7 +647,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               </tbody>
             </table>
             <div class="notes">
-              ※【集計基準】年休(常勤:7.75h/会計年度:7.5h) / 特休(登録時間、終日7.75h/7.5h) / 時間休(登録時間) / 夏季休暇(常勤:7.75h/会計年度:0h) / 振替4(4.0h) / 振替＋時間休(4.0h＋時間休) / 特休＋時間休(特休＋時間休) / 平日の出張(平日のみ登録時間、終日7.75h/7.5h、土日祝は除外) ※公休、休日出勤、通常の出勤は対象外
+              ※【集計基準】年休(常勤:7.75h/会計年度:7.5h) / 特休(登録時間、終日7.75h/7.5h) / 時間休(登録時間) / 夏季休暇(常勤:7.75h/会計年度:0h) / 振替4(4.0h) / 振替3.75(3.75h) / 振替＋時間休(4.0h＋時間休) / 特休＋時間休(特休＋時間休) / 平日の出張(平日のみ登録時間、終日7.75h/7.5h、土日祝は除外) ※公休、休日出勤、通常の出勤は対象外
             </div>
             <script>window.onload=function(){window.print();};<\/script>
           </body>
@@ -1123,6 +1125,9 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             } else if (type === '振替4' || type === '振4') {
               cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
               label = '振4';
+            } else if (type === '振替3.75' || type === '振3.75') {
+              cellStyle = 'background-color: #eff6ff; color: #2563eb; font-weight: bold;';
+              label = '振3.75';
             } else if (type === '夏季休暇') {
               cellStyle = 'background-color: #fefce8; color: #ca8a04;';
               label = '夏';
@@ -2185,6 +2190,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                                   <ThemeText variant="caption" color="#38bdf8">振替4: <ThemeText bold color="#38bdf8">{safeFormatHours(b.furikae4Hours)}</ThemeText></ThemeText>
                                 </View>
                               )}
+                              {b.furikae375Hours > 0 && (
+                                <View style={styles.breakdownChip}>
+                                  <ThemeText variant="caption" color="#38bdf8">振替3.75: <ThemeText bold color="#38bdf8">{safeFormatHours(b.furikae375Hours)}</ThemeText></ThemeText>
+                                </View>
+                              )}
                               {b.furikaeHourlyHours > 0 && (
                                 <View style={styles.breakdownChip}>
                                   <ThemeText variant="caption" color="#38bdf8">振替+時間休: <ThemeText bold color="#38bdf8">{safeFormatHours(b.furikaeHourlyHours)}</ThemeText></ThemeText>
@@ -2498,6 +2508,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                         {b.furikae4Hours > 0 && (
                           <View style={styles.breakdownChip}>
                             <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>振4: {safeFormatHours(b.furikae4Hours)}</ThemeText>
+                          </View>
+                        )}
+                        {b.furikae375Hours > 0 && (
+                          <View style={styles.breakdownChip}>
+                            <ThemeText variant="caption" color="#38bdf8" style={{ fontSize: 10 }}>振3.75: {safeFormatHours(b.furikae375Hours)}</ThemeText>
                           </View>
                         )}
                         {b.furikaeHourlyHours > 0 && (

@@ -78,7 +78,12 @@ const isManualRecord = (rec: any): boolean => {
 };
 
 const isOffShiftType = (type: any): boolean =>
-  ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '出張', '振替', '振休', '全休', '年給', '有給'].includes(
+  ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '出張', '振替', '振休', '振替＋時間休', '全休', '年給', '有給'].includes(
+    String(type || '').trim()
+  );
+
+const isHalfDayWorkLeaveType = (type: any): boolean =>
+  ['振替3.75', '振3.75', '振替4', '振4', '午前休', '午後休', '時間休', '時間給'].includes(
     String(type || '').trim()
   );
 
@@ -357,7 +362,7 @@ export const generateMonthlyShifts = async (
         const msId = String(ms.staff_id || ms.staffId || ms.user_id || ms.userId || extractUuid(ms.id) || '').trim();
         if (msId && msId === staff.id) {
           const dKey = ms.date.substring(0, 10);
-          if (isWorkShiftType(ms.type)) {
+          if (isWorkShiftType(ms.type) || isHalfDayWorkLeaveType(ms.type)) {
             tracker.workedDates.add(dKey);
             tracker.totalWorkCount++;
             if (getDayType(new Date(ms.date.replace(/-/g, '/'))) !== 'weekday') tracker.holidayWorkCount++;
@@ -644,7 +649,7 @@ export const generateMonthlyShifts = async (
           const person = sortedStaffList[currentStaffIndex % sortedStaffList.length];
           const tracker = trackers.get(person.id)!;
 
-          if (!tracker.workedDates.has(dateStr) && !tracker.forcedOffDates.has(dateStr) && !hasLeave(tracker, dateStr)) {
+          if (!tracker.workedDates.has(dateStr) && !tracker.forcedOffDates.has(dateStr) && !hasLeave(tracker, dateStr) && !hasManualShift(tracker.id, dateStr)) {
             generatedShifts.push({
               id: generateValidUuid(),
               staff_name: tracker.name,

@@ -14,7 +14,7 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
   const [hourlyHours, setHourlyHours] = useState(1.0);
   const [comment, setComment] = useState('');
 
-  const types = ['年休', '時間休', '振替4', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張'];
+  const types = ['年休', '時間休', '振替4', '振替3.75', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張'];
   const needsHours = ['時間休', '特休', '特休＋時間休', '振替＋時間休', '出張'].includes(type);
 
   const adjustHours = (delta: number) => {
@@ -43,7 +43,9 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
           ? (4.0 + hourlyHours)
           : type === '振替4'
             ? 4.0
-            : (needsHours ? hours : null),
+            : (type === '振替3.75' || type === '振3.75')
+              ? 3.75
+              : (needsHours ? hours : null),
       comment: comment,
       status: 'pending',
       details: type === '特休＋時間休'
@@ -52,7 +54,9 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
           ? { furikaeHours: 4.0, hourlyHours }
           : type === '振替4'
             ? { furikaeHours: 4.0, note: '振替4時間' }
-            : null,
+            : (type === '振替3.75' || type === '振3.75')
+              ? { furikaeHours: 3.75, duration: 3.75, hours: 3.75, note: '振替3.75時間' }
+              : null,
       createdAt: new Date().toISOString()
     };
 
@@ -73,7 +77,11 @@ export const LeaveRequestScreen = ({ user, onSubmitRequest }: any) => {
               <TouchableOpacity 
                 key={t}
                 style={[styles.typeBtn, type === t && styles.typeBtnActive]}
-                onPress={() => setType(t)}
+                onPress={() => {
+                  setType(t);
+                  if (t === '振替3.75') setHours(3.75);
+                  else if (t === '振替4') setHours(4.0);
+                }}
               >
                 <ThemeText color={type === t ? 'white' : COLORS.text} bold={type === t} style={{ fontSize: 11 }}>{t}</ThemeText>
               </TouchableOpacity>

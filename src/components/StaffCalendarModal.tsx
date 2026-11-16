@@ -17,7 +17,7 @@ export interface MonthDay {
   empty: boolean;
 }
 
-const SHIFT_TYPES = ['出勤', 'カスタム', '公休', '夏季休暇', '時間休', '振替＋時間休', '振替4', '特休', '年休', '特休＋時間休', '出張', '空欄'];
+const SHIFT_TYPES = ['出勤', 'カスタム', '公休', '夏季休暇', '時間休', '振替＋時間休', '振替4', '振替3.75', '特休', '年休', '特休＋時間休', '出張', '空欄'];
 const HOUR_SELECTOR_TYPES = ['時間休', '特休', '特休＋時間休', '振替＋時間休', '出張'];
 
 export const normalizeStaffKey = (n: string) => (n || '').replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/公費/g, '').toUpperCase();
@@ -42,7 +42,8 @@ export const getReqHours = (r: any): number => {
     return parsedH;
   }
 
-  if (r.type === '振替4') return 4.0;
+  if (r.type === '振替4' || r.type === '振4') return 4.0;
+  if (r.type === '振替3.75' || r.type === '振3.75') return 3.75;
   if (isFullDayLeaveType) return 7.75;
   if (rType === '午前休') return 4.0;
   if (rType === '午後休') return 3.75;
@@ -154,6 +155,9 @@ const CalendarGrid: React.FC<CalendarGridProps> = React.memo(({
                 labelColor = '#ef4444';
               } else if (rType === '振替4' || rType === '振4') {
                 displayLabel = '振4';
+                labelColor = '#ef4444';
+              } else if (rType === '振替3.75' || rType === '振3.75') {
+                displayLabel = '振3.75';
                 labelColor = '#ef4444';
               } else if (rType === '特休＋時間休') {
                 const sp = req.details?.specialHours ?? 0;
@@ -419,7 +423,9 @@ export const StaffCalendarModal: React.FC<StaffCalendarModalProps> = React.memo(
                 ? (4.0 + hourlyHours)
                 : type === '振替4'
                   ? 4.0
-                  : (HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : null),
+                  : (type === '振替3.75' || type === '振3.75')
+                    ? 3.75
+                    : (HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : null),
         details: isCustom
           ? { note: customName, customType: customName, isCustomWork: true, isManual: true }
           : isTrip
@@ -430,7 +436,9 @@ export const StaffCalendarModal: React.FC<StaffCalendarModalProps> = React.memo(
                 ? { note: '管理画面より更新', furikaeHours: 4.0, hourlyHours, isManual: true }
                 : type === '振替4'
                   ? { note: '振替4時間', furikaeHours: 4.0, isManual: true }
-                  : { note: '管理画面より更新', isManual: true },
+                  : (type === '振替3.75' || type === '振3.75')
+                    ? { note: '振替3.75時間', furikaeHours: 3.75, duration: 3.75, hours: 3.75, isManual: true }
+                    : { note: '管理画面より更新', isManual: true },
         status: 'approved',
         createdAt: now,
         updatedAt: now,
@@ -526,6 +534,10 @@ export const StaffCalendarModal: React.FC<StaffCalendarModalProps> = React.memo(
         } else if (type === '振替＋時間休') {
           const hrHrs = r?.details?.hourlyHours ?? (r?.hours ? Math.max(0, r.hours - 4) : 0);
           shiftDisplay = `振替4h＋時間休${hrHrs}h`;
+        } else if (type === '振替3.75' || type === '振3.75') {
+          shiftDisplay = '振替3.75(3.75h)';
+        } else if (type === '振替4' || type === '振4') {
+          shiftDisplay = '振替4(4.0h)';
         } else if (HOUR_SELECTOR_TYPES.includes(type) && h > 0) {
           shiftDisplay = `${type}(${h}h)`;
         }
@@ -638,7 +650,11 @@ export const StaffCalendarModal: React.FC<StaffCalendarModalProps> = React.memo(
                       style={[styles.typeBtn, selectedType === type && styles.typeBtnActive]}
                       onPress={() => {
                         setSelectedType(type);
-                        if (type === '出張' && (!selectedHours || selectedHours <= 1.0)) {
+                        if (type === '振替3.75') {
+                          setSelectedHours(3.75);
+                        } else if (type === '振替4') {
+                          setSelectedHours(4.0);
+                        } else if (type === '出張' && (!selectedHours || selectedHours <= 1.0)) {
                           setSelectedHours(maxWorkingHours);
                         }
                       }}

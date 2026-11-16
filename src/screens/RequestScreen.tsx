@@ -256,6 +256,9 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
     } else if (newRequest.type === '振替4') {
       duration = 4.0;
       detailsPayload = { furikaeHours: 4.0, note: '振替4時間' };
+    } else if (newRequest.type === '振替3.75' || newRequest.type === '振3.75') {
+      duration = 3.75;
+      detailsPayload = { furikaeHours: 3.75, duration: 3.75, hours: 3.75, note: '振替3.75時間' };
     } else if (newRequest.type === '時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '出張') {
       duration = newRequest.hours;
     }
@@ -382,12 +385,14 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
                   <View style={styles.infoRow}>
                     <CalendarIcon size={14} color={COLORS.textSecondary} />
                     <ThemeText variant="body" style={styles.infoText}>対象日: {formatDate(item.date)}</ThemeText>
-                    {item.details?.duration && (
+                    {(item.details?.duration || item.hours || item.type === '振替3.75' || item.type === '振替4') ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 12 }}>
                         <Clock size={14} color={COLORS.accent} />
-                        <ThemeText variant="caption" style={{ marginLeft: 4, color: COLORS.accent }} bold>{item.details.duration}時間</ThemeText>
+                        <ThemeText variant="caption" style={{ marginLeft: 4, color: COLORS.accent }} bold>
+                          {item.details?.duration || item.hours || (item.type === '振替3.75' ? 3.75 : 4.0)}時間
+                        </ThemeText>
                       </View>
-                    )}
+                    ) : null}
                   </View>
                   {(item.createdAt || item.created_at || item.details?.createdAt) ? (
                     <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 2, fontSize: 11 }}>
@@ -486,17 +491,33 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
               <View style={styles.inputGroup}>
                 <ThemeText variant="label">種類</ThemeText>
                 <View style={styles.typeSelector}>
-                  {['年休', '時間休', '公休変更', '休日出勤変更', '休日出勤＋公休変更', '振替4', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張'].map((t) => (
+                  {['年休', '時間休', '公休変更', '休日出勤変更', '休日出勤＋公休変更', '振替4', '振替3.75', '振替＋時間休', '夏季休暇', '特休', '特休＋時間休', '出張'].map((t) => (
                     <TouchableOpacity 
                       key={t}
                       style={[styles.typeOption, newRequest.type === t && styles.typeOptionActive]}
-                      onPress={() => setNewRequest({ ...newRequest, type: t })}
+                      onPress={() => {
+                        const nextHours = t === '振替3.75' ? 3.75 : t === '振替4' ? 4.0 : newRequest.hours;
+                        setNewRequest({ ...newRequest, type: t, hours: nextHours });
+                      }}
                     >
                       <ThemeText variant="caption" color={newRequest.type === t ? COLORS.background : COLORS.text}>{t}</ThemeText>
                     </TouchableOpacity>
                   ))}
                 </View>
               </View>
+
+              {(newRequest.type === '振替3.75' || newRequest.type === '振3.75') && (
+                <View style={styles.timeSelectionArea}>
+                  <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.12)', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+                    <ThemeText variant="caption" color={COLORS.primary} bold>
+                      ※ 振替3.75（3.75時間）として自動設定されます
+                    </ThemeText>
+                    <ThemeText variant="caption" style={{ color: COLORS.textSecondary, fontSize: 11, marginTop: 2 }}>
+                      ※ 半日振休扱い（年休残数からは消化されず、勤務を要しない時間に3.75h加算されます）
+                    </ThemeText>
+                  </View>
+                </View>
+              )}
   
               {(newRequest.type === '時間休' || newRequest.type === '特休' || newRequest.type === '時間給' || newRequest.type === '特休＋時間休' || newRequest.type === '振替＋時間休' || newRequest.type === '出張') && (
                 <View style={styles.timeSelectionArea}>

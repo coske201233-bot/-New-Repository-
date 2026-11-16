@@ -152,6 +152,8 @@ export const getNormalizedShiftMatrix = (
         label = `振4時${hr}`;
       } else if (type === '振替4' || type === '振4') {
         label = '振4';
+      } else if (type === '振替3.75' || type === '振3.75') {
+        label = '振3.75';
       } else if (type === '夏季休暇') {
         label = '夏';
       } else if (type === '時間休' || type === '時間給') {

@@ -248,6 +248,10 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
                     <ThemeText variant="caption" bold style={{ color: COLORS.accent, marginLeft: 8 }}>
                       振替:4h (実働3.75h)
                     </ThemeText>
+                  ) : (item.type === '振替3.75' || item.type === '振3.75') ? (
+                    <ThemeText variant="caption" bold style={{ color: COLORS.accent, marginLeft: 8 }}>
+                      振替:3.75h (半日振休)
+                    </ThemeText>
                   ) : (
                     (item.details?.duration || item.hours) ? (
                       <ThemeText variant="caption" bold style={{ color: COLORS.accent, marginLeft: 8 }}>

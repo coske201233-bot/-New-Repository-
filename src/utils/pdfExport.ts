@@ -123,6 +123,9 @@ export const exportShiftToPDF = async (
       } else if (rawType === '振替4' || rawType === '振4') {
         statusText = '振4';
         statusClass = 'status-transfer';
+      } else if (rawType === '振替3.75' || rawType === '振3.75') {
+        statusText = '振3.75';
+        statusClass = 'status-transfer';
       } else if (rawType === '特休') {
         const hrs = req.hours ? `${req.hours}h` : '';
         statusText = `特休${hrs}`;
