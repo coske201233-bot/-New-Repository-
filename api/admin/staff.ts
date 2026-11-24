@@ -178,7 +178,8 @@ export default async function handler(req: any, res: any) {
     !supabaseUrl ||
     (!supabaseServiceKey &&
       requestedAction !== 'UPSERT_CONFIG' &&
-      requestedAction !== 'UPDATE_ROTATION_ORDER')
+      requestedAction !== 'UPDATE_ROTATION_ORDER' &&
+      requestedAction !== 'UPDATE_REQUEST_STATUS')
   ) {
     console.error('❌ Supabase credentials missing: Service Role Key が設定されていません。');
     return res.status(500).json({
@@ -851,9 +852,66 @@ export default async function handler(req: any, res: any) {
           return res.status(200).json({ success: true, config: configData });
         }
 
+        // ==========================================
+        // 7. 申請ステータスの確実な更新 (action: 'UPDATE_REQUEST_STATUS')
+        //    RLS制約等によるクライアント直接更新の0行サイレント失敗を防ぐ特権エンドポイント
+        // ==========================================
+        case 'UPDATE_REQUEST_STATUS': {
+          const {
+            requestId,
+            status,
+            details,
+            duplicatePendingIds,
+          } = effectivePayload || {};
+
+          if (!requestId || !status) {
+            return res.status(400).json({ error: 'requestId と status は必須です。' });
+          }
+
+          const cleanId = String(requestId).replace(/['"]/g, '').trim();
+          const nowIso = new Date().toISOString();
+          const updatePayload: any = { status: String(status) };
+          if (details && typeof details === 'object') {
+            updatePayload.details = { ...details, updatedAt: nowIso };
+          }
+
+          const { data: updatedRows, error: updateErr } = await supabaseAdmin
+            .from('requests')
+            .update(updatePayload)
+            .eq('id', cleanId)
+            .select('id, status, details');
+
+          if (updateErr) {
+            console.error('UPDATE_REQUEST_STATUS Error:', updateErr);
+            return res.status(500).json({ error: updateErr.message });
+          }
+
+          if (!updatedRows || updatedRows.length === 0) {
+            return res.status(404).json({ error: `対象レコードが見つかりません (id: ${cleanId})` });
+          }
+
+          // 同日・同スタッフの重複 pending レコードがある場合は併せて確定状態へ整理
+          if (Array.isArray(duplicatePendingIds) && duplicatePendingIds.length > 0) {
+            const cleanDupIds = duplicatePendingIds
+              .map((d: any) => String(d || '').replace(/['"]/g, '').trim())
+              .filter((d: string) => d.length > 0 && d !== cleanId);
+            if (cleanDupIds.length > 0) {
+              await supabaseAdmin
+                .from('requests')
+                .update({ status: 'superseded', details: { supersededAt: nowIso, supersededBy: cleanId } })
+                .in('id', cleanDupIds);
+            }
+          }
+
+          return res.status(200).json({
+            success: true,
+            request: updatedRows[0],
+          });
+        }
+
         default:
           return res.status(400).json({
-            error: `不明なアクションです: ${currentAction}。有効なアクション: CREATE, UPDATE_INFO, UPDATE_PASSWORD, DELETE, UPDATE_ROTATION_ORDER, UPSERT_CONFIG`,
+            error: `不明なアクションです: ${currentAction}。有効なアクション: CREATE, UPDATE_INFO, UPDATE_PASSWORD, DELETE, UPDATE_ROTATION_ORDER, UPSERT_CONFIG, UPDATE_REQUEST_STATUS`,
           });
       }
     } catch (err: any) {

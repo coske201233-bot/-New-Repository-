@@ -121,7 +121,8 @@ export const useAppLogic = () => {
 
           if (mounted) {
             staff.setStaffList(staffData);
-            req.setRequests(finalReqs);
+            // 初回ロード時も定期リフェッチと同じ重複排除（確定ステータス優先）を通して不整合を防止
+            await req.processAndSetRequests(finalReqs, true);
             req.markRequestsLoadedRange(new Date().getFullYear());
             
             // シフトデータおよび設定値も取得（対象期間に絞って取得）
@@ -380,8 +381,9 @@ export const useAppLogic = () => {
   }, [auth.user, auth.profile, req.setRequests, staff.staffList]);
 
   const approveRequest = useCallback(async (requestId: string, status: string = 'approved') => {
-    const updatedItem = requestsRef.current.find(r => r.id === requestId);
-    if (!updatedItem && !requestId) return;
+    const cleanId = String(requestId || '').replace(/['"]/g, '').trim();
+    const updatedItem = requestsRef.current.find(r => r && (r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId));
+    if (!updatedItem && !cleanId) return;
 
     const operator = {
       id: auth.profile?.id || auth.user?.id,
@@ -392,45 +394,80 @@ export const useAppLogic = () => {
     const prevRequestsSnap = requestsRef.current;
     const prevShiftsSnap = shiftsRef.current;
     const now = new Date().toISOString();
+    const isApprove = status === 'approved' || status === '承認';
 
     markLocalMutation(5000);
+    req.registerLocalRequestMutation(cleanId, status, now);
 
     // 1. 楽観的UI更新: requests と shifts のメモリ上ステートを即座に差分更新（フルリフェッチ廃止）
+    const mutatedIds: string[] = [cleanId];
     if (updatedItem) {
       const { clearCriteria, upsertShifts, supersededConflictDates } = buildOptimisticShiftChanges(updatedItem, status, now);
+      const targetStaffId = String(updatedItem.staff_id || updatedItem.staffId || updatedItem.user_id || '').trim();
+      const targetStaffNameNorm = String(updatedItem.staff_name || updatedItem.staffName || '').replace(/[\s\u3000]/g, '').toUpperCase();
+      const targetDateNorm = normalizeDateStr(updatedItem.date);
+      const targetTypeTrim = String(updatedItem.type || '').trim();
 
-      req.setRequests(prev =>
-        prev.map(r => {
-          if (!r) return r;
-          if (r.id === requestId) {
-            return { ...r, status, updatedAt: now, details: { ...(r.details || {}), updatedAt: now } };
+      const nextRequests = prevRequestsSnap.map(r => {
+        if (!r) return r;
+        const rCleanId = String(r.id || '').replace(/['"]/g, '').trim();
+        if (r.id === requestId || rCleanId === cleanId) {
+          return { ...r, status, updatedAt: now, details: { ...(r.details || {}), updatedAt: now } };
+        }
+        // 承認時、同一スタッフ・同一日付・同種別の重複 pending レコードも即座に superseded 化
+        if (
+          isApprove &&
+          targetDateNorm &&
+          (r.status === 'pending' || r.status === '申請中' || !r.status) &&
+          normalizeDateStr(r.date) === targetDateNorm &&
+          (!targetTypeTrim || !r.type || String(r.type).trim() === targetTypeTrim)
+        ) {
+          const rStaffId = String(r.staff_id || r.staffId || r.user_id || '').trim();
+          const rStaffNameNorm = String(r.staff_name || r.staffName || '').replace(/[\s\u3000]/g, '').toUpperCase();
+          const isSameStaff =
+            (targetStaffId && rStaffId === targetStaffId) ||
+            (targetStaffNameNorm && rStaffNameNorm === targetStaffNameNorm);
+          if (isSameStaff) {
+            if (rCleanId) {
+              mutatedIds.push(rCleanId);
+              req.registerLocalRequestMutation(rCleanId, 'superseded', now);
+            }
+            return { ...r, status: 'superseded', updatedAt: now, details: { ...(r.details || {}), supersededAt: now, supersededBy: cleanId, updatedAt: now } };
           }
-          // 公休変更承認時の競合申請を即座に superseded 化
-          if (
-            supersededConflictDates &&
-            r.type === '公休変更' &&
-            r.status === 'approved' &&
-            String(r.id) !== supersededConflictDates.excludeId
-          ) {
-            const crStaffId = r.staff_id || r.staffId || r.user_id;
-            const crStaffName = r.staff_name || r.staffName;
-            const isSameStaff =
-              (supersededConflictDates.staffId && crStaffId === supersededConflictDates.staffId) ||
-              (supersededConflictDates.staffName && crStaffName === supersededConflictDates.staffName);
-            if (isSameStaff) {
-              const crOrig = normalizeDateStr(r.details?.originalDate || r.originalDate);
-              const crTarget = normalizeDateStr(r.details?.targetDate || r.targetDate || r.date);
-              if (
-                (crOrig && (crOrig === supersededConflictDates.originalDate || crOrig === supersededConflictDates.targetDate)) ||
-                (crTarget && (crTarget === supersededConflictDates.originalDate || crTarget === supersededConflictDates.targetDate))
-              ) {
-                return { ...r, status: 'superseded', details: { ...(r.details || {}), supersededAt: now, supersededBy: supersededConflictDates.excludeId } };
+        }
+        // 公休変更承認時の競合申請を即座に superseded 化
+        if (
+          supersededConflictDates &&
+          r.type === '公休変更' &&
+          r.status === 'approved' &&
+          rCleanId !== supersededConflictDates.excludeId
+        ) {
+          const crStaffId = r.staff_id || r.staffId || r.user_id;
+          const crStaffName = r.staff_name || r.staffName;
+          const isSameStaff =
+            (supersededConflictDates.staffId && crStaffId === supersededConflictDates.staffId) ||
+            (supersededConflictDates.staffName && crStaffName === supersededConflictDates.staffName);
+          if (isSameStaff) {
+            const crOrig = normalizeDateStr(r.details?.originalDate || r.originalDate);
+            const crTarget = normalizeDateStr(r.details?.targetDate || r.targetDate || r.date);
+            if (
+              (crOrig && (crOrig === supersededConflictDates.originalDate || crOrig === supersededConflictDates.targetDate)) ||
+              (crTarget && (crTarget === supersededConflictDates.originalDate || crTarget === supersededConflictDates.targetDate))
+            ) {
+              if (rCleanId) {
+                mutatedIds.push(rCleanId);
+                req.registerLocalRequestMutation(rCleanId, 'superseded', now);
               }
+              return { ...r, status: 'superseded', details: { ...(r.details || {}), supersededAt: now, supersededBy: supersededConflictDates.excludeId } };
             }
           }
-          return r;
-        })
-      );
+        }
+        return r;
+      });
+
+      req.setRequests(nextRequests);
+      // デバウンスを待たず即座に localStorage (proto_request_data) と AsyncStorage へ最新 approved 状態を永続化
+      req.persistRequestsImmediately(nextRequests);
 
       if (clearCriteria.length > 0) {
         shifts.removeLocalShifts(clearCriteria);
@@ -440,14 +477,33 @@ export const useAppLogic = () => {
       }
     }
 
-    // 2. バックグラウンドでDB保存を実行（失敗時のみロールバック＆通知）
-    approveShiftRequest(updatedItem || requestId, status, operator).catch((e: any) => {
-      console.error('Approve/Reject request background sync error (rolling back):', e);
-      req.setRequests(prevRequestsSnap);
-      shifts.setShifts(prevShiftsSnap);
-      Alert.alert('保存エラー', 'データベースへの保存に失敗したため変更を元に戻しました。\n詳細: ' + (e?.message || '不明なエラー'));
-    });
-  }, [req.setRequests, shifts.removeLocalShifts, shifts.upsertLocalShifts, shifts.setShifts, auth.profile, auth.user]);
+    // 2. バックグラウンドでDB保存＆実更新検証を実行（進行中Promiseを追跡し、失敗時のみロールバック＆通知）
+    const dbPromise = approveShiftRequest(updatedItem || cleanId, status, operator)
+      .then(() => {
+        mutatedIds.forEach(mid => req.markLocalRequestMutationCommitted(mid));
+      })
+      .catch((e: any) => {
+        console.error('Approve/Reject request background sync error (rolling back):', e);
+        mutatedIds.forEach(mid => req.clearLocalRequestMutation(mid));
+        req.setRequests(prevRequestsSnap);
+        req.persistRequestsImmediately(prevRequestsSnap);
+        shifts.setShifts(prevShiftsSnap);
+        Alert.alert('保存エラー', 'データベースへの保存に失敗したため変更を元に戻しました。\n詳細: ' + (e?.message || '不明なエラー'));
+      });
+    req.trackDbMutationPromise(dbPromise);
+  }, [
+    req.setRequests,
+    req.persistRequestsImmediately,
+    req.registerLocalRequestMutation,
+    req.markLocalRequestMutationCommitted,
+    req.clearLocalRequestMutation,
+    req.trackDbMutationPromise,
+    shifts.removeLocalShifts,
+    shifts.upsertLocalShifts,
+    shifts.setShifts,
+    auth.profile,
+    auth.user,
+  ]);
 
   const handleBulkApprove = useCallback(async (ids: string[]) => {
     if (!ids || ids.length === 0) return;
@@ -465,6 +521,7 @@ export const useAppLogic = () => {
     const idSet = new Set(cleanIds);
 
     markLocalMutation(5000);
+    cleanIds.forEach(cid => req.registerLocalRequestMutation(cid, 'approved', now));
 
     // 1. 楽観的UI更新: 一括で requests と shifts を即時更新
     const allClearCriteria: { staffId?: string; staffName?: string; date: string }[] = [];
@@ -477,26 +534,46 @@ export const useAppLogic = () => {
       allUpsertShifts.push(...upsertShifts);
     });
 
-    req.setRequests(prev =>
-      prev.map(r =>
-        r && idSet.has(String(r.id).replace(/['"]/g, '').trim())
-          ? { ...r, status: 'approved', updatedAt: now, details: { ...(r.details || {}), updatedAt: now } }
-          : r
-      )
+    const nextRequests = prevRequestsSnap.map(r =>
+      r && idSet.has(String(r.id).replace(/['"]/g, '').trim())
+        ? { ...r, status: 'approved', updatedAt: now, details: { ...(r.details || {}), updatedAt: now } }
+        : r
     );
+    req.setRequests(nextRequests);
+    req.persistRequestsImmediately(nextRequests);
+
     if (allClearCriteria.length > 0) shifts.removeLocalShifts(allClearCriteria);
     if (allUpsertShifts.length > 0) shifts.upsertLocalShifts(allUpsertShifts);
 
     Alert.alert('完了', '承認が完了しました');
 
-    // 2. バックグラウンドでDB一括保存（失敗時のみロールバック）
-    bulkApproveShiftRequests(cleanIds, operator).catch((e: any) => {
-      console.error('Bulk approve background sync error (rolling back):', e);
-      req.setRequests(prevRequestsSnap);
-      shifts.setShifts(prevShiftsSnap);
-      Alert.alert('エラー', '一括承認の保存に失敗したため元に戻しました: ' + (e?.message || '不明なエラー'));
-    });
-  }, [req.setRequests, shifts.removeLocalShifts, shifts.upsertLocalShifts, shifts.setShifts, auth.profile, auth.user]);
+    // 2. バックグラウンドでDB一括保存（進行中Promiseを追跡し、失敗時のみロールバック）
+    const dbPromise = bulkApproveShiftRequests(cleanIds, operator)
+      .then(() => {
+        cleanIds.forEach(cid => req.markLocalRequestMutationCommitted(cid));
+      })
+      .catch((e: any) => {
+        console.error('Bulk approve background sync error (rolling back):', e);
+        cleanIds.forEach(cid => req.clearLocalRequestMutation(cid));
+        req.setRequests(prevRequestsSnap);
+        req.persistRequestsImmediately(prevRequestsSnap);
+        shifts.setShifts(prevShiftsSnap);
+        Alert.alert('エラー', '一括承認の保存に失敗したため元に戻しました: ' + (e?.message || '不明なエラー'));
+      });
+    req.trackDbMutationPromise(dbPromise);
+  }, [
+    req.setRequests,
+    req.persistRequestsImmediately,
+    req.registerLocalRequestMutation,
+    req.markLocalRequestMutationCommitted,
+    req.clearLocalRequestMutation,
+    req.trackDbMutationPromise,
+    shifts.removeLocalShifts,
+    shifts.upsertLocalShifts,
+    shifts.setShifts,
+    auth.profile,
+    auth.user,
+  ]);
 
   const cancelRequest = useCallback(async (requestId: string) => {
     if (!requestId) {
@@ -506,11 +583,16 @@ export const useAppLogic = () => {
     const prevRequestsSnap = requestsRef.current;
     const prevShiftsSnap = shiftsRef.current;
     const targetItem = prevRequestsSnap.find(r => r && (r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId));
+    const now = new Date().toISOString();
 
     markLocalMutation(5000);
+    req.registerLocalRequestMutation(cleanId, 'deleted', now);
 
-    // 1. 楽観的UI更新: requests と連動する shifts を即座に除外
-    req.setRequests(prev => prev.filter(r => r && r.id !== requestId && String(r.id).replace(/['"]/g, '').trim() !== cleanId));
+    // 1. 楽観的UI更新: requests と連動する shifts を即座に除外＋即時キャッシュ永続化
+    const nextRequests = prevRequestsSnap.filter(r => r && r.id !== requestId && String(r.id).replace(/['"]/g, '').trim() !== cleanId);
+    req.setRequests(nextRequests);
+    req.persistRequestsImmediately(nextRequests);
+
     if (targetItem) {
       shifts.removeLocalShifts([{
         id: cleanId,
@@ -523,16 +605,34 @@ export const useAppLogic = () => {
     }
 
     // 2. バックグラウンドでDB物理削除（失敗時のみロールバック）
-    deleteShiftRequest(cleanId, {
+    const dbPromise = deleteShiftRequest(cleanId, {
       id: auth.profile?.id || auth.user?.id,
       name: auth.profile?.name || 'ユーザー'
-    }).catch((e: any) => {
-      console.error('Cancel request background sync error (rolling back):', e);
-      req.setRequests(prevRequestsSnap);
-      shifts.setShifts(prevShiftsSnap);
-      Alert.alert('削除エラー', 'データベースからの削除に失敗したため元に戻しました: ' + (e?.message || '不明なエラー'));
-    });
-  }, [req.setRequests, shifts.removeLocalShifts, shifts.setShifts, auth.profile, auth.user]);
+    })
+      .then(() => {
+        req.markLocalRequestMutationCommitted(cleanId);
+      })
+      .catch((e: any) => {
+        console.error('Cancel request background sync error (rolling back):', e);
+        req.clearLocalRequestMutation(cleanId);
+        req.setRequests(prevRequestsSnap);
+        req.persistRequestsImmediately(prevRequestsSnap);
+        shifts.setShifts(prevShiftsSnap);
+        Alert.alert('削除エラー', 'データベースからの削除に失敗したため元に戻しました: ' + (e?.message || '不明なエラー'));
+      });
+    req.trackDbMutationPromise(dbPromise);
+  }, [
+    req.setRequests,
+    req.persistRequestsImmediately,
+    req.registerLocalRequestMutation,
+    req.markLocalRequestMutationCommitted,
+    req.clearLocalRequestMutation,
+    req.trackDbMutationPromise,
+    shifts.removeLocalShifts,
+    shifts.setShifts,
+    auth.profile,
+    auth.user,
+  ]);
 
   const onDeleteRequest = useCallback(async (requestId: string) => {
     await cancelRequest(requestId);
@@ -550,13 +650,15 @@ export const useAppLogic = () => {
     const newWithStatus = { ...updatedItem, status: 'rejected', updatedAt: now };
 
     markLocalMutation(5000);
+    req.registerLocalRequestMutation(cleanId, 'rejected', now);
 
-    // 1. 楽観的UI更新: requests を却下に更新し、連動シフトを即座に除外
-    req.setRequests(prev =>
-      prev.map(r =>
-        r && (r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId) ? newWithStatus : r
-      )
+    // 1. 楽観的UI更新: requests を却下に更新し、連動シフトを即座に除外＋即時キャッシュ永続化
+    const nextRequests = prevRequestsSnap.map(r =>
+      r && (r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId) ? newWithStatus : r
     );
+    req.setRequests(nextRequests);
+    req.persistRequestsImmediately(nextRequests);
+
     if (updatedItem.date) {
       shifts.removeLocalShifts([{
         id: cleanId,
@@ -569,10 +671,11 @@ export const useAppLogic = () => {
     Alert.alert('完了', '却下・取り消しが完了しました');
 
     // 2. バックグラウンドでDB同期・監査ログ記録（失敗時のみロールバック）
-    (async () => {
+    const dbPromise = (async () => {
       try {
         await updateRequestStatus(cleanId, 'rejected');
         await cloudStorage.upsertRequestsAndShifts([newWithStatus]);
+        req.markLocalRequestMutationCommitted(cleanId);
         await recordAuditLog({
           operatorId: auth.profile?.id || auth.user?.id,
           operatorName: auth.profile?.name || '管理者',
@@ -586,12 +689,26 @@ export const useAppLogic = () => {
         });
       } catch (e: any) {
         console.error('Reject background sync error (rolling back):', e);
+        req.clearLocalRequestMutation(cleanId);
         req.setRequests(prevRequestsSnap);
+        req.persistRequestsImmediately(prevRequestsSnap);
         shifts.setShifts(prevShiftsSnap);
         Alert.alert('エラー', '却下の保存に失敗したため元に戻しました: ' + (e?.message || '不明なエラー'));
       }
     })();
-  }, [req.setRequests, shifts.removeLocalShifts, shifts.setShifts, auth.profile, auth.user]);
+    req.trackDbMutationPromise(dbPromise);
+  }, [
+    req.setRequests,
+    req.persistRequestsImmediately,
+    req.registerLocalRequestMutation,
+    req.markLocalRequestMutationCommitted,
+    req.clearLocalRequestMutation,
+    req.trackDbMutationPromise,
+    shifts.removeLocalShifts,
+    shifts.setShifts,
+    auth.profile,
+    auth.user,
+  ]);
 
 
   const onUpdateAvatar = useCallback(async (avatarUrl: string) => {

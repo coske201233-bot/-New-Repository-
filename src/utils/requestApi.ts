@@ -53,7 +53,51 @@ export const deleteShiftRequest = async (
   return true;
 };
 
-// 申請のステータス更新（承認・却下）
+// 管理者API経由で requests テーブルのステータスを確実に更新するフォールバック（RLS 0行サイレント失敗対策）
+const updateRequestStatusViaAdminApi = async (
+  cleanId: string,
+  status: string,
+  details?: any,
+  duplicatePendingIds?: string[]
+): Promise<any | null> => {
+  try {
+    if (typeof fetch !== 'function') return null;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) return null;
+
+    const apiRes = await fetch('/api/admin/staff', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        action: 'UPDATE_REQUEST_STATUS',
+        payload: {
+          requestId: cleanId,
+          status,
+          details,
+          duplicatePendingIds,
+        },
+      }),
+    });
+
+    if (!apiRes.ok) {
+      const errBody = await apiRes.json().catch(() => ({}));
+      console.warn('[requestApi] Admin API UPDATE_REQUEST_STATUS failed:', apiRes.status, errBody);
+      return null;
+    }
+
+    const json = await apiRes.json();
+    return json?.request || null;
+  } catch (err) {
+    console.warn('[requestApi] Admin API UPDATE_REQUEST_STATUS exception:', err);
+    return null;
+  }
+};
+
+// 申請のステータス更新（承認・却下）— 実更新行数とステータス反映を厳密検証
 export const updateRequestStatus = async (
   requestId: string,
   status: '承認' | '却下' | '申請中' | 'approved' | 'rejected' | 'pending' | string
@@ -65,11 +109,27 @@ export const updateRequestStatus = async (
   const { data, error } = await supabase
     .from('requests')
     .update({ status })
-    .filter('id', 'eq', cleanId)
-    .select();
+    .eq('id', cleanId)
+    .select('id, status');
 
   markLocalMutation(5000);
-  if (error) throw error;
+
+  if (error || !data || data.length === 0 || data[0].status !== status) {
+    console.warn('[updateRequestStatus] Direct update did not verify row change; attempting Admin API fallback...', {
+      cleanId,
+      status,
+      error: error?.message,
+      rowCount: data?.length ?? 0,
+    });
+    const fallbackRow = await updateRequestStatusViaAdminApi(cleanId, status);
+    if (fallbackRow && fallbackRow.status === status) {
+      markLocalMutation(5000);
+      return [fallbackRow];
+    }
+    if (error) throw error;
+    throw new Error(`申請ステータスのDB更新が確認できませんでした（対象ID: ${cleanId} / 更新行数: 0）。権限またはRLS設定を確認してください。`);
+  }
+
   return data;
 };
 
@@ -242,23 +302,80 @@ export const approveShiftRequest = async (
     updated_at: now
   };
 
-  // 1. requests テーブルの更新
-  const { error: updateErr } = await supabase
+  // 1. requests テーブルの更新（.select() で実際に1行以上更新され、status が書き換わったことを厳密検証）
+  const nextDetails = { ...(req.details || {}), updatedAt: now };
+  const { data: updatedRows, error: updateErr } = await supabase
     .from('requests')
     .update({
       status,
-      details: { ...(req.details || {}), updatedAt: now }
+      details: nextDetails
     })
-    .filter('id', 'eq', cleanId);
+    .eq('id', cleanId)
+    .select('id, status, details');
 
-  if (updateErr) throw updateErr;
+  if (updateErr || !updatedRows || updatedRows.length === 0 || updatedRows[0].status !== status) {
+    console.warn('[approveShiftRequest] Direct DB update failed or updated 0 rows (possible RLS block). Falling back to Admin API...', {
+      cleanId,
+      targetStatus: status,
+      error: updateErr?.message,
+      updatedCount: updatedRows?.length ?? 0,
+      returnedStatus: updatedRows?.[0]?.status,
+    });
 
-  // 2. shifts テーブルの連動同期
+    const fallbackRow = await updateRequestStatusViaAdminApi(cleanId, status, nextDetails);
+    if (!fallbackRow || fallbackRow.status !== status) {
+      if (updateErr) throw updateErr;
+      throw new Error(`申請（ID: ${cleanId}）のDBステータスを「${status}」へ更新できませんでした（更新行数: 0）。管理者権限・RLSポリシーを確認してください。`);
+    }
+  }
+
+  // 1-2. 承認時、同一スタッフ・同一日付・同種別の重複した pending レコードが DB に残存していれば自動的に superseded 化（亡霊復活防止）
   const isApprove = status === 'approved' || status === '承認';
   const isUnapprove = status === 'pending' || status === '申請中' || status === 'cancelled' || status === '取消';
   const isReject = status === 'rejected' || status === '却下';
   const targetStaffId = req.staff_id || req.staffId || req.user_id || req.userId;
   const targetStaffName = req.staff_name || req.staffName;
+
+  if (isApprove && req.date) {
+    try {
+      const cleanDate = normalizeDateStr(req.date);
+      let dupQuery = supabase
+        .from('requests')
+        .select('id, staff_id, staff_name, date, type, status')
+        .eq('date', cleanDate)
+        .in('status', ['pending', '申請中'])
+        .neq('id', cleanId);
+
+      const { data: sameDayPendings } = await dupQuery;
+      if (sameDayPendings && sameDayPendings.length > 0) {
+        const normTargetName = String(targetStaffName || '').replace(/[\s\u3000]/g, '').toUpperCase();
+        const dupIds = sameDayPendings
+          .filter((d: any) => {
+            const dStaffId = String(d.staff_id || '').trim();
+            const dStaffName = String(d.staff_name || '').replace(/[\s\u3000]/g, '').toUpperCase();
+            const isSameStaff =
+              (targetStaffId && dStaffId === String(targetStaffId).trim()) ||
+              (normTargetName && dStaffName === normTargetName);
+            if (!isSameStaff) return false;
+            return !req.type || !d.type || String(d.type).trim() === String(req.type).trim();
+          })
+          .map((d: any) => String(d.id));
+
+        if (dupIds.length > 0) {
+          const { data: dupUpdated, error: dupErr } = await supabase
+            .from('requests')
+            .update({ status: 'superseded', details: { supersededAt: now, supersededBy: cleanId } })
+            .in('id', dupIds)
+            .select('id');
+          if (dupErr || !dupUpdated || dupUpdated.length < dupIds.length) {
+            await updateRequestStatusViaAdminApi(cleanId, status, nextDetails, dupIds);
+          }
+        }
+      }
+    } catch (dupCleanErr) {
+      console.warn('[approveShiftRequest] Duplicate pending cleanup warning (non-blocking):', dupCleanErr);
+    }
+  }
 
   // 指定日の既存シフトを確実にDELETEするヘルパー（出勤・公休問わず既存のゾンビレコードを全削除・並列実行）
   const clearShiftsForDate = async (rawDate: string) => {

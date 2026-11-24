@@ -338,7 +338,7 @@ export const RequestScreen: React.FC<RequestScreenProps> = ({ requests, setReque
             {requests
               .filter(r => {
                 const isWorkType = r.type === '出勤' || r.type === '公休';
-                if (isWorkType || r.status === 'deleted') return false;
+                if (isWorkType || r.status === 'deleted' || r.status === 'superseded') return false;
                 
                 // [NEW] 却下された申請は一般職員の履歴からは非表示にする（管理者は管理者画面で確認可能）
                 if (!isManager && r.status === 'rejected') return false;
