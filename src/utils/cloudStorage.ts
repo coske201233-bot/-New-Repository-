@@ -55,7 +55,42 @@ const MSG_MAP = { fromId: 'from_id', fromName: 'from_name', toId: 'to_id', creat
 
 import { normalizeName } from './dateUtils';
 
+// 自己更新直後の Realtime イベントによる二重・三重リフェッチを防止するためのクールダウン管理
+let localMutationIgnoreUntil = 0;
+
+export const markLocalMutation = (durationMs: number = 5000) => {
+  const until = Date.now() + durationMs;
+  if (until > localMutationIgnoreUntil) {
+    localMutationIgnoreUntil = until;
+  }
+};
+
+export const isLocalMutationCooldownActive = (): boolean => {
+  return Date.now() < localMutationIgnoreUntil;
+};
+
+// 取得対象の日付範囲（対象年の前年1月1日〜翌年12月31日）を算出
+export const getFetchDateRange = (baseYear: number = new Date().getFullYear()) => {
+  const y = Number.isFinite(baseYear) ? baseYear : new Date().getFullYear();
+  return {
+    startDate: `${y - 1}-01-01`,
+    endDate: `${y + 1}-12-31`,
+    minYear: y - 1,
+    maxYear: y + 1,
+  };
+};
+
+export interface FetchDateRangeOptions {
+  baseYear?: number;
+  startDate?: string;
+  endDate?: string;
+  allPeriods?: boolean;
+}
+
 export const cloudStorage = {
+  markLocalMutation,
+  isLocalMutationCooldownActive,
+  getFetchDateRange,
   // --- Staff ---
   async fetchStaff() {
     try {
@@ -171,16 +206,24 @@ export const cloudStorage = {
   },
 
   // --- Requests ---
-  async fetchRequests() {
+  async fetchRequests(options?: FetchDateRangeOptions) {
     try {
       if (!supabase) return [];
-      // 取得上限を大幅に引き上げ
+      // 対象期間（デフォルト: 前年1月1日〜翌年末）に日付範囲を絞って通信量と配列サイズを削減
       // status が deleted のものは取得しない（ゾンビデータ復活防止）
-      const { data, error } = await supabase
+      let query = supabase
         .from('requests')
         .select('*')
-        .neq('status', 'deleted')
-        .limit(100000);
+        .neq('status', 'deleted');
+
+      if (!options?.allPeriods) {
+        const range = getFetchDateRange(options?.baseYear);
+        const startDate = options?.startDate || range.startDate;
+        const endDate = options?.endDate || range.endDate;
+        query = query.gte('date', startDate).lte('date', endDate);
+      }
+
+      const { data, error } = await query.limit(20000);
       if (error) {
         console.warn('[CONFIG_ERROR Handled] fetchRequests failed:', error.message);
         return [];
@@ -222,6 +265,7 @@ export const cloudStorage = {
   },
   async upsertRequests(requests: any[]) {
     if (!requests || requests.length === 0) return;
+    markLocalMutation(5000);
 
     try {
       // 1. 最新のクラウド状態を取得して比較する（Safe-Upsert）
@@ -298,6 +342,7 @@ export const cloudStorage = {
       }
 
       const { error } = await supabase.from('requests').upsert(filtered, { onConflict: 'id' });
+      markLocalMutation(5000);
       if (error) {
          console.error('❌ Requests sync error in upsert:', error);
          // [CRITICAL GUARD] エラーはコンソール出力し、アプリのクラッシュを防ぐため throw しない
@@ -310,6 +355,7 @@ export const cloudStorage = {
   },
   async upsertShifts(shifts: any[]) {
     if (!shifts || shifts.length === 0) return;
+    markLocalMutation(5000);
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const genUuid = () => {
       if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -344,15 +390,23 @@ export const cloudStorage = {
       return obj;
     });
     const { error } = await supabase.from('shifts').upsert(filtered, { onConflict: 'id' });
+    markLocalMutation(5000);
     if (error) {
       console.error('❌ Shifts sync error:', error);
       throw error;
     }
     console.log(`✅ ${filtered.length} shifts synced to cloud successfully`);
   },
-  async fetchShifts() {
+  async fetchShifts(options?: FetchDateRangeOptions) {
     try {
-      const { data, error } = await supabase.from('shifts').select('*').limit(100000);
+      let query = supabase.from('shifts').select('*');
+      if (!options?.allPeriods) {
+        const range = getFetchDateRange(options?.baseYear);
+        const startDate = options?.startDate || range.startDate;
+        const endDate = options?.endDate || range.endDate;
+        query = query.gte('date', startDate).lte('date', endDate);
+      }
+      const { data, error } = await query.limit(20000);
       if (error) throw error;
       return data || [];
     } catch (err) {
@@ -365,6 +419,7 @@ export const cloudStorage = {
    */
   async upsertRequestsAndShifts(requests: any[]) {
     if (!requests || requests.length === 0) return;
+    markLocalMutation(5000);
     
     try {
       // 1. requests への保存 (内部でエラーはキャッチされます)
@@ -493,19 +548,24 @@ export const cloudStorage = {
         }
       });
 
-      // 既存の古いシフト（公休など）を確実にDELETE
+      // 既存の古いシフト（公休など）を確実にDELETE（並列実行で高速化）
+      const deleteTasks: Promise<any>[] = [];
       for (const item of datesToClear) {
         if (item.date) {
           if (item.staffId) {
-            await supabase.from('shifts').delete().eq('staff_id', item.staffId).eq('date', item.date);
+            deleteTasks.push(Promise.resolve(supabase.from('shifts').delete().eq('staff_id', item.staffId).eq('date', item.date)));
           }
           if (item.staffName) {
-            await supabase.from('shifts').delete().eq('staff_name', item.staffName).eq('date', item.date);
+            deleteTasks.push(Promise.resolve(supabase.from('shifts').delete().eq('staff_name', item.staffName).eq('date', item.date)));
           }
         }
       }
+      if (deleteTasks.length > 0) {
+        await Promise.all(deleteTasks);
+      }
       
       await this.upsertShifts(shiftPayloads);
+      markLocalMutation(5000);
     } catch (err) {
       console.error('❌ upsertRequestsAndShifts crashed with unhandled exception:', err);
     }
@@ -518,6 +578,7 @@ export const cloudStorage = {
     if (!id) {
       throw new Error('削除対象の申請IDが存在しません。');
     }
+    markLocalMutation(5000);
 
     // UUID形式の文字列であることを確認（前後の空白およびクォートを除去）
     const cleanId = String(id).replace(/['"]/g, '').trim();
@@ -578,6 +639,7 @@ export const cloudStorage = {
   },
   async deleteRequests(ids: string[]) {
     if (!ids || ids.length === 0) return;
+    markLocalMutation(5000);
     const cleanIds = ids.filter(Boolean).map(id => String(id).replace(/['"]/g, '').trim()).filter(id => id.length > 0);
     if (cleanIds.length === 0) return;
 
@@ -664,23 +726,16 @@ export const cloudStorage = {
 
   // --- Realtime (V76.6 Bulletproof) ---
   subscribeToChanges(callback: (payload: any) => void) {
-    console.log('--- [REALTIME] Initializing Subscription (shifts, requests) ---');
     const channel = supabase
       .channel('db-changes-v76')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, (payload: any) => {
-        console.log('--- [REALTIME_DEBUG] Request Event:', payload.eventType, 'ID:', payload.new?.id || payload.old?.id);
         callback(payload);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, (payload: any) => {
-        console.log('--- [REALTIME_DEBUG] Shift Event:', payload.eventType, 'ID:', payload.new?.id || payload.old?.id);
         callback(payload);
       })
       .subscribe((status, err) => {
-        console.log(`--- [REALTIME_STATUS] Status: ${status} ---`);
         if (err) console.error('--- [REALTIME_ERROR] Connection failed:', err);
-        if (status === 'SUBSCRIBED') {
-          console.log('--- [REALTIME_READY] Listening for changes in public.shifts and public.requests ---');
-        }
       });
     return channel;
   },

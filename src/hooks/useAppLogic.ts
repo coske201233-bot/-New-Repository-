@@ -5,9 +5,10 @@ import { useStaffData } from './useStaffData';
 import { useRequestData } from './useRequestData';
 import { useConfigData } from './useConfigData';
 import { useShiftData } from './useShiftData';
-import { cloudStorage } from '../utils/cloudStorage';
+import { cloudStorage, markLocalMutation, isLocalMutationCooldownActive } from '../utils/cloudStorage';
 import { supabase, isSupabaseAuthReady as isSupabaseConfigured } from '../utils/supabase';
-import { deleteShiftRequest, updateRequestStatus, approveShiftRequest, bulkApproveShiftRequests } from '../utils/requestApi';
+import { deleteShiftRequest, updateRequestStatus, approveShiftRequest, bulkApproveShiftRequests, buildOptimisticShiftChanges } from '../utils/requestApi';
+import { normalizeDateStr } from '../utils/dateUtils';
 import { recordAuditLog } from '../utils/auditLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '../utils/storage';
@@ -43,6 +44,12 @@ export const useAppLogic = () => {
   React.useEffect(() => {
     isSyncingRef.current = isSyncing;
   }, [isSyncing]);
+
+  const requestsRef = React.useRef(req.requests);
+  requestsRef.current = req.requests;
+
+  const shiftsRef = React.useRef(shifts.shifts);
+  shiftsRef.current = shifts.shifts;
 
   const loadedUserIdRef = React.useRef<string | null>(null);
 
@@ -115,9 +122,10 @@ export const useAppLogic = () => {
           if (mounted) {
             staff.setStaffList(staffData);
             req.setRequests(finalReqs);
+            req.markRequestsLoadedRange(new Date().getFullYear());
             
-            // シフトデータおよび設定値も取得
-            shifts.fetchShifts();
+            // シフトデータおよび設定値も取得（対象期間に絞って取得）
+            shifts.fetchShifts({ baseYear: new Date().getFullYear(), force: true });
             config.refreshConfigs();
 
             console.log(`✅ [AUTH_SYNC] Data Loaded: Staff=${staffData.length}, Requests=${finalReqs.length}`);
@@ -143,14 +151,29 @@ export const useAppLogic = () => {
     };
   }, [auth.isAuthReady, auth.user?.id]);
 
+  // Web向けローカルキャッシュ保存をデバウンス非同期化し、クリック時のメインスレッドブロッキングを防止
   useEffect(() => {
-    if (Platform.OS === 'web' && isInitialized) {
-      if (staff.staffList.length > 0) {
-        localStorage.setItem('proto_staff_data', JSON.stringify(staff.staffList));
+    if (Platform.OS !== 'web' || !isInitialized) return;
+    const timer = setTimeout(() => {
+      try {
+        if (staff.staffList.length > 0) {
+          localStorage.setItem('proto_staff_data', JSON.stringify(staff.staffList));
+        }
+        localStorage.setItem('proto_request_data', JSON.stringify(req.requests));
+      } catch (e) {
+        console.warn('localStorage cache write warning:', e);
       }
-      localStorage.setItem('proto_request_data', JSON.stringify(req.requests));
-    }
+    }, 500);
+    return () => clearTimeout(timer);
   }, [staff.staffList, req.requests, isInitialized]);
+
+  // 表示対象年が取得済み範囲（前年〜翌年）を超えた場合のみバックグラウンドで追加取得
+  const activeYear = activeDate ? activeDate.getFullYear() : new Date().getFullYear();
+  useEffect(() => {
+    if (!isInitialized || !auth.user) return;
+    shifts.ensureShiftsForYear(activeYear);
+    req.ensureRequestsForYear(activeYear);
+  }, [activeYear, isInitialized, auth.user?.id, shifts.ensureShiftsForYear, req.ensureRequestsForYear]);
 
   // [CRITICAL VERSION 48.20] Infinite Spinner Failsafe for Master Admin
   useEffect(() => {
@@ -189,6 +212,8 @@ export const useAppLogic = () => {
     req.setRequests([]);
     req.setRequestsHistory([]);
     shifts.setShifts([]);
+    req.resetRequestCache();
+    shifts.resetShiftCache();
     
     // 2. 初期化完了フラグをリセットし、次回ログイン時に再フェッチを走らせる
     setIsInitialized(false);
@@ -255,14 +280,18 @@ export const useAppLogic = () => {
     }
   }, [staff.staffList, staff.setStaffList, auth.setProfile]);
 
-  // --- データ操作系ハンドラ ---
+  // --- データ操作系ハンドラ (楽観的UI更新 + 非同期バックグラウンドDB同期) ---
   const onSubmitRequest = useCallback(async (request: any) => {
     try {
-      // 【確定】supabase.auth.getUser() で認証UUIDを取得
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-      if (authError || !authUser) {
-        Alert.alert('エラー', 'ログイン情報を取得できませんでした。');
-        return false;
+      // メモリ上の認証ユーザーを優先利用（無駄なネットワーク往復を削減）
+      let authUser = auth.user;
+      if (!authUser) {
+        const { data: { user: fetchedUser }, error: authError } = await supabase.auth.getUser();
+        if (authError || !fetchedUser) {
+          Alert.alert('エラー', 'ログイン情報を取得できませんでした。');
+          return false;
+        }
+        authUser = fetchedUser;
       }
 
       // スタッフリストから正式な日本語名を取得（IDで照合）
@@ -270,71 +299,77 @@ export const useAppLogic = () => {
       const staffRecord = (staff.staffList || []).find((s: any) =>
         s.id === authUid || s.userId === authUid || s.user_id === authUid
       );
-      // profile.nameが英字の場合でも、スタッフリストの日本語名を優先する
       const officialName = staffRecord?.name || auth.profile?.name || '不明';
-
-      // [V76.3 STRICT UUID ONLY]
-      // Auth UUID のみで保存すると不整合の元になるため、必ず名簿の true staff.id に紐づけて保存する
       const trueStaffId = staffRecord?.id || authUid;
 
-      const requestId = 'req-' + Date.now();
       const now = new Date().toISOString();
-      const newRequest = { 
-       id: crypto.randomUUID(), // 💡 汎用的な標準UUID（36文字の正規形式）を直接生成！
-        ...request, 
+      const newId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = (Math.random() * 16) | 0;
+            const v = c === 'x' ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+          });
+
+      const newRequest = {
+        id: newId,
+        ...request,
         status: 'pending',
-        staff_id: trueStaffId, // <--- 真のスタッフIDをセット
+        staff_id: trueStaffId,
         staffId: trueStaffId,
-        user_id: authUid, // 認証用のバックアップとして保持
-        staff_name: officialName, 
-        staffName: officialName, 
+        user_id: authUid,
+        staff_name: officialName,
+        staffName: officialName,
         created_at: now,
         updatedAt: now,
         details: { ...(request.details || {}), updatedAt: now }
       };
 
-      console.log('[DEBUG] useAppLogic Submitting:', {
-        user_id: authUid,
-        staff_name: officialName,
-        status: newRequest.status
-      });
+      // 1. 楽観的UI更新: 即座にローカルステートへ反映
+      markLocalMutation(5000);
+      const prevRequestsSnap = requestsRef.current;
+      req.setRequests(prev => [...prev, newRequest]);
 
-      // 直接Supabaseに挿入（未承認 status: 'pending'、is_manual: false）
-      const { error } = await supabase.from('requests').insert([
-        {
-          id: newRequest.id,
-          staff_id: trueStaffId, // [V76.3] Strict UUID
-          user_id: authUid,
-          staff_name: officialName,
-          date: newRequest.date,
-          type: newRequest.type,
-          status: newRequest.status,
-          is_manual: false,
-          hours: newRequest.hours, // [STRICT REFACTOR] 専用カラムへ保存
-          reason: newRequest.reason,
-          details: newRequest.details,
-          created_at: now
+      // 2. バックグラウンド非同期でDB保存・監査ログ記録（失敗時のみロールバック）
+      (async () => {
+        try {
+          const { error } = await supabase.from('requests').insert([
+            {
+              id: newRequest.id,
+              staff_id: trueStaffId,
+              user_id: authUid,
+              staff_name: officialName,
+              date: newRequest.date,
+              type: newRequest.type,
+              status: newRequest.status,
+              is_manual: false,
+              hours: newRequest.hours,
+              reason: newRequest.reason,
+              details: newRequest.details,
+              created_at: now
+            }
+          ]);
+          markLocalMutation(5000);
+          if (error) throw error;
+
+          await recordAuditLog({
+            operatorId: authUid,
+            operatorName: officialName,
+            targetStaffId: trueStaffId,
+            targetStaffName: officialName,
+            actionType: 'REQUEST_CREATE',
+            targetDate: newRequest.date,
+            details: `${officialName}さんが休暇申請「${newRequest.type}」を提出しました（日付: ${newRequest.date}${newRequest.hours ? ` / ${newRequest.hours}h` : ''}${newRequest.reason ? ` / 理由: ${newRequest.reason}` : ''}）`,
+            beforeData: null,
+            afterData: newRequest
+          });
+        } catch (bgErr: any) {
+          console.error('[Optimistic] Request submission failed, rolling back:', bgErr);
+          req.setRequests(prevRequestsSnap);
+          Alert.alert('送信失敗', 'データベースへの保存に失敗したため元に戻しました。\n詳細: ' + (bgErr?.message || '不明なエラー'));
         }
-      ]);
-      
-      if (error) throw error;
-      
-      // 【重要】DB保存が成功した場合のみ、ローカルステートを更新（shiftsテーブルへは管理者が承認した時のみ反映）
-      req.setRequests(prev => [...prev, newRequest]); 
+      })();
 
-      // 監査ログの記録
-      await recordAuditLog({
-        operatorId: authUid,
-        operatorName: officialName,
-        targetStaffId: trueStaffId,
-        targetStaffName: officialName,
-        actionType: 'REQUEST_CREATE',
-        targetDate: newRequest.date,
-        details: `${officialName}さんが休暇申請「${newRequest.type}」を提出しました（日付: ${newRequest.date}${newRequest.hours ? ` / ${newRequest.hours}h` : ''}${newRequest.reason ? ` / 理由: ${newRequest.reason}` : ''}）`,
-        beforeData: null,
-        afterData: newRequest
-      });
-      
       Alert.alert('送信成功！', '休暇申請を送信しました。');
       return true;
     } catch (e: any) {
@@ -342,76 +377,162 @@ export const useAppLogic = () => {
       Alert.alert('送信失敗', 'データベースへの保存に失敗しました。しばらく時間をおいて再度お試しください。\n詳細: ' + (e.message || '不明なエラー'));
       return false;
     }
-  }, [auth.user, auth.profile, req.setRequests, staff.staffList, shifts]);
+  }, [auth.user, auth.profile, req.setRequests, staff.staffList]);
 
   const approveRequest = useCallback(async (requestId: string, status: string = 'approved') => {
-    try {
-      const updatedItem = req.requests.find(r => r.id === requestId);
-      if (!updatedItem && !requestId) return;
+    const updatedItem = requestsRef.current.find(r => r.id === requestId);
+    if (!updatedItem && !requestId) return;
 
-      const operator = {
-        id: auth.profile?.id || auth.user?.id,
-        name: auth.profile?.name || '管理者'
-      };
+    const operator = {
+      id: auth.profile?.id || auth.user?.id,
+      name: auth.profile?.name || '管理者'
+    };
 
-      await approveShiftRequest(updatedItem || requestId, status, operator);
+    // ロールバック用スナップショット退避
+    const prevRequestsSnap = requestsRef.current;
+    const prevShiftsSnap = shiftsRef.current;
+    const now = new Date().toISOString();
 
-      // フロントエンド状態（State）の即時同期
-      await Promise.all([
-        shifts.fetchShifts(),
-        req.fetchRequests()
-      ]);
-    } catch (e) {
-      console.error('Approve/Reject request error:', e);
-      throw e;
+    markLocalMutation(5000);
+
+    // 1. 楽観的UI更新: requests と shifts のメモリ上ステートを即座に差分更新（フルリフェッチ廃止）
+    if (updatedItem) {
+      const { clearCriteria, upsertShifts, supersededConflictDates } = buildOptimisticShiftChanges(updatedItem, status, now);
+
+      req.setRequests(prev =>
+        prev.map(r => {
+          if (!r) return r;
+          if (r.id === requestId) {
+            return { ...r, status, updatedAt: now, details: { ...(r.details || {}), updatedAt: now } };
+          }
+          // 公休変更承認時の競合申請を即座に superseded 化
+          if (
+            supersededConflictDates &&
+            r.type === '公休変更' &&
+            r.status === 'approved' &&
+            String(r.id) !== supersededConflictDates.excludeId
+          ) {
+            const crStaffId = r.staff_id || r.staffId || r.user_id;
+            const crStaffName = r.staff_name || r.staffName;
+            const isSameStaff =
+              (supersededConflictDates.staffId && crStaffId === supersededConflictDates.staffId) ||
+              (supersededConflictDates.staffName && crStaffName === supersededConflictDates.staffName);
+            if (isSameStaff) {
+              const crOrig = normalizeDateStr(r.details?.originalDate || r.originalDate);
+              const crTarget = normalizeDateStr(r.details?.targetDate || r.targetDate || r.date);
+              if (
+                (crOrig && (crOrig === supersededConflictDates.originalDate || crOrig === supersededConflictDates.targetDate)) ||
+                (crTarget && (crTarget === supersededConflictDates.originalDate || crTarget === supersededConflictDates.targetDate))
+              ) {
+                return { ...r, status: 'superseded', details: { ...(r.details || {}), supersededAt: now, supersededBy: supersededConflictDates.excludeId } };
+              }
+            }
+          }
+          return r;
+        })
+      );
+
+      if (clearCriteria.length > 0) {
+        shifts.removeLocalShifts(clearCriteria);
+      }
+      if (upsertShifts.length > 0) {
+        shifts.upsertLocalShifts(upsertShifts);
+      }
     }
-  }, [req.requests, req.fetchRequests, shifts.fetchShifts, auth.profile, auth.user]);
+
+    // 2. バックグラウンドでDB保存を実行（失敗時のみロールバック＆通知）
+    approveShiftRequest(updatedItem || requestId, status, operator).catch((e: any) => {
+      console.error('Approve/Reject request background sync error (rolling back):', e);
+      req.setRequests(prevRequestsSnap);
+      shifts.setShifts(prevShiftsSnap);
+      Alert.alert('保存エラー', 'データベースへの保存に失敗したため変更を元に戻しました。\n詳細: ' + (e?.message || '不明なエラー'));
+    });
+  }, [req.setRequests, shifts.removeLocalShifts, shifts.upsertLocalShifts, shifts.setShifts, auth.profile, auth.user]);
 
   const handleBulkApprove = useCallback(async (ids: string[]) => {
-    try {
-      if (!ids || ids.length === 0) return;
-      const cleanIds = ids.filter(Boolean).map(id => String(id).replace(/['"]/g, '').trim()).filter(id => id.length > 0);
-      if (cleanIds.length === 0) return;
+    if (!ids || ids.length === 0) return;
+    const cleanIds = ids.filter(Boolean).map(id => String(id).replace(/['"]/g, '').trim()).filter(id => id.length > 0);
+    if (cleanIds.length === 0) return;
 
-      const operator = {
-        id: auth.profile?.id || auth.user?.id,
-        name: auth.profile?.name || '管理者'
-      };
+    const operator = {
+      id: auth.profile?.id || auth.user?.id,
+      name: auth.profile?.name || '管理者'
+    };
 
-      await bulkApproveShiftRequests(cleanIds, operator);
+    const prevRequestsSnap = requestsRef.current;
+    const prevShiftsSnap = shiftsRef.current;
+    const now = new Date().toISOString();
+    const idSet = new Set(cleanIds);
 
-      // フロントエンド状態（State）の即時同期
-      await Promise.all([
-        shifts.fetchShifts(),
-        req.fetchRequests()
-      ]);
+    markLocalMutation(5000);
 
-      Alert.alert('完了', '承認が完了しました');
-    } catch (e: any) {
-      console.error('Bulk approve error:', e);
-      Alert.alert('エラー', 'エラー: ' + e.message);
-    }
-  }, [shifts.fetchShifts, req.fetchRequests, auth.profile, auth.user]);
+    // 1. 楽観的UI更新: 一括で requests と shifts を即時更新
+    const allClearCriteria: { staffId?: string; staffName?: string; date: string }[] = [];
+    const allUpsertShifts: any[] = [];
+
+    const targetItems = prevRequestsSnap.filter(r => r && idSet.has(String(r.id).replace(/['"]/g, '').trim()));
+    targetItems.forEach(item => {
+      const { clearCriteria, upsertShifts } = buildOptimisticShiftChanges(item, 'approved', now);
+      allClearCriteria.push(...clearCriteria);
+      allUpsertShifts.push(...upsertShifts);
+    });
+
+    req.setRequests(prev =>
+      prev.map(r =>
+        r && idSet.has(String(r.id).replace(/['"]/g, '').trim())
+          ? { ...r, status: 'approved', updatedAt: now, details: { ...(r.details || {}), updatedAt: now } }
+          : r
+      )
+    );
+    if (allClearCriteria.length > 0) shifts.removeLocalShifts(allClearCriteria);
+    if (allUpsertShifts.length > 0) shifts.upsertLocalShifts(allUpsertShifts);
+
+    Alert.alert('完了', '承認が完了しました');
+
+    // 2. バックグラウンドでDB一括保存（失敗時のみロールバック）
+    bulkApproveShiftRequests(cleanIds, operator).catch((e: any) => {
+      console.error('Bulk approve background sync error (rolling back):', e);
+      req.setRequests(prevRequestsSnap);
+      shifts.setShifts(prevShiftsSnap);
+      Alert.alert('エラー', '一括承認の保存に失敗したため元に戻しました: ' + (e?.message || '不明なエラー'));
+    });
+  }, [req.setRequests, shifts.removeLocalShifts, shifts.upsertLocalShifts, shifts.setShifts, auth.profile, auth.user]);
 
   const cancelRequest = useCallback(async (requestId: string) => {
     if (!requestId) {
       throw new Error('削除対象の申請IDが存在しません。');
     }
     const cleanId = String(requestId).replace(/['"]/g, '').trim();
-    try {
-      const targetItem = req.requests.find(r => r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId);
-      // 物理削除および関連シフトの連動削除（内部で監査ログも記録）
-      await deleteShiftRequest(cleanId, {
-        id: auth.profile?.id || auth.user?.id,
-        name: auth.profile?.name || 'ユーザー'
-      });
-      const newRequests = req.requests.filter(r => r.id !== requestId && String(r.id).replace(/['"]/g, '').trim() !== cleanId);
-      req.setRequests(newRequests);
-    } catch (e) {
-      console.error('Cancel request error:', e);
-      throw e;
+    const prevRequestsSnap = requestsRef.current;
+    const prevShiftsSnap = shiftsRef.current;
+    const targetItem = prevRequestsSnap.find(r => r && (r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId));
+
+    markLocalMutation(5000);
+
+    // 1. 楽観的UI更新: requests と連動する shifts を即座に除外
+    req.setRequests(prev => prev.filter(r => r && r.id !== requestId && String(r.id).replace(/['"]/g, '').trim() !== cleanId));
+    if (targetItem) {
+      shifts.removeLocalShifts([{
+        id: cleanId,
+        staffId: targetItem.staff_id || targetItem.staffId || targetItem.user_id,
+        staffName: targetItem.staff_name || targetItem.staffName,
+        date: targetItem.date,
+      }]);
+    } else {
+      shifts.removeLocalShifts([{ id: cleanId }]);
     }
-  }, [req.requests, req.setRequests, auth.profile, auth.user]);
+
+    // 2. バックグラウンドでDB物理削除（失敗時のみロールバック）
+    deleteShiftRequest(cleanId, {
+      id: auth.profile?.id || auth.user?.id,
+      name: auth.profile?.name || 'ユーザー'
+    }).catch((e: any) => {
+      console.error('Cancel request background sync error (rolling back):', e);
+      req.setRequests(prevRequestsSnap);
+      shifts.setShifts(prevShiftsSnap);
+      Alert.alert('削除エラー', 'データベースからの削除に失敗したため元に戻しました: ' + (e?.message || '不明なエラー'));
+    });
+  }, [req.setRequests, shifts.removeLocalShifts, shifts.setShifts, auth.profile, auth.user]);
 
   const onDeleteRequest = useCallback(async (requestId: string) => {
     await cancelRequest(requestId);
@@ -420,41 +541,57 @@ export const useAppLogic = () => {
   const handleReject = useCallback(async (requestId: string) => {
     if (!requestId) return;
     const cleanId = String(requestId).replace(/['"]/g, '').trim();
-    try {
-      const updatedItem = req.requests.find(r => r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId);
-      if (!updatedItem) return;
+    const prevRequestsSnap = requestsRef.current;
+    const prevShiftsSnap = shiftsRef.current;
+    const updatedItem = prevRequestsSnap.find(r => r && (r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId));
+    if (!updatedItem) return;
 
-      await updateRequestStatus(cleanId, 'rejected');
+    const now = new Date().toISOString();
+    const newWithStatus = { ...updatedItem, status: 'rejected', updatedAt: now };
 
-      Alert.alert('完了', '却下・取り消しが完了しました');
+    markLocalMutation(5000);
 
-      const now = new Date().toISOString();
-      const newWithStatus = { ...updatedItem, status: 'rejected', updatedAt: now };
-      const newRequests = req.requests.map(r => 
-        (r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId) ? newWithStatus : r
-      );
-      req.setRequests(newRequests);
-      
-      // V73.0: 却下時もシフトテーブルとの同期を強制し、不整合を防止
-      await cloudStorage.upsertRequestsAndShifts([newWithStatus]);
-      shifts.fetchShifts();
-
-      await recordAuditLog({
-        operatorId: auth.profile?.id || auth.user?.id,
-        operatorName: auth.profile?.name || '管理者',
-        targetStaffId: updatedItem.staff_id || updatedItem.staffId || updatedItem.user_id,
-        targetStaffName: updatedItem.staff_name || updatedItem.staffName,
-        actionType: 'REQUEST_REJECT',
-        targetDate: updatedItem.date,
-        details: `${updatedItem.staff_name || updatedItem.staffName || 'スタッフ'}さんの申請「${updatedItem.type}」(${updatedItem.date}) を却下しました`,
-        beforeData: updatedItem,
-        afterData: newWithStatus
-      });
-    } catch (e: any) {
-      console.error('Reject error:', e);
-      Alert.alert('エラー', 'エラー: ' + e.message);
+    // 1. 楽観的UI更新: requests を却下に更新し、連動シフトを即座に除外
+    req.setRequests(prev =>
+      prev.map(r =>
+        r && (r.id === requestId || String(r.id).replace(/['"]/g, '').trim() === cleanId) ? newWithStatus : r
+      )
+    );
+    if (updatedItem.date) {
+      shifts.removeLocalShifts([{
+        id: cleanId,
+        staffId: updatedItem.staff_id || updatedItem.staffId || updatedItem.user_id,
+        staffName: updatedItem.staff_name || updatedItem.staffName,
+        date: updatedItem.date,
+      }]);
     }
-  }, [req.requests, req.setRequests, auth.profile, auth.user]);
+
+    Alert.alert('完了', '却下・取り消しが完了しました');
+
+    // 2. バックグラウンドでDB同期・監査ログ記録（失敗時のみロールバック）
+    (async () => {
+      try {
+        await updateRequestStatus(cleanId, 'rejected');
+        await cloudStorage.upsertRequestsAndShifts([newWithStatus]);
+        await recordAuditLog({
+          operatorId: auth.profile?.id || auth.user?.id,
+          operatorName: auth.profile?.name || '管理者',
+          targetStaffId: updatedItem.staff_id || updatedItem.staffId || updatedItem.user_id,
+          targetStaffName: updatedItem.staff_name || updatedItem.staffName,
+          actionType: 'REQUEST_REJECT',
+          targetDate: updatedItem.date,
+          details: `${updatedItem.staff_name || updatedItem.staffName || 'スタッフ'}さんの申請「${updatedItem.type}」(${updatedItem.date}) を却下しました`,
+          beforeData: updatedItem,
+          afterData: newWithStatus
+        });
+      } catch (e: any) {
+        console.error('Reject background sync error (rolling back):', e);
+        req.setRequests(prevRequestsSnap);
+        shifts.setShifts(prevShiftsSnap);
+        Alert.alert('エラー', '却下の保存に失敗したため元に戻しました: ' + (e?.message || '不明なエラー'));
+      }
+    })();
+  }, [req.setRequests, shifts.removeLocalShifts, shifts.setShifts, auth.profile, auth.user]);
 
 
   const onUpdateAvatar = useCallback(async (avatarUrl: string) => {
@@ -571,8 +708,8 @@ export const useAppLogic = () => {
       }
         
         const s = await cloudStorage.fetchStaff();
-        const r = await cloudStorage.fetchRequests();
-        await shifts.fetchShifts();
+        const r = await cloudStorage.fetchRequests({ baseYear: activeDate.getFullYear() });
+        await shifts.fetchShifts({ baseYear: activeDate.getFullYear(), force: true });
         await config.refreshConfigs();
         
         // 修正: データが 0 件であっても、それを最新状態として反映する
@@ -580,6 +717,7 @@ export const useAppLogic = () => {
         
         // [CRITICAL FIX] 0件でも空リストを渡してステートとキャッシュをクリアする
         await req.processAndSetRequests(r || [], true);
+        req.markRequestsLoadedRange(activeDate.getFullYear());
         
         if (Platform.OS === 'web') {
           localStorage.setItem('proto_staff_data', JSON.stringify(s || []));
@@ -613,30 +751,43 @@ export const useAppLogic = () => {
     handleForceSave
   }), [handleForceCloudSync, handleForceSave]);
 
-  // [V76.6] リアルタイム同期設定（常時接続・ループ防止ガード付き）
+  // [V77.0] リアルタイム同期設定（自己更新クールダウン無視 + 1000ms デバウンス + テーブル別選択的取得）
   useEffect(() => {
     if (!isInitialized) return;
-    
+
     let debounceTimer: any = null;
-    const channel = cloudStorage.subscribeToChanges(async (payload) => {
-      const { eventType, table } = payload;
-      
-      // 保存処理中（自分が更新中）は再取得をスキップしてループを防止
-      if (isSyncingRef.current) {
+    const pendingTables = new Set<string>();
+
+    const channel = cloudStorage.subscribeToChanges((payload) => {
+      const { table } = payload || {};
+
+      // 自分が保存・削除した直後（5秒間）および同期処理中は自己イベントを完全無視して多重リフェッチを防止
+      if (isSyncingRef.current || isLocalMutationCooldownActive()) {
         return;
       }
 
       if (table === 'requests' || table === 'shifts') {
+        pendingTables.add(table);
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
-          fetchersRef.current.fetchRequests();
-          fetchersRef.current.fetchShifts();
-        }, 300);
+          // デバウンス発火直前にも自己変更クールダウンを再検証
+          if (isSyncingRef.current || isLocalMutationCooldownActive()) {
+            pendingTables.clear();
+            return;
+          }
+          const needRequests = pendingTables.has('requests');
+          const needShifts = pendingTables.has('shifts');
+          pendingTables.clear();
+
+          if (needRequests) fetchersRef.current.fetchRequests({ force: true });
+          if (needShifts) fetchersRef.current.fetchShifts({ force: true });
+        }, 1000);
       }
     });
-    
+
     return () => {
       clearTimeout(debounceTimer);
+      pendingTables.clear();
       cloudStorage.unsubscribe(channel);
     };
   }, [isInitialized]);

@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { recordAuditLog } from './auditLogger';
+import { markLocalMutation } from './cloudStorage';
 
 // 申請の削除（キャンセル）
 export const deleteShiftRequest = async (
@@ -7,6 +8,7 @@ export const deleteShiftRequest = async (
   operator?: { id?: string; name?: string }
 ) => {
   if (!requestId) throw new Error('申請IDが見つかりません');
+  markLocalMutation(5000);
   const cleanId = String(requestId).replace(/['"]/g, '').trim();
 
   // 申請情報の事前取得（ログ記録用）
@@ -47,6 +49,7 @@ export const deleteShiftRequest = async (
     });
   }
 
+  markLocalMutation(5000);
   return true;
 };
 
@@ -56,6 +59,7 @@ export const updateRequestStatus = async (
   status: '承認' | '却下' | '申請中' | 'approved' | 'rejected' | 'pending' | string
 ) => {
   if (!requestId) throw new Error('申請IDが見つかりません');
+  markLocalMutation(5000);
   const cleanId = String(requestId).replace(/['"]/g, '').trim();
 
   const { data, error } = await supabase
@@ -64,6 +68,7 @@ export const updateRequestStatus = async (
     .filter('id', 'eq', cleanId)
     .select();
 
+  markLocalMutation(5000);
   if (error) throw error;
   return data;
 };
@@ -77,6 +82,132 @@ const normalizeDateStr = (d: string | undefined): string => {
   return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
 };
 
+const makeOptimisticUuid = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
+/**
+ * 申請承認・取消・却下時にフロントエンドの shifts / requests ステートへ即時適用する楽観的差分を生成
+ * （approveShiftRequest の DB 更新ロジックと100%同一のルール）
+ */
+export const buildOptimisticShiftChanges = (
+  req: any,
+  status: string = 'approved',
+  now: string = new Date().toISOString()
+): {
+  clearCriteria: { staffId?: string; staffName?: string; date: string }[];
+  upsertShifts: any[];
+  supersededConflictDates?: { staffId?: string; staffName?: string; originalDate: string; targetDate: string; excludeId: string };
+} => {
+  if (!req) return { clearCriteria: [], upsertShifts: [] };
+
+  const isApprove = status === 'approved' || status === '承認';
+  const isUnapprove = status === 'pending' || status === '申請中' || status === 'cancelled' || status === '取消';
+  const isReject = status === 'rejected' || status === '却下';
+  const targetStaffId = req.staff_id || req.staffId || req.user_id || req.userId;
+  const targetStaffName = req.staff_name || req.staffName;
+
+  const clearCriteria: { staffId?: string; staffName?: string; date: string }[] = [];
+  const upsertShifts: any[] = [];
+  let supersededConflictDates: { staffId?: string; staffName?: string; originalDate: string; targetDate: string; excludeId: string } | undefined;
+
+  const pushClear = (rawDate?: string) => {
+    const date = normalizeDateStr(rawDate);
+    if (!date) return '';
+    clearCriteria.push({ staffId: targetStaffId, staffName: targetStaffName, date });
+    return date;
+  };
+
+  const pushShift = (date: string, type: string, hours?: number, details?: any) => {
+    if (!date) return;
+    upsertShifts.push({
+      id: makeOptimisticUuid(),
+      staff_id: targetStaffId,
+      staff_name: targetStaffName,
+      date,
+      type,
+      status: 'approved',
+      is_manual: true,
+      hours,
+      details,
+      created_at: now,
+      updatedAt: now,
+    });
+  };
+
+  if (isApprove) {
+    if (req.type === '公休変更') {
+      const originalDate = pushClear(req.details?.originalDate || req.originalDate || req.old_date);
+      const targetDate = pushClear(req.details?.targetDate || req.targetDate || req.new_date || req.date);
+      if (originalDate) pushShift(originalDate, '出勤', undefined, { note: '公休変更に伴う出勤化' });
+      if (targetDate) pushShift(targetDate, '公休', undefined, req.details);
+      if (originalDate || targetDate) {
+        supersededConflictDates = {
+          staffId: targetStaffId,
+          staffName: targetStaffName,
+          originalDate,
+          targetDate,
+          excludeId: String(req.id || ''),
+        };
+      }
+    } else if (req.type === '休日出勤変更') {
+      const originalDate = pushClear(req.details?.originalDate || req.originalDate || req.old_date);
+      const targetDate = pushClear(req.details?.targetDate || req.targetDate || req.new_date || req.date);
+      if (originalDate) pushShift(originalDate, '公休', undefined, { note: '休日出勤変更に伴う公休化' });
+      if (targetDate) pushShift(targetDate, '休日出勤', undefined, req.details);
+    } else if (req.type === '休日出勤＋公休変更') {
+      const workOriginalDate = pushClear(req.details?.workOriginalDate || req.workOriginalDate);
+      const workTargetDate = pushClear(req.details?.workTargetDate || req.workTargetDate);
+      const offOriginalDate = pushClear(req.details?.offOriginalDate || req.offOriginalDate);
+      const offTargetDate = pushClear(req.details?.offTargetDate || req.offTargetDate);
+      if (workOriginalDate) pushShift(workOriginalDate, '公休');
+      if (workTargetDate) pushShift(workTargetDate, '休日出勤');
+      if (offOriginalDate) pushShift(offOriginalDate, '出勤');
+      if (offTargetDate) pushShift(offTargetDate, '公休');
+    } else if (req.date) {
+      const cleanDate = pushClear(req.date);
+      if (cleanDate) {
+        pushShift(cleanDate, req.type, req.hours ?? req.details?.hours ?? req.details?.duration, req.details);
+      }
+    }
+  } else if (isUnapprove) {
+    if (req.type === '公休変更') {
+      const originalDate = pushClear(req.details?.originalDate || req.originalDate || req.old_date);
+      const targetDate = pushClear(req.details?.targetDate || req.targetDate || req.new_date || req.date);
+      if (originalDate) pushShift(originalDate, '公休', undefined, { note: '承認取り消しによる公休復元' });
+      if (targetDate) pushShift(targetDate, '出勤', undefined, { note: '承認取り消しによる出勤復元' });
+    } else if (req.type === '休日出勤変更') {
+      const originalDate = pushClear(req.details?.originalDate || req.originalDate || req.old_date);
+      const targetDate = pushClear(req.details?.targetDate || req.targetDate || req.new_date || req.date);
+      if (originalDate) pushShift(originalDate, '休日出勤', undefined, { note: '承認取り消しによる休出復元' });
+      if (targetDate) pushShift(targetDate, '公休', undefined, { note: '承認取り消しによる公休復元' });
+    } else if (req.type === '休日出勤＋公休変更') {
+      const workOriginalDate = pushClear(req.details?.workOriginalDate || req.workOriginalDate);
+      const workTargetDate = pushClear(req.details?.workTargetDate || req.workTargetDate);
+      const offOriginalDate = pushClear(req.details?.offOriginalDate || req.offOriginalDate);
+      const offTargetDate = pushClear(req.details?.offTargetDate || req.offTargetDate);
+      if (workOriginalDate) pushShift(workOriginalDate, '休日出勤');
+      if (workTargetDate) pushShift(workTargetDate, '公休');
+      if (offOriginalDate) pushShift(offOriginalDate, '公休');
+      if (offTargetDate) pushShift(offTargetDate, '出勤');
+    } else if (req.date) {
+      const cleanDate = pushClear(req.date);
+      if (cleanDate) pushShift(cleanDate, '出勤', undefined, { note: '申請承認取り消しによる出勤復元' });
+    }
+  } else if (isReject) {
+    if (req.date) pushClear(req.date);
+  }
+
+  return { clearCriteria, upsertShifts, supersededConflictDates };
+};
+
 /**
  * 申請の承認処理（公休変更・休日出勤変更・ダブルペア・単一日申請のshiftsテーブル完全同期・ロールバック対応）
  */
@@ -85,6 +216,7 @@ export const approveShiftRequest = async (
   status: 'approved' | 'rejected' | 'pending' | 'cancelled' | string = 'approved',
   operator?: { id?: string; name?: string }
 ) => {
+  markLocalMutation(5000);
   let req: any = typeof requestIdOrObj === 'object' ? { ...requestIdOrObj } : null;
   const requestId = typeof requestIdOrObj === 'string' ? requestIdOrObj : requestIdOrObj?.id;
   if (!requestId) throw new Error('申請IDが見つかりません');
@@ -128,24 +260,34 @@ export const approveShiftRequest = async (
   const targetStaffId = req.staff_id || req.staffId || req.user_id || req.userId;
   const targetStaffName = req.staff_name || req.staffName;
 
-  // 指定日の既存シフトを確実にDELETEするヘルパー（出勤・公休問わず既存のゾンビレコードを全削除）
+  // 指定日の既存シフトを確実にDELETEするヘルパー（出勤・公休問わず既存のゾンビレコードを全削除・並列実行）
   const clearShiftsForDate = async (rawDate: string) => {
     const date = normalizeDateStr(rawDate);
     if (!date) return;
+    const tasks: Promise<any>[] = [];
     if (targetStaffId) {
-      await supabase
-        .from('shifts')
-        .delete()
-        .eq('staff_id', targetStaffId)
-        .eq('date', date);
+      tasks.push(
+        Promise.resolve(
+          supabase
+            .from('shifts')
+            .delete()
+            .eq('staff_id', targetStaffId)
+            .eq('date', date)
+        )
+      );
     }
     if (targetStaffName) {
-      await supabase
-        .from('shifts')
-        .delete()
-        .eq('staff_name', targetStaffName)
-        .eq('date', date);
+      tasks.push(
+        Promise.resolve(
+          supabase
+            .from('shifts')
+            .delete()
+            .eq('staff_name', targetStaffName)
+            .eq('date', date)
+        )
+      );
     }
+    if (tasks.length > 0) await Promise.all(tasks);
   };
 
   // shifts テーブルへ登録するヘルパー
@@ -414,6 +556,7 @@ export const approveShiftRequest = async (
     afterData: updatedReq
   });
 
+  markLocalMutation(5000);
   return updatedReq;
 };
 

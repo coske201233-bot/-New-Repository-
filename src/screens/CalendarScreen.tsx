@@ -5,7 +5,7 @@ import { ThemeCard } from '../components/ThemeCard';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme/theme';
 import { ChevronLeft, ChevronRight, Users, Shield, UserMinus, XCircle, Check, LogOut, Edit3, Trash2, Move, Copy, Calendar as CalendarIcon, ArrowRight } from 'lucide-react-native';
 import { getDayType, formatDate, getDateStr, normalizeName } from '../utils/dateUtils';
-import { cloudStorage } from '../utils/cloudStorage';
+import { cloudStorage, markLocalMutation } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
 import { recordAuditLog } from '../utils/auditLogger';
 import { checkIsAdmin } from '../utils/authUtils';
@@ -68,7 +68,7 @@ export const CalendarScreen: React.FC<any> = ({
   profile, staffList, isAdminAuthenticated, monthlyLimits, staffViewMode = false,
   currentDate, setCurrentDate, onDeleteRequest, onDeleteRequests, approveRequest,
   onLogout,
-  shifts, fetchShifts, isLoadingShifts, // [V53.9] Props から受け取る
+  shifts, setShifts, fetchShifts, isLoadingShifts, upsertLocalShifts, removeLocalShifts, // [V77.0] 楽観的UI更新用ハンドラを受け取る
   weekdayLimit, saturdayLimit, sundayLimit, publicHolidayLimit
 }) => {
   const [selectedDate, setSelectedDate] = useState(currentDate);
@@ -98,13 +98,7 @@ export const CalendarScreen: React.FC<any> = ({
   const [isProcessingShift, setIsProcessingShift] = useState<boolean>(false);
 
   const currentMonthKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}`;
-  const fetchShiftsRef = React.useRef(fetchShifts);
-  fetchShiftsRef.current = fetchShifts;
-
-  React.useEffect(() => {
-    // 月変更時に最新データを取得
-    if (fetchShiftsRef.current) fetchShiftsRef.current();
-  }, [currentMonthKey]);
+  const currentMonthPrefix = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
 
   React.useEffect(() => {
     // If current selected date is not in the active month, reset it to the 1st of that month
@@ -123,23 +117,46 @@ export const CalendarScreen: React.FC<any> = ({
     return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
   };
 
-  // [V55.0] PERFECT DATA SYNC: 全てのスタッフで共通の重複排除・優先順位ロジック
-  const requestMap = React.useMemo(() => {
-    // [STRICT FILTER] requests テーブルから却下・削除・無効化・未承認（pending）のIDを抽出
-    const pendingOrRejectedOrDeletedIds = new Set(
-      (requests || [])
-        .filter(r => r && (
-          r.status === 'pending' || r.status === '申請中' ||
-          r.status === 'rejected' || r.status === '却下' || 
-          r.status === 'deleted' || r.status === '削除' || 
-          r.status === 'superseded'
-        ))
-        .map(r => String(r.id))
-    );
+  // O(1) スタッフルックアップ辞書（全レコード走査時の O(N*S) 線形探索を排除）
+  const staffLookup = React.useMemo(() => {
+    const byId = new Map<string, any>();
+    const byName = new Map<string, any>();
+    let sakumaUuid = '';
+    (staffList || []).forEach((s: any) => {
+      if (!s) return;
+      const ids = [s.id, s.userId, s.user_id, s.staff_id, s.staffId].filter(Boolean);
+      ids.forEach((idVal: any) => byId.set(String(idVal).trim(), s));
+      if (s.name) {
+        byName.set(normalize(s.name), s);
+        if (!sakumaUuid && String(s.name).replace(/\s/g, '').includes('佐久間')) {
+          sakumaUuid = s.id || '';
+        }
+      }
+    });
+    return { byId, byName, sakumaUuid };
+  }, [staffList]);
 
-    const map = new Map<string, Map<string, any>>();
-    const allData = [...(requests || []), ...(shifts || [])].filter(r => {
-      if (!r) return false;
+  // [V77.0] 月別インデックス（YYYY-MM -> 有効レコード配列）を事前に構築（月移動時は O(1) で当月分のみ取得）
+  const monthlyDataIndex = React.useMemo(() => {
+    const pendingOrRejectedOrDeletedIds = new Set<string>();
+    const reqList = Array.isArray(requests) ? requests : [];
+    for (let i = 0; i < reqList.length; i++) {
+      const r = reqList[i];
+      if (!r) continue;
+      const st = r.status;
+      if (
+        st === 'pending' || st === '申請中' ||
+        st === 'rejected' || st === '却下' ||
+        st === 'deleted' || st === '削除' ||
+        st === 'superseded'
+      ) {
+        pendingOrRejectedOrDeletedIds.add(String(r.id));
+      }
+    }
+
+    const byMonth = new Map<string, any[]>();
+    const pushIfValid = (r: any) => {
+      if (!r || !r.date) return;
 
       // 🚨 吉田のゴーストデータ（6月11日と7月1日の時間休3.75h）を強制スルー
       const sId = r.staff_id || r.staffId || r.userId || r.user_id || '';
@@ -147,131 +164,128 @@ export const CalendarScreen: React.FC<any> = ({
       const isGhostDate = r.date === '2026-06-11' || r.date === '2026-07-01';
       const rawH = r.hours ?? r.details?.duration ?? r.details?.hours;
       if (isYoshida && isGhostDate && parseFloat(String(rawH)) === 3.75 && r.type !== '振替3.75' && r.type !== '振3.75') {
-        return false;
+        return;
       }
 
-      // 1. レコード自体のステータスが申請中（pending）・却下・削除・無効化（superseded）の場合はカレンダーから除外
+      const st = r.status;
       if (
-        r.status === 'pending' || r.status === '申請中' ||
-        r.status === 'rejected' || r.status === '却下' || 
-        r.status === 'deleted' || r.status === '削除' || 
-        r.status === 'superseded'
-      ) return false;
-      // 2. requestsテーブル側で申請中・却下・削除・無効化されているIDを持つレコードは、shifts側の残骸であっても除外
-      if (pendingOrRejectedOrDeletedIds.has(String(r.id))) return false;
-      return true;
-    });
+        st === 'pending' || st === '申請中' ||
+        st === 'rejected' || st === '却下' ||
+        st === 'deleted' || st === '削除' ||
+        st === 'superseded'
+      ) return;
+      if (pendingOrRejectedOrDeletedIds.has(String(r.id))) return;
 
-    const normalizeLocal = (n: string) => (n || '').replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '').replace(/公費/g, '').toUpperCase();
-    
-    const extractUuid = (idStr: string): string | null => {
-      if (!idStr) return null;
-      const parts = idStr.split('-');
-      // auto-UUID-DATE-... または m-UUID-DATE-... 形式 (1 + 5 + ...)
-      if (parts.length >= 6) return parts.slice(1, 6).join('-');
-      // レガシーな5連IDへの対応
-      if (parts.length === 5 && !idStr.includes('req-')) return idStr;
-      return null;
+      const dateKey = normalizeDate(String(r.date));
+      if (!dateKey || dateKey.length < 7) return;
+      const ym = dateKey.slice(0, 7);
+      let bucket = byMonth.get(ym);
+      if (!bucket) {
+        bucket = [];
+        byMonth.set(ym, bucket);
+      }
+      bucket.push(r);
     };
 
-    allData.forEach((r: any) => {
-      if (!r || !r.date || r.status === 'pending' || r.status === '申請中' || r.status === 'deleted' || r.status === '削除' || r.status === 'superseded') return;
-      
+    for (let i = 0; i < reqList.length; i++) pushIfValid(reqList[i]);
+    const shiftList = Array.isArray(shifts) ? shifts : [];
+    for (let i = 0; i < shiftList.length; i++) pushIfValid(shiftList[i]);
+
+    return byMonth;
+  }, [requests, shifts]);
+
+  // [V77.0] 表示対象月（currentMonthPrefix: YYYY-MM）のみを O(当月件数) でマップ構築（月移動を爆速化）
+  const requestMap = React.useMemo(() => {
+    const map = new Map<string, Map<string, any>>();
+    const monthRecords = monthlyDataIndex.get(currentMonthPrefix);
+    if (!monthRecords || monthRecords.length === 0) return map;
+
+    const OFF_TYPE_SET = new Set([
+      '公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '出張',
+      '振替＋時間休', '振替4', '振4', '振替3.75', '振3.75', '時間休', '時間給', '全休', '年給', '有給', '午前休', '午後休'
+    ]);
+
+    const isManualEntry = (rec: any) => {
+      if (!rec) return false;
+      if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
+      if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
+      const idStr = String(rec.id || '');
+      return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
+    };
+
+    const getTime = (i: any) => {
+      const t = i.updatedAt || i.updated_at || i.createdAt || i.created_at || 0;
+      return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
+    };
+
+    for (let idx = 0; idx < monthRecords.length; idx++) {
+      const r = monthRecords[idx];
       const dateKey = normalizeDate(String(r.date));
-      if (!dateKey) return;
-      if (!map.has(dateKey)) map.set(dateKey, new Map<string, any>());
-      const dayMap = map.get(dateKey)!;
-      
-      // [V74.4] UUID / ID による紐付け
+      if (!dateKey) continue;
+      let dayMap = map.get(dateKey);
+      if (!dayMap) {
+        dayMap = new Map<string, any>();
+        map.set(dateKey, dayMap);
+      }
+
       const extractedId = extractUuid(r.id);
       const rawId = String(r.staff_id || r.staffId || r.user_id || r.userId || extractedId || '').trim();
-      const sName = normalizeLocal(r.staffName || r.staff_name || '');
-      
-      // スネークケース / キャメルケース / ID / 名前による柔軟なマッチング
-      let staffEntry = (staffList || []).find(s => {
-        if (!s) return false;
-        if (rawId && (s.id === rawId || s.userId === rawId || s.user_id === rawId || s.staff_id === rawId || s.staffId === rawId)) {
-          return true;
-        }
-        if (sName && normalizeLocal(s.name) === sName) {
-          return true;
-        }
-        return false;
-      });
+      const sName = normalize(r.staffName || r.staff_name || '');
 
-      let resolvedId = staffEntry?.id || rawId || (sName ? `name_${sName}` : '');
-      if (!resolvedId) return;
+      const staffEntry = (rawId && staffLookup.byId.get(rawId)) || (sName && staffLookup.byName.get(sName)) || null;
+      const resolvedId = staffEntry?.id || rawId || (sName ? `name_${sName}` : '');
+      if (!resolvedId) continue;
 
-      const normalizedReq = { 
-        ...r, 
-        staff_id: staffEntry?.id || r.staff_id || r.staffId || resolvedId, 
+      const normalizedReq = {
+        ...r,
+        staff_id: staffEntry?.id || r.staff_id || r.staffId || resolvedId,
         staffId: staffEntry?.id || r.staffId || r.staff_id || resolvedId,
         staffName: staffEntry?.name || r.staffName || r.staff_name || '',
         staff_name: staffEntry?.name || r.staff_name || r.staffName || ''
       };
 
-      const isManualEntry = (rec: any) => {
-        if (!rec) return false;
-        if (rec.is_manual === true || rec.isManual === true || rec.details?.isManual === true) return true;
-        if (rec.is_manual === false || rec.isManual === false || rec.details?.isManual === false || rec.details?.isAuto === true) return false;
-        const idStr = String(rec.id || '');
-        return idStr.startsWith('m-') || idStr.startsWith('manual-') || idStr.startsWith('req-');
-      };
-
-      const isOff = (t: string) => ['公休', '年休', '有給休暇', '夏季休暇', '特休', '休暇', '欠勤', '研修', '出張', '振替＋時間休', '振替4', '振4', '振替3.75', '振3.75', '時間休', '時間給', '全休', '年給', '有給', '午前休', '午後休'].includes(t);
-
-      const getTime = (i: any) => {
-        const t = i.updatedAt || i.updated_at || i.createdAt || i.created_at || 0;
-        return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
-      };
-
       const setKeyWithPriority = (key: string) => {
-        const existing = dayMap.get(key);
+        const existing = dayMap!.get(key);
         let isBetter = false;
         if (!existing) {
           isBetter = true;
         } else {
           const isManNew = isManualEntry(normalizedReq);
           const wasManOld = isManualEntry(existing);
-          const isOffNew = isOff(normalizedReq.type);
-          const isOffOld = isOff(existing.type);
+          const isOffNew = OFF_TYPE_SET.has(normalizedReq.type);
+          const isOffOld = OFF_TYPE_SET.has(existing.type);
 
           if (isManNew && !wasManOld) {
-            isBetter = true; 
+            isBetter = true;
           } else if (!isManNew && wasManOld) {
-            isBetter = false; 
+            isBetter = false;
           } else if (isManNew && wasManOld) {
             const timeDiff = getTime(normalizedReq) - getTime(existing);
-            if (timeDiff !== 0) {
-              isBetter = timeDiff > 0;
-            } else {
-              isBetter = true;
-            }
+            isBetter = timeDiff !== 0 ? timeDiff > 0 : true;
           } else {
             isBetter = isOffNew && !isOffOld;
           }
         }
 
         if (isBetter) {
-          dayMap.set(key, normalizedReq);
+          dayMap!.set(key, normalizedReq);
         }
       };
 
-      // ID および 名前キーの両方にマッピングして検索漏れを物理的にゼロにする
       setKeyWithPriority(resolvedId);
       if (staffEntry?.id && staffEntry.id !== resolvedId) {
         setKeyWithPriority(staffEntry.id);
       }
       if (staffEntry?.name) {
-        setKeyWithPriority(`name_${normalizeLocal(staffEntry.name)}`);
+        setKeyWithPriority(`name_${normalize(staffEntry.name)}`);
       }
       if (sName) {
         setKeyWithPriority(`name_${sName}`);
       }
-    });
+    }
 
     return map;
-  }, [requests, shifts, staffList]);
+  }, [monthlyDataIndex, currentMonthPrefix, staffLookup]);
 
   const isPrivileged = ((checkIsAdmin(undefined, profile) || isAdminAuthenticated) && !staffViewMode);
   const isAdmin = isPrivileged;
@@ -434,10 +448,24 @@ export const CalendarScreen: React.FC<any> = ({
       return { working: cleanWorking, off: cleanOff };
     };
 
-  const targetStaff = (staffList || []).find((s: any) => (s?.name || '').replace(/\s/g, '').includes('佐久間'));
-  const TARGET_UUID = targetStaff?.id || '';
+  const TARGET_UUID = staffLookup.sakumaUuid;
 
-  const { working: workingStaffRaw, off: offStaffRaw } = getDetailedDayInfo(selectedDate);
+  // 表示対象月の全日の出勤/休暇情報を事前キャッシュ（日付タップ・モーダル開閉時の31日分再計算をゼロ化）
+  const monthDayInfoMap = React.useMemo(() => {
+    const cache = new Map<string, { working: any[]; off: any[] }>();
+    const y = currentDate.getFullYear();
+    const m = currentDate.getMonth();
+    const totalDays = new Date(y, m + 1, 0).getDate();
+    for (let day = 1; day <= totalDays; day++) {
+      const d = new Date(y, m, day);
+      const dKey = normalizeDate(getDateStr(d));
+      cache.set(dKey, getDetailedDayInfo(d));
+    }
+    return cache;
+  }, [currentMonthPrefix, requestMap, staffList]);
+
+  const selectedDateKey = normalizeDate(getDateStr(selectedDate));
+  const { working: workingStaffRaw, off: offStaffRaw } = monthDayInfoMap.get(selectedDateKey) || getDetailedDayInfo(selectedDate);
 
   // 振替＋時間休でかつ最大制限に達しているスタッフを特定するヘルパー (UUIDを利用)
   const isTargetException = (item: any) => {
@@ -504,50 +532,68 @@ export const CalendarScreen: React.FC<any> = ({
           style: 'destructive', 
           onPress: async () => {
             const dateStr = normalizeDate(getDateStr(selectedDate));
-            const dayType = getDayType(selectedDate);
-            
+            const staff = staffList.find((s: any) => normalizeName(s.name) === normalizeName(staffName));
+            const cleanStaffId = staff?.id ? String(staff.id).trim() : '';
+
             // 1. 対象スタッフ・対象日の「手動リクエスト」をすべて特定
             const manualRequestIds = requests
-              .filter(r => r.staffName?.trim() === staffName.trim() && r.date === dateStr && (r.is_manual === true || r.isManual === true || r.details?.isManual === true || !String(r.id).startsWith('auto-')))
-              .map(r => r.id);
+              .filter((r: any) => r.staffName?.trim() === staffName.trim() && r.date === dateStr && (r.is_manual === true || r.isManual === true || r.details?.isManual === true || !String(r.id).startsWith('auto-')))
+              .map((r: any) => r.id);
 
-            // 2. クラウド/グローバルステートから一括削除
-            if (manualRequestIds.length > 0) {
-              if (onDeleteRequests) {
-                await onDeleteRequests(manualRequestIds);
-              } else {
-                for (const id of manualRequestIds) {
-                  await onDeleteRequest(id);
+            const prevRequestsSnap = requests;
+            const prevShiftsSnap = shifts || [];
+            markLocalMutation(5000);
+
+            // 2. 楽観的UI更新: requests と shifts を即座に更新（フルリフェッチ廃止）
+            setRequests((prev: any[]) => prev.filter(r => !(r.staffName?.trim() === staffName.trim() && normalizeDate(r.date) === dateStr)));
+            if (removeLocalShifts) {
+              removeLocalShifts([{ staffId: cleanStaffId, staffName, date: dateStr }]);
+            } else if (setShifts) {
+              setShifts((prev: any[]) => prev.filter(s => !(normalizeDate(s.date) === dateStr && (String(s.staff_id || s.staffId) === cleanStaffId || normalize(s.staff_name || s.staffName) === normalize(staffName)))));
+            }
+
+            // 3. バックグラウンドでDB削除＆監査ログ記録（失敗時のみロールバック）
+            (async () => {
+              try {
+                const tasks: Promise<any>[] = [];
+                if (manualRequestIds.length > 0) {
+                  if (onDeleteRequests) {
+                    tasks.push(Promise.resolve(onDeleteRequests(manualRequestIds)));
+                  } else {
+                    for (const id of manualRequestIds) {
+                      tasks.push(Promise.resolve(onDeleteRequest(id)));
+                    }
+                  }
                 }
+                if (cleanStaffId) {
+                  tasks.push(
+                    Promise.resolve(
+                      supabase.from('shifts').delete()
+                        .eq('staff_id', cleanStaffId)
+                        .eq('date', dateStr)
+                        .eq('is_manual', true)
+                    )
+                  );
+                }
+                await Promise.all(tasks);
+                markLocalMutation(5000);
+
+                await recordAuditLog({
+                  operatorId: profile?.id,
+                  operatorName: profile?.name || '管理者',
+                  targetStaffId: staff?.id,
+                  targetStaffName: staffName,
+                  actionType: 'SHIFT_UPDATE',
+                  targetDate: dateStr,
+                  details: `${staffName}さんのシフト（${dateStr}）を解除・リセットしました`,
+                });
+              } catch (e: any) {
+                console.error('handleDeleteShift background sync error (rolling back):', e);
+                setRequests(prevRequestsSnap);
+                if (setShifts) setShifts(prevShiftsSnap);
+                Alert.alert('エラー', 'シフトの解除保存に失敗したため元に戻しました。');
               }
-            }
-
-            // 3. shiftsテーブルからも削除
-            const staff = staffList.find(s => normalizeName(s.name) === normalizeName(staffName));
-            if (staff && staff.id) {
-              const cleanStaffId = String(staff.id).trim();
-              await supabase.from('shifts').delete()
-                .eq('staff_id', cleanStaffId)
-                .eq('date', dateStr)
-                .eq('is_manual', true);
-            }
-
-            // 4. ローカルステートの更新
-            setRequests((prev: any[]) => prev.filter(r => !(r.staffName?.trim() === staffName.trim() && r.date === dateStr)));
-
-            // 5. 監査ログの記録
-            await recordAuditLog({
-              operatorId: profile?.id,
-              operatorName: profile?.name || '管理者',
-              targetStaffId: staff?.id,
-              targetStaffName: staffName,
-              actionType: 'SHIFT_UPDATE',
-              targetDate: dateStr,
-              details: `${staffName}さんのシフト（${dateStr}）を解除・リセットしました`,
-            });
-
-            Alert.alert('完了', 'シフトの解除・調整が完了しました。');
-            fetchShifts();
+            })();
           }
         }
       ]
@@ -560,53 +606,78 @@ export const CalendarScreen: React.FC<any> = ({
       return;
     }
     const dateStr = normalizeDate(getDateStr(selectedDate));
+    const prevRequestsSnap = requests;
+    const prevShiftsSnap = shifts || [];
 
     if (selectedType === '空欄') {
       const idsToDelete = requests
-        .filter(r => r.date === dateStr && staffNames.includes(r.staffName?.trim()) && (r.is_manual === true || r.isManual === true || r.details?.isManual === true || !String(r.id).startsWith('auto-')))
-        .map(r => r.id);
-      
-      if (idsToDelete.length > 0) {
-        if (onDeleteRequests) {
-          await onDeleteRequests(idsToDelete);
-        } else {
-          for (const id of idsToDelete) {
-            await onDeleteRequest(id);
-          }
-        }
-        
-        setRequests((prev: any[]) => prev.filter(r => !idsToDelete.includes(r.id)));
-        Alert.alert('完了', 'シフトをクリアしました。');
-      }
+        .filter((r: any) => normalizeDate(r.date) === dateStr && staffNames.includes(r.staffName?.trim()) && (r.is_manual === true || r.isManual === true || r.details?.isManual === true || !String(r.id).startsWith('auto-')))
+        .map((r: any) => r.id);
 
-      // [V60.9] shiftsテーブルからも該当スタッフのその日の手動シフトを確実に削除する
-      const staffs = staffNames.map(name => staffList.find(s => normalizeName(s.name) === normalizeName(name)));
-      const staffIds = staffs.filter(Boolean).map(s => String(s.id).trim()).filter(id => id.length > 0);
-      if (staffIds.length > 0) {
-        await supabase.from('shifts').delete()
-          .in('staff_id', staffIds)
-          .eq('date', dateStr)
-          .eq('is_manual', true);
-      }
+      const staffs = staffNames.map(name => staffList.find((s: any) => normalizeName(s.name) === normalizeName(name)));
+      const staffIds = staffs.filter(Boolean).map((s: any) => String(s.id).trim()).filter((id: string) => id.length > 0);
 
-      // 監査ログの記録
-      for (const name of staffNames) {
-        const st = staffList.find(s => normalizeName(s.name) === normalizeName(name) || s.id === name);
-        await recordAuditLog({
-          operatorId: profile?.id,
-          operatorName: profile?.name || '管理者',
-          targetStaffId: st?.id,
-          targetStaffName: st?.name || name,
-          actionType: 'SHIFT_UPDATE',
-          targetDate: dateStr,
-          details: `${st?.name || name}さんのシフト（${dateStr}）をクリアしました`,
-        });
+      markLocalMutation(5000);
+
+      // 1. 楽観的UI更新: 即座にモーダルを閉じ、requests & shifts から対象を除外
+      setRequests((prev: any[]) => prev.filter(r => !idsToDelete.includes(r.id) && !(normalizeDate(r.date) === dateStr && staffNames.includes(r.staffName?.trim()))));
+      if (removeLocalShifts) {
+        removeLocalShifts(staffNames.map((name, i) => ({ staffId: staffs[i]?.id, staffName: name, date: dateStr })));
+      } else if (setShifts) {
+        const staffIdSet = new Set(staffIds);
+        const nameSet = new Set(staffNames.map(n => normalize(n)));
+        setShifts((prev: any[]) => prev.filter(s => !(normalizeDate(s.date) === dateStr && (staffIdSet.has(String(s.staff_id || s.staffId || '').trim()) || nameSet.has(normalize(s.staff_name || s.staffName || ''))))));
       }
 
       setIsAddStaffModalVisible(false);
       setIsTypeModalVisible(false);
       setSelectedStaffToAdd([]);
-      fetchShifts(); // [V60.9] 削除後も再取得を呼ぶ
+
+      // 2. バックグラウンドでDB削除＆監査ログ記録（フルリフェッチ廃止）
+      (async () => {
+        try {
+          const tasks: Promise<any>[] = [];
+          if (idsToDelete.length > 0) {
+            if (onDeleteRequests) {
+              tasks.push(Promise.resolve(onDeleteRequests(idsToDelete)));
+            } else {
+              for (const id of idsToDelete) {
+                tasks.push(Promise.resolve(onDeleteRequest(id)));
+              }
+            }
+          }
+          if (staffIds.length > 0) {
+            tasks.push(
+              Promise.resolve(
+                supabase.from('shifts').delete()
+                  .in('staff_id', staffIds)
+                  .eq('date', dateStr)
+                  .eq('is_manual', true)
+              )
+            );
+          }
+          await Promise.all(tasks);
+          markLocalMutation(5000);
+
+          for (const name of staffNames) {
+            const st = staffList.find((s: any) => normalizeName(s.name) === normalizeName(name) || s.id === name);
+            await recordAuditLog({
+              operatorId: profile?.id,
+              operatorName: profile?.name || '管理者',
+              targetStaffId: st?.id,
+              targetStaffName: st?.name || name,
+              actionType: 'SHIFT_UPDATE',
+              targetDate: dateStr,
+              details: `${st?.name || name}さんのシフト（${dateStr}）をクリアしました`,
+            });
+          }
+        } catch (err: any) {
+          console.error('[Optimistic] Clear shift failed (rolling back):', err);
+          setRequests(prevRequestsSnap);
+          if (setShifts) setShifts(prevShiftsSnap);
+          Alert.alert('エラー', 'シフトのクリア保存に失敗したため元に戻しました。');
+        }
+      })();
       return;
     }
 
@@ -614,9 +685,10 @@ export const CalendarScreen: React.FC<any> = ({
     const cTitle = customTitle.trim() || 'カスタム';
     const isTrip = selectedType === '出張';
     const tTitle = tripTitle.trim();
+    const nowIso = new Date().toISOString();
 
     const newReqs = staffNames.map(nameOrId => {
-      const staff = staffList.find(s => s.id === nameOrId || normalizeName(s.name) === normalizeName(nameOrId));
+      const staff = staffList.find((s: any) => s.id === nameOrId || normalizeName(s.name) === normalizeName(nameOrId));
       const finalName = staff ? staff.name : nameOrId;
       const sId = staff ? staff.id : undefined;
       const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
@@ -626,13 +698,14 @@ export const CalendarScreen: React.FC<any> = ({
         staffId: sId,
         staff_id: sId,
         staffName: finalName,
+        staff_name: finalName,
         date: dateStr,
         type: selectedType,
         customType: customVal,
         customTitle: customVal,
         status: 'approved',
         reason: isCustom ? `カスタム出勤: ${cTitle}` : (isTrip && tTitle ? `出張: ${tTitle}` : '管理者による調整'),
-        isManual: true, // リクエストテーブル用
+        isManual: true,
         is_manual: true,
         hours: isCustom
           ? 0
@@ -669,46 +742,79 @@ export const CalendarScreen: React.FC<any> = ({
                   : (selectedType === '振替3.75' || selectedType === '振3.75')
                     ? { note: '振替3.75時間', furikaeHours: 3.75, duration: 3.75, hours: 3.75, isManual: true }
                     : { note: '手動割当', isManual: true },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(), // [V61.0] 優先度判定のためにupdatedAtを付与
+        createdAt: nowIso,
+        updatedAt: nowIso,
       };
     });
 
-    // [V61.4] requests と shifts 両方のテーブルを更新して状態の不整合を防ぐ
-    // [V75.2] STRICT ERROR HANDLING & UUID VALIDATION
-    try {
-      for (const r of newReqs) {
-        const staff = staffList.find(s => s.id === (r.staff_id || r.staffId) || normalizeName(s.name) === normalizeName(r.staffName));
-        
-        if (!staff || !staff.id) {
-          console.error('[V75.2] Failed to resolve UUID for staff:', r.staffName);
-          Alert.alert('保存エラー', `${r.staffName}さんのUUIDを特定できません。名簿を確認してください。`);
-          continue;
-        }
+    // UUID解決チェック
+    const validReqs = newReqs.filter(r => {
+      if (!r.staff_id) {
+        console.error('[V75.2] Failed to resolve UUID for staff:', r.staffName);
+        Alert.alert('保存エラー', `${r.staffName}さんのUUIDを特定できません。名簿を確認してください。`);
+        return false;
+      }
+      return true;
+    });
+    if (validReqs.length === 0) return;
 
-        // 1. shiftsテーブルの更新
-        const { error: sErr } = await supabase.from('shifts').upsert({
+    markLocalMutation(5000);
+
+    // 1. 楽観的UI更新: モーダルを即閉じ、requests & shifts を即座に差分反映
+    const targetStaffIdSet = new Set(validReqs.map(r => String(r.staff_id).trim()));
+    const targetNameSet = new Set(validReqs.map(r => normalize(r.staffName)));
+    setRequests((prev: any[]) => {
+      const without = prev.filter(r => !(normalizeDate(r.date) === dateStr && (targetStaffIdSet.has(String(r.staff_id || r.staffId || '').trim()) || targetNameSet.has(normalize(r.staff_name || r.staffName || '')))));
+      return [...without, ...validReqs];
+    });
+
+    const shiftPayloads = validReqs.map(r => ({
+      id: r.id,
+      staff_id: r.staff_id,
+      staff_name: r.staffName,
+      date: r.date,
+      type: r.type,
+      status: 'approved',
+      is_manual: true,
+      hours: r.hours,
+      details: r.details,
+      created_at: nowIso,
+      updatedAt: nowIso,
+    }));
+
+    if (upsertLocalShifts) {
+      upsertLocalShifts(shiftPayloads);
+    } else if (setShifts) {
+      setShifts((prev: any[]) => {
+        const without = prev.filter(s => !(normalizeDate(s.date) === dateStr && (targetStaffIdSet.has(String(s.staff_id || s.staffId || '').trim()) || targetNameSet.has(normalize(s.staff_name || s.staffName || '')))));
+        return [...without, ...shiftPayloads];
+      });
+    }
+
+    setIsAddStaffModalVisible(false);
+    setIsTypeModalVisible(false);
+    setSelectedStaffToAdd([]);
+    setSelectedType('出勤');
+    setCustomTitle('');
+    setTripTitle('');
+
+    // 2. バックグラウンドでDB保存＆監査ログ記録（フルリフェッチ廃止・失敗時のみロールバック）
+    (async () => {
+      try {
+        const dbShiftRows = validReqs.map(r => ({
           id: r.id,
-          staff_id: staff.id,
-          staff_name: staff.name,
+          staff_id: r.staff_id,
+          staff_name: r.staffName,
           date: r.date,
           type: r.type,
           status: 'approved',
           is_manual: true,
           hours: r.hours,
           details: r.details
-        });
-
-        if (sErr) {
-          console.error('[V75.2] Shifts Upsert Error:', sErr);
-          Alert.alert('DB保存失敗(Shifts)', `${staff.name}さんの保存に失敗しました: ${sErr.message}`);
-          throw sErr;
-        }
-
-        // 2. requestsテーブルの更新（同期割れ防止）
-        const { error: rErr } = await supabase.from('requests').upsert({
+        }));
+        const dbReqRows = validReqs.map(r => ({
           id: r.id,
-          staff_id: staff.id, // [V75.3] Added staff_id column
+          staff_id: r.staff_id,
           staff_name: r.staffName,
           date: r.date,
           type: r.type,
@@ -717,312 +823,307 @@ export const CalendarScreen: React.FC<any> = ({
           hours: r.hours,
           details: { ...r.details, isManual: true, updatedAt: r.updatedAt },
           is_manual: true
-        });
+        }));
 
-        if (rErr) {
-          console.error('[V75.2] Requests Upsert Error:', rErr);
-          Alert.alert('DB保存失敗(Requests)', `${staff.name}さんの申請保存に失敗しました: ${rErr.message}`);
-          throw rErr;
+        const [{ error: sErr }, { error: rErr }] = await Promise.all([
+          supabase.from('shifts').upsert(dbShiftRows),
+          supabase.from('requests').upsert(dbReqRows),
+        ]);
+        markLocalMutation(5000);
+
+        if (sErr) throw sErr;
+        if (rErr) throw rErr;
+
+        for (const r of validReqs) {
+          await recordAuditLog({
+            operatorId: profile?.id,
+            operatorName: profile?.name || '管理者',
+            targetStaffId: r.staff_id || r.staffId,
+            targetStaffName: r.staffName,
+            actionType: 'SHIFT_UPDATE',
+            targetDate: r.date,
+            details: r.type === 'カスタム'
+              ? `${r.staffName}さんのシフト（${r.date}）を「${r.customType || 'カスタム'}（カスタム出勤）」に設定しました`
+              : r.type === '出張'
+                ? `${r.staffName}さんのシフト（${r.date}）を「${r.customTitle || '出張'}」(${r.hours}h)に設定しました`
+                : `${r.staffName}さんのシフト（${r.date}）を「${r.type}」に設定しました${r.hours ? ` (${r.hours}h)` : ''}`,
+            afterData: r,
+          });
         }
+      } catch (err: any) {
+        console.error('[V75.2] Critical Save Failure (rolling back):', err);
+        setRequests(prevRequestsSnap);
+        if (setShifts) setShifts(prevShiftsSnap);
+        Alert.alert('DB保存失敗', `保存に失敗したため変更を元に戻しました: ${err?.message || '不明なエラー'}`);
       }
-
-      setRequests((prev: any[]) => [...prev, ...newReqs]);
-
-      // 監査ログの記録
-      for (const r of newReqs) {
-        await recordAuditLog({
-          operatorId: profile?.id,
-          operatorName: profile?.name || '管理者',
-          targetStaffId: r.staff_id || r.staffId,
-          targetStaffName: r.staffName,
-          actionType: 'SHIFT_UPDATE',
-          targetDate: r.date,
-          details: r.type === 'カスタム'
-            ? `${r.staffName}さんのシフト（${r.date}）を「${r.customType || 'カスタム'}（カスタム出勤）」に設定しました`
-            : r.type === '出張'
-              ? `${r.staffName}さんのシフト（${r.date}）を「${r.customTitle || '出張'}」(${r.hours}h)に設定しました`
-              : `${r.staffName}さんのシフト（${r.date}）を「${r.type}」に設定しました${r.hours ? ` (${r.hours}h)` : ''}`,
-          afterData: r,
-        });
-      }
-
-      setIsAddStaffModalVisible(false);
-      setIsTypeModalVisible(false);
-      setSelectedStaffToAdd([]);
-      setSelectedType('出勤');
-      setCustomTitle('');
-      setTripTitle('');
-      
-      // 保存完了後に確実に再取得
-      await fetchShifts();
-      Alert.alert('完了', 'シフトを保存しました。');
-      
-    } catch (err: any) {
-      console.error('[V75.2] Critical Save Failure:', err);
-    }
+    })();
   };
 
-  // --- 1. シフト移動処理 ---
+  // --- 1. シフト移動処理 (楽観的UI更新 + バックグラウンド同期) ---
   const handleMoveShift = async (item: any, fromDateStr: string, toDateStr: string) => {
     if (!isAdmin) {
       Alert.alert('権限エラー', 'シフトの移動は管理者のみ可能です。');
       return;
     }
-    console.log('🔄 [handleMoveShift] Initiating move:', { item, fromDateStr, toDateStr });
     if (!item || !fromDateStr || !toDateStr || fromDateStr === toDateStr) {
-      console.log('⚠️ [handleMoveShift] Skipped: invalid params or same date.');
       return;
     }
-    setIsProcessingShift(true);
 
-    try {
-      const staff = staffList.find(s => s.id === item.staff?.id || s.id === item.staffId || normalizeName(s.name) === normalizeName(item.staff?.name || item.staffName || item.name));
-      if (!staff || !staff.id) {
-        console.error('❌ [handleMoveShift] Staff not found for:', item);
-        Alert.alert('エラー', '対象スタッフの情報を特定できませんでした。');
-        return;
-      }
-      const cleanStaffId = String(staff.id).trim();
-      const staffName = staff.name;
-      const shiftType = item.type || '出勤';
-      const hours = item.hours || null;
-      const details = item.details || { note: '管理画面より日付移動' };
+    const staff = staffList.find((s: any) => s.id === item.staff?.id || s.id === item.staffId || normalizeName(s.name) === normalizeName(item.staff?.name || item.staffName || item.name));
+    if (!staff || !staff.id) {
+      Alert.alert('エラー', '対象スタッフの情報を特定できませんでした。');
+      return;
+    }
 
-      console.log(`[handleMoveShift] Deleting existing records on ${fromDateStr} for staff ${staffName} (${cleanStaffId})...`);
+    const cleanStaffId = String(staff.id).trim();
+    const staffName = staff.name;
+    const shiftType = item.type || '出勤';
+    const hours = item.hours || null;
+    const details = item.details || { note: '管理画面より日付移動' };
+    const nowIso = new Date().toISOString();
 
-      // 1. 移動元の古い日付のシフト（shiftsテーブル）を完全削除（staff_id と staff_name の両方でクエリ）
-      await supabase.from('shifts').delete()
-        .eq('staff_id', cleanStaffId)
-        .eq('date', fromDateStr);
+    const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    const newReq = {
+      id: newId,
+      staff_id: cleanStaffId,
+      staffId: cleanStaffId,
+      staff_name: staffName,
+      staffName: staffName,
+      date: toDateStr,
+      type: shiftType,
+      status: 'approved',
+      is_manual: true,
+      isManual: true,
+      hours: hours,
+      details: { ...details, isManual: true, movedFrom: fromDateStr },
+      created_at: nowIso,
+      updatedAt: nowIso,
+    };
 
-      await supabase.from('shifts').delete()
-        .eq('staff_name', staffName)
-        .eq('date', fromDateStr);
+    const prevRequestsSnap = requests;
+    const prevShiftsSnap = shifts || [];
+    const normStaffName = normalizeName(staffName);
 
-      // 2. 移動元の古い日付のリクエスト（requestsテーブル）を完全削除
-      if (item.requestId && !String(item.requestId).startsWith('auto-')) {
-        await supabase.from('requests').delete().eq('id', item.requestId);
-      }
-      await supabase.from('requests').delete()
-        .eq('staff_id', cleanStaffId)
-        .eq('date', fromDateStr);
+    markLocalMutation(5000);
 
-      await supabase.from('requests').delete()
-        .eq('staff_name', staffName)
-        .eq('date', fromDateStr);
+    // 1. 楽観的UI更新: モーダルを即閉じ、移動元削除＋移動先追加を即座に反映
+    setSelectedShiftToEdit(null);
+    setRequests((prev: any[]) => {
+      const filtered = (prev || []).filter(r => {
+        if (!r) return false;
+        const rDate = normalizeDate(r.date);
+        if (rDate !== fromDateStr && rDate !== toDateStr) return true;
 
-      // 3. 移動先の日付へ新規シフト/リクエストを upsert
-      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-      const newReq = {
-        id: newId,
-        staff_id: cleanStaffId,
-        staff_name: staffName,
-        date: toDateStr,
-        type: shiftType,
-        status: 'approved',
-        is_manual: true,
-        hours: hours,
-        details: { ...details, isManual: true, movedFrom: fromDateStr },
-        created_at: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+        const rId = String(r.id || '');
+        const rStaffId = String(r.staff_id || r.staffId || '').trim();
+        const rStaffName = normalizeName(r.staff_name || r.staffName || r.name || '');
 
-      console.log(`[handleMoveShift] Upserting to shifts on ${toDateStr}:`, newReq);
+        const isMatchId = item.requestId && rId === String(item.requestId);
+        const isMatchStaffId = cleanStaffId && rStaffId === cleanStaffId;
+        const isMatchName = normStaffName && rStaffName === normStaffName;
 
-      const { error: sErr } = await supabase.from('shifts').upsert({
-        id: newId,
-        staff_id: cleanStaffId,
-        staff_name: staffName,
-        date: toDateStr,
-        type: shiftType,
-        status: 'approved',
-        is_manual: true,
-        hours: hours,
-        details: newReq.details,
+        return !(isMatchId || isMatchStaffId || isMatchName);
       });
-      if (sErr) throw sErr;
+      return [...filtered, newReq];
+    });
 
-      const { error: rErr } = await supabase.from('requests').upsert({
-        id: newId,
-        staff_id: cleanStaffId,
-        staff_name: staffName,
-        date: toDateStr,
-        type: shiftType,
-        status: 'approved',
-        reason: '管理画面より日付移動',
-        hours: hours,
-        details: newReq.details,
-        is_manual: true,
-      });
-      if (rErr) console.warn('Requests sync warning:', rErr.message);
-
-      // 4. ローカルステートの完全除去と追加（名前・ID両方で移動元を完全フィルタリング）
-      const normStaffName = normalizeName(staffName);
-      setRequests((prev: any[]) => {
-        const filtered = (prev || []).filter(r => {
-          if (!r) return false;
-          const rDate = normalizeDate(r.date);
-          if (rDate !== fromDateStr) return true; // 別の日付はそのまま保持
-
-          const rId = String(r.id || '');
-          const rStaffId = String(r.staff_id || r.staffId || '').trim();
-          const rStaffName = normalizeName(r.staff_name || r.staffName || r.name || '');
-
-          const isMatchId = item.requestId && rId === String(item.requestId);
-          const isMatchStaffId = cleanStaffId && rStaffId === cleanStaffId;
-          const isMatchName = normStaffName && rStaffName === normStaffName;
-
-          return !(isMatchId || isMatchStaffId || isMatchName);
+    if (removeLocalShifts && upsertLocalShifts) {
+      removeLocalShifts([{ id: item.requestId, staffId: cleanStaffId, staffName, date: fromDateStr }]);
+      upsertLocalShifts([newReq]);
+    } else if (setShifts) {
+      setShifts((prev: any[]) => {
+        const filtered = (prev || []).filter(s => {
+          if (!s) return false;
+          const sDate = normalizeDate(s.date);
+          if (sDate !== fromDateStr && sDate !== toDateStr) return true;
+          const sStaffId = String(s.staff_id || s.staffId || '').trim();
+          const sStaffName = normalizeName(s.staff_name || s.staffName || '');
+          return !(sStaffId === cleanStaffId || sStaffName === normStaffName);
         });
         return [...filtered, newReq];
       });
-
-      // 5. 監査ログの記録 (SHIFT_MOVE)
-      await recordAuditLog({
-        operatorId: profile?.id,
-        operatorName: profile?.name || '管理者',
-        targetStaffId: cleanStaffId,
-        targetStaffName: staffName,
-        actionType: 'SHIFT_MOVE',
-        targetDate: toDateStr,
-        details: `${staffName}さんのシフトを ${fromDateStr} から ${toDateStr} へ移動しました（${shiftType}${hours ? ` ${hours}h` : ''}）`,
-        beforeData: { date: fromDateStr, type: shiftType, hours },
-        afterData: newReq,
-      });
-
-      console.log(`✅ [handleMoveShift] Successfully moved shift to ${toDateStr}.`);
-
-      // 6. 最新データの再取得と同期
-      if (fetchShifts) await fetchShifts();
-      setSelectedShiftToEdit(null);
-      Alert.alert('移動完了', `${staffName}さんのシフトを ${toDateStr} に移動しました。`);
-
-    } catch (err: any) {
-      console.error('❌ [handleMoveShift] Error during move:', err);
-      Alert.alert('エラー', 'シフトの移動に失敗しました: ' + (err.message || '不明なエラー'));
-    } finally {
-      setIsProcessingShift(false);
     }
+
+    // 2. バックグラウンドでDB更新＆監査ログ記録（フルリフェッチ廃止・失敗時のみロールバック）
+    (async () => {
+      try {
+        const deleteTasks: Promise<any>[] = [
+          Promise.resolve(supabase.from('shifts').delete().eq('staff_id', cleanStaffId).eq('date', fromDateStr)),
+          Promise.resolve(supabase.from('shifts').delete().eq('staff_name', staffName).eq('date', fromDateStr)),
+          Promise.resolve(supabase.from('requests').delete().eq('staff_id', cleanStaffId).eq('date', fromDateStr)),
+          Promise.resolve(supabase.from('requests').delete().eq('staff_name', staffName).eq('date', fromDateStr)),
+        ];
+        if (item.requestId && !String(item.requestId).startsWith('auto-')) {
+          deleteTasks.push(Promise.resolve(supabase.from('requests').delete().eq('id', item.requestId)));
+        }
+        await Promise.all(deleteTasks);
+
+        const [{ error: sErr }, { error: rErr }] = await Promise.all([
+          supabase.from('shifts').upsert({
+            id: newId,
+            staff_id: cleanStaffId,
+            staff_name: staffName,
+            date: toDateStr,
+            type: shiftType,
+            status: 'approved',
+            is_manual: true,
+            hours: hours,
+            details: newReq.details,
+          }),
+          supabase.from('requests').upsert({
+            id: newId,
+            staff_id: cleanStaffId,
+            staff_name: staffName,
+            date: toDateStr,
+            type: shiftType,
+            status: 'approved',
+            reason: '管理画面より日付移動',
+            hours: hours,
+            details: newReq.details,
+            is_manual: true,
+          }),
+        ]);
+        markLocalMutation(5000);
+        if (sErr) throw sErr;
+        if (rErr) console.warn('Requests sync warning:', rErr.message);
+
+        await recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          targetStaffId: cleanStaffId,
+          targetStaffName: staffName,
+          actionType: 'SHIFT_MOVE',
+          targetDate: toDateStr,
+          details: `${staffName}さんのシフトを ${fromDateStr} から ${toDateStr} へ移動しました（${shiftType}${hours ? ` ${hours}h` : ''}）`,
+          beforeData: { date: fromDateStr, type: shiftType, hours },
+          afterData: newReq,
+        });
+      } catch (err: any) {
+        console.error('❌ [handleMoveShift] Error during move (rolling back):', err);
+        setRequests(prevRequestsSnap);
+        if (setShifts) setShifts(prevShiftsSnap);
+        Alert.alert('エラー', 'シフトの移動に失敗したため元に戻しました: ' + (err.message || '不明なエラー'));
+      }
+    })();
   };
 
-  // --- 1-2. シフト複製処理 ---
+  // --- 1-2. シフト複製処理 (楽観的UI更新 + バックグラウンド同期) ---
   const handleCopyShift = async (item: any, targetDateStr: string) => {
     if (!isAdmin) {
       Alert.alert('権限エラー', 'シフトの複製は管理者のみ可能です。');
       return;
     }
-    console.log('📋 [handleCopyShift] Initiating copy:', { item, targetDateStr });
-    if (!item || !targetDateStr) {
-      console.log('⚠️ [handleCopyShift] Skipped: invalid params.');
+    if (!item || !targetDateStr) return;
+
+    const staff = staffList.find((s: any) => s.id === item.staff?.id || s.id === item.staffId || normalizeName(s.name) === normalizeName(item.staff?.name || item.staffName || item.name));
+    if (!staff || !staff.id) {
+      Alert.alert('エラー', '対象スタッフの情報を特定できませんでした。');
       return;
     }
-    setIsProcessingShift(true);
 
-    try {
-      const staff = staffList.find(s => s.id === item.staff?.id || s.id === item.staffId || normalizeName(s.name) === normalizeName(item.staff?.name || item.staffName || item.name));
-      if (!staff || !staff.id) {
-        console.error('❌ [handleCopyShift] Staff not found for:', item);
-        Alert.alert('エラー', '対象スタッフの情報を特定できませんでした。');
-        return;
-      }
-      const cleanStaffId = String(staff.id).trim();
-      const staffName = staff.name;
-      const shiftType = item.type || '出勤';
-      const hours = item.hours ?? item.details?.duration ?? item.details?.hours ?? null;
-      const details = item.details || { note: '管理画面より複製' };
+    const cleanStaffId = String(staff.id).trim();
+    const staffName = staff.name;
+    const shiftType = item.type || '出勤';
+    const hours = item.hours ?? item.details?.duration ?? item.details?.hours ?? null;
+    const details = item.details || { note: '管理画面より複製' };
+    const nowIso = new Date().toISOString();
 
-      // 1. 複製先の日付へ新規シフト/リクエストを upsert
-      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-      const newReq = {
-        id: newId,
-        staff_id: cleanStaffId,
-        staff_name: staffName,
-        date: targetDateStr,
-        type: shiftType,
-        status: 'approved',
-        is_manual: true,
-        hours: hours,
-        details: { ...details, isManual: true, copiedFrom: item.date },
-        created_at: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+    const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    const newReq = {
+      id: newId,
+      staff_id: cleanStaffId,
+      staffId: cleanStaffId,
+      staff_name: staffName,
+      staffName: staffName,
+      date: targetDateStr,
+      type: shiftType,
+      status: 'approved',
+      is_manual: true,
+      isManual: true,
+      hours: hours,
+      details: { ...details, isManual: true, copiedFrom: item.date },
+      created_at: nowIso,
+      updatedAt: nowIso,
+    };
 
-      console.log(`[handleCopyShift] Upserting to shifts on ${targetDateStr}:`, newReq);
+    const prevRequestsSnap = requests;
+    const prevShiftsSnap = shifts || [];
+    const normStaffName = normalizeName(staffName);
 
-      const { error: sErr } = await supabase.from('shifts').upsert({
-        id: newId,
-        staff_id: cleanStaffId,
-        staff_name: staffName,
-        date: targetDateStr,
-        type: shiftType,
-        status: 'approved',
-        is_manual: true,
-        hours: hours,
-        details: newReq.details,
+    markLocalMutation(5000);
+
+    // 1. 楽観的UI更新: モーダルを即閉じ、複製先をステートに即反映
+    setSelectedShiftToEdit(null);
+    setRequests((prev: any[]) => {
+      const filtered = (prev || []).filter(r => {
+        if (!r) return false;
+        const rDate = normalizeDate(r.date);
+        if (rDate !== targetDateStr) return true;
+        const rStaffId = String(r.staff_id || r.staffId || '').trim();
+        const rStaffName = normalizeName(r.staff_name || r.staffName || r.name || '');
+        return !(rStaffId === cleanStaffId || rStaffName === normStaffName);
       });
-      if (sErr) throw sErr;
+      return [...filtered, newReq];
+    });
 
-      const { error: rErr } = await supabase.from('requests').upsert({
-        id: newId,
-        staff_id: cleanStaffId,
-        staff_name: staffName,
-        date: targetDateStr,
-        type: shiftType,
-        status: 'approved',
-        reason: '管理画面より複製',
-        hours: hours,
-        details: newReq.details,
-        is_manual: true,
-      });
-      if (rErr) console.warn('Requests sync warning:', rErr.message);
-
-      // 2. ローカルステートの更新 (元のシフトは保持し、複製先の同スタッフデータを更新/追加)
-      const normStaffName = normalizeName(staffName);
-      setRequests((prev: any[]) => {
-        const filtered = (prev || []).filter(r => {
-          if (!r) return false;
-          const rDate = normalizeDate(r.date);
-          if (rDate !== targetDateStr) return true;
-
-          const rStaffId = String(r.staff_id || r.staffId || '').trim();
-          const rStaffName = normalizeName(r.staff_name || r.staffName || r.name || '');
-
-          const isMatchStaffId = cleanStaffId && rStaffId === cleanStaffId;
-          const isMatchName = normStaffName && rStaffName === normStaffName;
-
-          return !(isMatchStaffId || isMatchName);
-        });
+    if (upsertLocalShifts) {
+      upsertLocalShifts([newReq]);
+    } else if (setShifts) {
+      setShifts((prev: any[]) => {
+        const filtered = (prev || []).filter(s => !(normalizeDate(s.date) === targetDateStr && (String(s.staff_id || s.staffId || '').trim() === cleanStaffId || normalizeName(s.staff_name || s.staffName || '') === normStaffName)));
         return [...filtered, newReq];
       });
-
-      // 3. 監査ログの記録
-      await recordAuditLog({
-        operatorId: profile?.id,
-        operatorName: profile?.name || '管理者',
-        targetStaffId: cleanStaffId,
-        targetStaffName: staffName,
-        actionType: 'SHIFT_UPDATE',
-        targetDate: targetDateStr,
-        details: `${staffName}さんのシフト（${item.date}の${shiftType}${hours ? ` ${hours}h` : ''}）を ${targetDateStr} へ複製しました`,
-        afterData: newReq,
-      });
-
-      console.log(`✅ [handleCopyShift] Successfully copied shift to ${targetDateStr}.`);
-
-      // 4. 最新データの再取得と同期
-      if (fetchShifts) await fetchShifts();
-      setSelectedShiftToEdit(null);
-
-      const parts = targetDateStr.split('-');
-      const dateDisplay = parts.length === 3 ? `${parseInt(parts[1], 10)}月${parseInt(parts[2], 10)}日` : targetDateStr;
-      Alert.alert('複製完了', `${dateDisplay}へシフトを複製しました。`);
-
-    } catch (err: any) {
-      console.error('❌ [handleCopyShift] Error during copy:', err);
-      Alert.alert('エラー', 'シフトの複製に失敗しました: ' + (err.message || '不明なエラー'));
-    } finally {
-      setIsProcessingShift(false);
     }
+
+    // 2. バックグラウンドでDB保存＆監査ログ記録（フルリフェッチ廃止・失敗時のみロールバック）
+    (async () => {
+      try {
+        const [{ error: sErr }, { error: rErr }] = await Promise.all([
+          supabase.from('shifts').upsert({
+            id: newId,
+            staff_id: cleanStaffId,
+            staff_name: staffName,
+            date: targetDateStr,
+            type: shiftType,
+            status: 'approved',
+            is_manual: true,
+            hours: hours,
+            details: newReq.details,
+          }),
+          supabase.from('requests').upsert({
+            id: newId,
+            staff_id: cleanStaffId,
+            staff_name: staffName,
+            date: targetDateStr,
+            type: shiftType,
+            status: 'approved',
+            reason: '管理画面より複製',
+            hours: hours,
+            details: newReq.details,
+            is_manual: true,
+          }),
+        ]);
+        markLocalMutation(5000);
+        if (sErr) throw sErr;
+        if (rErr) console.warn('Requests sync warning:', rErr.message);
+
+        await recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          targetStaffId: cleanStaffId,
+          targetStaffName: staffName,
+          actionType: 'SHIFT_UPDATE',
+          targetDate: targetDateStr,
+          details: `${staffName}さんのシフト（${item.date}の${shiftType}${hours ? ` ${hours}h` : ''}）を ${targetDateStr} へ複製しました`,
+          afterData: newReq,
+        });
+      } catch (err: any) {
+        console.error('❌ [handleCopyShift] Error during copy (rolling back):', err);
+        setRequests(prevRequestsSnap);
+        if (setShifts) setShifts(prevShiftsSnap);
+        Alert.alert('エラー', 'シフトの複製に失敗したため元に戻しました: ' + (err.message || '不明なエラー'));
+      }
+    })();
   };
 
   // --- 2. クイック編集モーダルを開く ---
@@ -1070,140 +1171,158 @@ export const CalendarScreen: React.FC<any> = ({
     setEditActionTab('type');
   };
 
-  // --- 3. クイック種別変更確定 ---
+  // --- 3. クイック種別変更確定 (楽観的UI更新 + バックグラウンド同期) ---
   const handleQuickEditType = async () => {
     if (!isAdmin) {
       Alert.alert('権限エラー', 'シフトの変更は管理者のみ可能です。');
       return;
     }
     if (!selectedShiftToEdit) return;
-    setIsProcessingShift(true);
 
-    try {
-      const staff = selectedShiftToEdit.staff;
-      const cleanStaffId = String(staff?.id || selectedShiftToEdit.staffId).trim();
-      const staffName = staff?.name || selectedShiftToEdit.staffName;
-      const dateStr = selectedShiftToEdit.date;
-      const newType = newEditType;
-      const isCustom = newType === 'カスタム';
-      const cTitle = editCustomTitle.trim() || 'カスタム';
-      const isTrip = newType === '出張';
-      const tTitle = editTripTitle.trim();
-      const isAs = staff?.jobType === '助手' || staff?.role === '助手' || selectedShiftToEdit.isAssistant;
-      const defaultH = isAs ? 7.5 : 7.75;
+    const editingTarget = selectedShiftToEdit;
+    const staff = editingTarget.staff;
+    const cleanStaffId = String(staff?.id || editingTarget.staffId).trim();
+    const staffName = staff?.name || editingTarget.staffName;
+    const dateStr = editingTarget.date;
+    const newType = newEditType;
+    const isCustom = newType === 'カスタム';
+    const cTitle = editCustomTitle.trim() || 'カスタム';
+    const isTrip = newType === '出張';
+    const tTitle = editTripTitle.trim();
+    const isAs = staff?.jobType === '助手' || staff?.role === '助手' || editingTarget.isAssistant;
+    const defaultH = isAs ? 7.5 : 7.75;
 
-      let calcHours = null;
-      let details: any = { note: '管理画面よりクイック変更', isManual: true };
+    let calcHours = null;
+    let details: any = { note: '管理画面よりクイック変更', isManual: true };
 
-      if (isCustom) {
-        calcHours = 0;
-        details = { note: cTitle, customType: cTitle, isCustomWork: true, isManual: true };
-      } else if (newType === '特休＋時間休') {
-        calcHours = newEditSpecialHours + newEditHourlyHours;
-        details = { note: '管理画面よりクイック変更', specialHours: newEditSpecialHours, hourlyHours: newEditHourlyHours, isManual: true };
-      } else if (newType === '振替＋時間休') {
-        calcHours = 4.0 + newEditHourlyHours;
-        details = { note: '管理画面よりクイック変更', furikaeHours: 4.0, hourlyHours: newEditHourlyHours, isManual: true };
-      } else if (newType === '振替4') {
-        calcHours = 4.0;
-        details = { note: '振替4時間', furikaeHours: 4.0, isManual: true };
-      } else if (newType === '振替3.75' || newType === '振3.75') {
-        calcHours = 3.75;
-        details = { note: '振替3.75時間', furikaeHours: 3.75, duration: 3.75, hours: 3.75, isManual: true };
-      } else if (['時間休', '時間給', '特休'].includes(newType)) {
-        calcHours = newEditHours;
-        details = { note: '管理画面よりクイック変更', duration: newEditHours, isManual: true };
-      } else if (newType === '出張') {
-        const tripH = (newEditHours && newEditHours > 0) ? newEditHours : defaultH;
-        calcHours = tripH;
-        details = { note: tTitle || '出張', customTitle: tTitle, customType: tTitle, duration: tripH, hours: tripH, isManual: true };
-      }
+    if (isCustom) {
+      calcHours = 0;
+      details = { note: cTitle, customType: cTitle, isCustomWork: true, isManual: true };
+    } else if (newType === '特休＋時間休') {
+      calcHours = newEditSpecialHours + newEditHourlyHours;
+      details = { note: '管理画面よりクイック変更', specialHours: newEditSpecialHours, hourlyHours: newEditHourlyHours, isManual: true };
+    } else if (newType === '振替＋時間休') {
+      calcHours = 4.0 + newEditHourlyHours;
+      details = { note: '管理画面よりクイック変更', furikaeHours: 4.0, hourlyHours: newEditHourlyHours, isManual: true };
+    } else if (newType === '振替4') {
+      calcHours = 4.0;
+      details = { note: '振替4時間', furikaeHours: 4.0, isManual: true };
+    } else if (newType === '振替3.75' || newType === '振3.75') {
+      calcHours = 3.75;
+      details = { note: '振替3.75時間', furikaeHours: 3.75, duration: 3.75, hours: 3.75, isManual: true };
+    } else if (['時間休', '時間給', '特休'].includes(newType)) {
+      calcHours = newEditHours;
+      details = { note: '管理画面よりクイック変更', duration: newEditHours, isManual: true };
+    } else if (newType === '出張') {
+      const tripH = (newEditHours && newEditHours > 0) ? newEditHours : defaultH;
+      calcHours = tripH;
+      details = { note: tTitle || '出張', customTitle: tTitle, customType: tTitle, duration: tripH, hours: tripH, isManual: true };
+    }
 
-      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-      const customVal = isCustom ? cTitle : (isTrip && tTitle ? tTitle : undefined);
-      const updatedReq = {
-        id: selectedShiftToEdit.requestId && !String(selectedShiftToEdit.requestId).startsWith('auto-') ? selectedShiftToEdit.requestId : newId,
-        staff_id: cleanStaffId,
-        staff_name: staffName,
-        date: dateStr,
-        type: newType,
-        customType: customVal,
-        customTitle: customVal,
-        status: 'approved',
-        reason: isCustom ? `カスタム出勤: ${cTitle}` : (isTrip && tTitle ? `出張: ${tTitle}` : '管理者による変更'),
-        is_manual: true,
-        hours: calcHours,
-        details: details,
-        updatedAt: new Date().toISOString(),
-      };
+    const nowIso = new Date().toISOString();
+    const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    const customVal = isCustom ? cTitle : (isTrip && tTitle ? tTitle : undefined);
+    const updatedReq = {
+      id: editingTarget.requestId && !String(editingTarget.requestId).startsWith('auto-') ? editingTarget.requestId : newId,
+      staff_id: cleanStaffId,
+      staffId: cleanStaffId,
+      staff_name: staffName,
+      staffName: staffName,
+      date: dateStr,
+      type: newType,
+      customType: customVal,
+      customTitle: customVal,
+      status: 'approved',
+      reason: isCustom ? `カスタム出勤: ${cTitle}` : (isTrip && tTitle ? `出張: ${tTitle}` : '管理者による変更'),
+      is_manual: true,
+      isManual: true,
+      hours: calcHours,
+      details: details,
+      updatedAt: nowIso,
+    };
 
-      // 1. shiftsテーブル更新
-      const { error: sErr } = await supabase.from('shifts').upsert({
-        id: updatedReq.id,
-        staff_id: cleanStaffId,
-        staff_name: staffName,
-        date: dateStr,
-        type: newType,
-        status: 'approved',
-        is_manual: true,
-        hours: calcHours,
-        details: details,
-      });
-      if (sErr) throw sErr;
+    const prevRequestsSnap = requests;
+    const prevShiftsSnap = shifts || [];
 
-      // 2. requestsテーブル更新
-      const { error: rErr } = await supabase.from('requests').upsert({
-        id: updatedReq.id,
-        staff_id: cleanStaffId,
-        staff_name: staffName,
-        date: dateStr,
-        type: newType,
-        status: 'approved',
-        reason: '管理者による変更',
-        hours: calcHours,
-        details: details,
-        is_manual: true,
-      });
-      if (rErr) console.warn('Requests sync error:', rErr);
+    markLocalMutation(5000);
 
-      // 3. ローカル更新
-      setRequests((prev: any[]) => {
-        const without = prev.filter(r => !(
-          (r.id === selectedShiftToEdit.requestId || String(r.staff_id || r.staffId) === cleanStaffId) && r.date === dateStr
+    // 1. 楽観的UI更新: モーダルを即閉じ、requests & shifts を即時更新（0ms反映）
+    setSelectedShiftToEdit(null);
+    setEditCustomTitle('');
+    setEditTripTitle('');
+
+    setRequests((prev: any[]) => {
+      const without = prev.filter(r => !(
+        (r.id === editingTarget.requestId || String(r.staff_id || r.staffId) === cleanStaffId) && normalizeDate(r.date) === dateStr
+      ));
+      return [...without, updatedReq];
+    });
+
+    if (upsertLocalShifts) {
+      upsertLocalShifts([updatedReq]);
+    } else if (setShifts) {
+      setShifts((prev: any[]) => {
+        const without = prev.filter(s => !(
+          (s.id === editingTarget.requestId || String(s.staff_id || s.staffId) === cleanStaffId) && normalizeDate(s.date) === dateStr
         ));
         return [...without, updatedReq];
       });
-
-      // 4. 監査ログ記録
-      const newTypeDisplay = isCustom ? `${cTitle}（カスタム出勤）` : (isTrip && tTitle ? `${tTitle}(${calcHours}h)` : newType);
-      await recordAuditLog({
-        operatorId: profile?.id,
-        operatorName: profile?.name || '管理者',
-        targetStaffId: cleanStaffId,
-        targetStaffName: staffName,
-        actionType: 'SHIFT_UPDATE',
-        targetDate: dateStr,
-        details: `${staffName}さんの ${dateStr} のシフトを「${selectedShiftToEdit.type || '未設定'}」から【${newTypeDisplay}】に変更しました`,
-        beforeData: selectedShiftToEdit,
-        afterData: updatedReq,
-      });
-
-      // 5. 最新データ再取得
-      if (fetchShifts) await fetchShifts();
-      setSelectedShiftToEdit(null);
-      setEditCustomTitle('');
-      setEditTripTitle('');
-      Alert.alert('完了', `${staffName}さんのシフトを「${newTypeDisplay}」に変更しました。`);
-
-    } catch (err: any) {
-      console.error('Quick edit error:', err);
-      Alert.alert('エラー', '変更に失敗しました: ' + (err.message || '不明なエラー'));
-    } finally {
-      setIsProcessingShift(false);
     }
+
+    // 2. バックグラウンドでDB保存＆監査ログ記録（フルリフェッチ廃止・失敗時のみロールバック）
+    (async () => {
+      try {
+        const [{ error: sErr }, { error: rErr }] = await Promise.all([
+          supabase.from('shifts').upsert({
+            id: updatedReq.id,
+            staff_id: cleanStaffId,
+            staff_name: staffName,
+            date: dateStr,
+            type: newType,
+            status: 'approved',
+            is_manual: true,
+            hours: calcHours,
+            details: details,
+          }),
+          supabase.from('requests').upsert({
+            id: updatedReq.id,
+            staff_id: cleanStaffId,
+            staff_name: staffName,
+            date: dateStr,
+            type: newType,
+            status: 'approved',
+            reason: '管理者による変更',
+            hours: calcHours,
+            details: details,
+            is_manual: true,
+          }),
+        ]);
+        markLocalMutation(5000);
+        if (sErr) throw sErr;
+        if (rErr) console.warn('Requests sync error:', rErr);
+
+        const newTypeDisplay = isCustom ? `${cTitle}（カスタム出勤）` : (isTrip && tTitle ? `${tTitle}(${calcHours}h)` : newType);
+        await recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          targetStaffId: cleanStaffId,
+          targetStaffName: staffName,
+          actionType: 'SHIFT_UPDATE',
+          targetDate: dateStr,
+          details: `${staffName}さんの ${dateStr} のシフトを「${editingTarget.type || '未設定'}」から【${newTypeDisplay}】に変更しました`,
+          beforeData: editingTarget,
+          afterData: updatedReq,
+        });
+      } catch (err: any) {
+        console.error('Quick edit background sync error (rolling back):', err);
+        setRequests(prevRequestsSnap);
+        if (setShifts) setShifts(prevShiftsSnap);
+        Alert.alert('エラー', '変更の保存に失敗したため元に戻しました: ' + (err.message || '不明なエラー'));
+      }
+    })();
   };
 
-  // --- 4. クイック削除処理 ---
+  // --- 4. クイック削除処理 (楽観的UI更新 + バックグラウンド同期) ---
   const handleQuickDelete = async () => {
     if (!isAdmin) {
       Alert.alert('権限エラー', 'シフトの削除は管理者のみ可能です。');
@@ -1211,7 +1330,6 @@ export const CalendarScreen: React.FC<any> = ({
     }
     if (!selectedShiftToEdit) return;
 
-    // 削除対象の情報をローカル変数に退避
     const shiftToDelete = selectedShiftToEdit;
     const staff = shiftToDelete.staff;
     const cleanStaffId = String(staff?.id || shiftToDelete.staffId || '').trim();
@@ -1220,75 +1338,82 @@ export const CalendarScreen: React.FC<any> = ({
     const shiftType = shiftToDelete.type || 'シフト';
     const reqId = shiftToDelete.requestId ? String(shiftToDelete.requestId).trim() : '';
 
-    // モーダルを即座に閉じる
+    const prevRequestsSnap = requests;
+    const prevShiftsSnap = shifts || [];
+
+    markLocalMutation(5000);
+
+    // 1. 楽観的UI更新: モーダルを即座に閉じ、requests & shifts の両方から即座に除外
     setSelectedShiftToEdit(null);
-    setIsProcessingShift(true);
+    const normTargetName = normalize(staffName);
+    setRequests((prev: any[]) =>
+      (prev || []).filter(r => {
+        if (!r || normalizeDate(r.date) !== dateStr) return true;
+        const rId = String(r.id || '').trim();
+        const rStaffId = String(r.staff_id || r.staffId || '').trim();
+        const rStaffName = normalize(r.staff_name || r.staffName || '');
 
-    try {
-      // 1. ローカルステートを即時先行更新 (UI バッジを瞬時に消す)
-      const normTargetName = normalize(staffName);
-      setRequests((prev: any[]) =>
-        (prev || []).filter(r => {
-          if (!r || r.date !== dateStr) return true;
-          const rId = String(r.id || '').trim();
-          const rStaffId = String(r.staff_id || r.staffId || '').trim();
-          const rStaffName = normalize(r.staff_name || r.staffName || '');
+        const isIdMatch = !!reqId && (rId === reqId);
+        const isStaffIdMatch = !!cleanStaffId && (rStaffId === cleanStaffId);
+        const isStaffNameMatch = !!normTargetName && (rStaffName === normTargetName);
 
-          const isIdMatch = !!reqId && (rId === reqId);
-          const isStaffIdMatch = !!cleanStaffId && (rStaffId === cleanStaffId);
-          const isStaffNameMatch = !!normTargetName && (rStaffName === normTargetName);
+        return !(isIdMatch || isStaffIdMatch || isStaffNameMatch);
+      })
+    );
 
-          return !(isIdMatch || isStaffIdMatch || isStaffNameMatch);
+    if (removeLocalShifts) {
+      removeLocalShifts([{ id: reqId || undefined, staffId: cleanStaffId || undefined, staffName: staffName || undefined, date: dateStr }]);
+    } else if (setShifts) {
+      setShifts((prev: any[]) =>
+        (prev || []).filter(s => {
+          if (!s || normalizeDate(s.date) !== dateStr) return true;
+          const sId = String(s.id || '').trim();
+          const sStaffId = String(s.staff_id || s.staffId || '').trim();
+          const sStaffName = normalize(s.staff_name || s.staffName || '');
+          return !((!!reqId && sId === reqId) || (!!cleanStaffId && sStaffId === cleanStaffId) || (!!normTargetName && sStaffName === normTargetName));
         })
       );
-
-      // 2. shifts テーブルからの確実な一括削除 (ID, staff_id, staff_name の全条件で削除)
-      if (cleanStaffId) {
-        await supabase.from('shifts').delete().eq('staff_id', cleanStaffId).eq('date', dateStr);
-      }
-      if (staffName) {
-        await supabase.from('shifts').delete().eq('staff_name', staffName).eq('date', dateStr);
-      }
-      if (reqId) {
-        await supabase.from('shifts').delete().eq('id', reqId);
-      }
-
-      // 3. requests テーブルからの確実な一括削除 (ID, staff_id, staff_name の全条件で削除)
-      if (reqId && !reqId.startsWith('auto-')) {
-        await supabase.from('requests').delete().eq('id', reqId);
-      }
-      if (cleanStaffId) {
-        await supabase.from('requests').delete().eq('staff_id', cleanStaffId).eq('date', dateStr);
-      }
-      if (staffName) {
-        await supabase.from('requests').delete().eq('staff_name', staffName).eq('date', dateStr);
-      }
-
-      // 4. 監査ログ記録
-      await recordAuditLog({
-        operatorId: profile?.id,
-        operatorName: profile?.name || '管理者',
-        targetStaffId: cleanStaffId || undefined,
-        targetStaffName: staffName,
-        actionType: 'SHIFT_DELETE',
-        targetDate: dateStr,
-        details: `${staffName}さんの ${dateStr} のシフト（${shiftType}）を削除しました`,
-        beforeData: shiftToDelete,
-        afterData: null,
-      });
-
-      // 5. 最新データの再取得
-      if (fetchShifts) {
-        await fetchShifts();
-      }
-
-    } catch (err: any) {
-      console.error('Delete shift error:', err);
-      Alert.alert('エラー', 'シフトの削除に失敗しました: ' + (err.message || '不明なエラー'));
-      if (fetchShifts) await fetchShifts();
-    } finally {
-      setIsProcessingShift(false);
     }
+
+    // 2. バックグラウンドでDB削除＆監査ログ記録（フルリフェッチ廃止・失敗時のみロールバック）
+    (async () => {
+      try {
+        const deleteTasks: Promise<any>[] = [];
+        if (cleanStaffId) {
+          deleteTasks.push(Promise.resolve(supabase.from('shifts').delete().eq('staff_id', cleanStaffId).eq('date', dateStr)));
+          deleteTasks.push(Promise.resolve(supabase.from('requests').delete().eq('staff_id', cleanStaffId).eq('date', dateStr)));
+        }
+        if (staffName) {
+          deleteTasks.push(Promise.resolve(supabase.from('shifts').delete().eq('staff_name', staffName).eq('date', dateStr)));
+          deleteTasks.push(Promise.resolve(supabase.from('requests').delete().eq('staff_name', staffName).eq('date', dateStr)));
+        }
+        if (reqId) {
+          deleteTasks.push(Promise.resolve(supabase.from('shifts').delete().eq('id', reqId)));
+          if (!reqId.startsWith('auto-')) {
+            deleteTasks.push(Promise.resolve(supabase.from('requests').delete().eq('id', reqId)));
+          }
+        }
+        await Promise.all(deleteTasks);
+        markLocalMutation(5000);
+
+        await recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          targetStaffId: cleanStaffId || undefined,
+          targetStaffName: staffName,
+          actionType: 'SHIFT_DELETE',
+          targetDate: dateStr,
+          details: `${staffName}さんの ${dateStr} のシフト（${shiftType}）を削除しました`,
+          beforeData: shiftToDelete,
+          afterData: null,
+        });
+      } catch (err: any) {
+        console.error('Delete shift background sync error (rolling back):', err);
+        setRequests(prevRequestsSnap);
+        if (setShifts) setShifts(prevShiftsSnap);
+        Alert.alert('エラー', 'シフトの削除保存に失敗したため元に戻しました: ' + (err.message || '不明なエラー'));
+      }
+    })();
   };
 
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
@@ -1336,15 +1461,13 @@ export const CalendarScreen: React.FC<any> = ({
       let offWorkers: any[] = [];
       let cellExceptions: any[] = [];
       if (day) {
-        const info = getDetailedDayInfo(d!);
+        const cellDateKey = d ? normalizeDate(getDateStr(d)) : '';
+        const info = monthDayInfoMap.get(cellDateKey) || getDetailedDayInfo(d!);
         
         // 1日休み（満額休み）は出勤者数にはカウントしない
         workingCount = info.working.filter(w => !w.isHomeVisit && !w.isAssistant).length;
 
-        const targetStaff = (staffList || []).find((s: any) => (s?.name || '').replace(/\s/g, '').includes('佐久間'));
-        const TARGET_UUID = targetStaff?.id || '';
-
-        const cellDateStr = d ? normalizeDate(getDateStr(d)) : '';
+        const cellDateStr = cellDateKey;
 
         // セル内表示用オブジェクトを生成するヘルパー
         const getDisplayLabelObj = (item: any, isException = false) => {
@@ -1682,8 +1805,6 @@ export const CalendarScreen: React.FC<any> = ({
             <View style={styles.sectionDivider} />
             <View style={styles.leavesTitleRow}><Users size={16} color={COLORS.primary} /><ThemeText variant="label" style={{ color: COLORS.primary, marginLeft: 8 }}>出勤者一覧</ThemeText></View>
             {workingStaff.length > 0 ? workingStaff.map((item, idx) => {
-              const targetStaff = (staffList || []).find((s: any) => (s?.name || '').replace(/\s/g, '').includes('佐久間'));
-              const TARGET_UUID = targetStaff?.id || '';
               const isTarget = TARGET_UUID && item.staff?.id === TARGET_UUID;
 
               const isTransferType = (item.type || '').includes('振替') || 
@@ -1794,8 +1915,6 @@ export const CalendarScreen: React.FC<any> = ({
             <View style={styles.sectionDivider} />
             <View style={styles.leavesTitleRow}><UserMinus size={16} color="#ef4444" /><ThemeText variant="label" style={{ color: '#ef4444', marginLeft: 8 }}>休暇・休日</ThemeText></View>
             {offStaff.length > 0 ? offStaff.map((item, idx) => {
-              const targetStaff = (staffList || []).find((s: any) => (s?.name || '').replace(/\s/g, '').includes('佐久間'));
-              const TARGET_UUID = targetStaff?.id || '';
               const isTarget = TARGET_UUID && item.staff?.id === TARGET_UUID;
 
               const isTransferType = (item.type || '').includes('振替') || 

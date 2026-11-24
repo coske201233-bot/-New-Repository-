@@ -35,6 +35,9 @@ interface StaffScreenProps {
   onLogout?: () => void;
   fetchShifts?: () => Promise<void>;
   shifts?: any[];
+  setShifts?: (shifts: any[] | ((prev: any[]) => any[])) => void;
+  upsertLocalShifts?: (items: any[]) => void;
+  removeLocalShifts?: (criteria: { id?: string; staffId?: string; staffName?: string; date?: string }[]) => void;
 }
 
 interface MonthDay {
@@ -182,7 +185,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     staffList, setStaffList, 
     requests, setRequests, onDeleteRequest, isPrivileged, profile, 
     currentDate, setCurrentDate,
-    fetchShifts, shifts
+    fetchShifts, shifts, setShifts, upsertLocalShifts, removeLocalShifts
   } = props;
 
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
@@ -195,13 +198,10 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   const isAdminAuthenticated = !!isUserAdmin;
   const userRole = isUserAdmin ? 'admin' : 'staff';
 
-  const activeMonthKey = activeDate ? `${activeDate.getFullYear()}-${activeDate.getMonth()}` : '';
-  const fetchShiftsRef = React.useRef(fetchShifts);
-  fetchShiftsRef.current = fetchShifts;
-
-  useEffect(() => {
-    if (fetchShiftsRef.current) fetchShiftsRef.current();
-  }, [activeMonthKey]);
+  const activeMonthPrefix = activeDate
+    ? `${activeDate.getFullYear()}-${String(activeDate.getMonth() + 1).padStart(2, '0')}`
+    : '';
+  const activeYear = activeDate ? activeDate.getFullYear() : new Date().getFullYear();
 
   // --- [CRITICAL: FORCE RE-FETCH ON FOCUS & DEBUG] ---
   const runDebugFetch = async () => {
@@ -280,10 +280,14 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     }
   };
 
-  // タブが切り替わってこのコンポーネントがマウントされるたびにクラウドから最新データを取得します
+  // 初回または名簿未取得時のみクラウドからスタッフ一覧を取得（タブ切替ごとの無駄な再取得を防止）
   useEffect(() => {
-    runDebugFetch();
-  }, []);
+    if (!Array.isArray(staffList) || staffList.length === 0) {
+      runDebugFetch();
+    } else {
+      setDebugStaffList(staffList);
+    }
+  }, [staffList]);
 
   // 自動的に自分のカレンダーを開くロジック (一般スタッフ用) & 管理者時のリセット
   useEffect(() => {
@@ -346,7 +350,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
   // --- [ON-SCREEN DEBUGGING & FAIL-SAFE RENDER] ---
   const [statusMsg, setStatusMsg] = useState("");
   const [debugError, setDebugError] = useState<string | null>(null);
-  const [debugStaffList, setDebugStaffList] = useState<any[]>([]);
+  const [debugStaffList, setDebugStaffList] = useState<any[]>(() => Array.isArray(staffList) ? staffList : []);
   const staff = debugStaffList; // Alias for user requirement snippet
 
   // Multi-choice options (Custom Hospital Structure)
@@ -598,20 +602,22 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         }
 
         setStatusMsg('🎉 変更を保存しました！');
+        const applyStaffPatch = (prev: any[]) => (prev || []).map(s => {
+          if (s.id === editingStaff.id || s.email === finalEmail) {
+            return {
+              ...s,
+              ...payload,
+              leave_start_date: leaveStart,
+              leaveStartDate: leaveStart,
+              leave_end_date: leaveEnd,
+              leaveEndDate: leaveEnd,
+            };
+          }
+          return s;
+        });
+        setDebugStaffList(applyStaffPatch);
         if (props.setStaffList) {
-          props.setStaffList((prev: any[]) => (prev || []).map(s => {
-            if (s.id === editingStaff.id || s.email === finalEmail) {
-              return {
-                ...s,
-                ...payload,
-                leave_start_date: leaveStart,
-                leaveStartDate: leaveStart,
-                leave_end_date: leaveEnd,
-                leaveEndDate: leaveEnd,
-              };
-            }
-            return s;
-          }));
+          props.setStaffList(applyStaffPatch);
         }
         // 監査ログの記録 (STAFF_UPDATE)
         let logDetails = `${regName.trim()}さんの職員情報を更新しました`;
@@ -629,7 +635,8 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           logDetails = `${regName.trim()}さんの職員情報（${regTitle} / ${regJobType} / ${regPlacement}）を更新しました`;
         }
 
-        await recordAuditLog({
+        // 監査ログは非同期で記録（多重フルリフェッチを廃止して即時反映）
+        recordAuditLog({
           operatorId: profile?.id,
           operatorName: profile?.name || '管理者',
           targetStaffId: editingStaff.id,
@@ -638,20 +645,13 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
           details: logDetails,
           beforeData: editingStaff,
           afterData: { ...editingStaff, ...payload },
-        });
+        }).catch(() => {});
 
-        await fetchStaff();
-        if (props.fetchShifts) {
-          try { await props.fetchShifts(); } catch (e) { console.warn('fetchShifts error:', e); }
-        }
-        if (props.onForceCloudSync) {
-          try { await props.onForceCloudSync(); } catch (e) { console.warn('onForceCloudSync error:', e); }
-        }
         setTimeout(() => { 
           setStatusMsg(''); 
           setIsRegistrationModalVisible(false);
           setEditingStaff(null);
-        }, 1000);
+        }, 600);
       }
     } catch (error: any) {
       console.error("UPDATE ERROR:", error);
@@ -785,22 +785,41 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
     return [...debugStaffList.filter(s => s)].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   }, [debugStaffList]);
 
-  const requestMap = useMemo(() => {
-    return buildRequestMap(requests, shifts);
-  }, [requests, shifts]);
-
   const allCalendarData = useMemo(() => [
     ...(Array.isArray(requests) ? requests : []),
     ...(Array.isArray(shifts) ? shifts : [])
   ], [requests, shifts]);
 
-  const staffCardDataMap = useMemo(() => {
-    const map = new Map<string, { stats: { workDays: number; holidayWorkDays: number; leaveHours: string }; remLeaveText: string; mStatus: any }>();
-    const currentYear = activeDate.getFullYear();
+  // 月別インデックス（YYYY-MM -> レコード配列）を事前構築し、月移動時は O(当月件数) で処理
+  const recordsByMonth = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (let i = 0; i < allCalendarData.length; i++) {
+      const r = allCalendarData[i];
+      if (!r || !r.date || r.status === 'deleted') continue;
+      const dateKey = normalizeDateStr(r.date);
+      if (!dateKey || dateKey.length < 7) continue;
+      const ym = dateKey.slice(0, 7);
+      let bucket = map.get(ym);
+      if (!bucket) {
+        bucket = [];
+        map.set(ym, bucket);
+      }
+      bucket.push(r);
+    }
+    return map;
+  }, [allCalendarData]);
 
+  // 表示対象月（activeMonthPrefix）のデータのみから requestMap を構築（O(当月件数)）
+  const requestMap = useMemo(() => {
+    const monthRecords = recordsByMonth.get(activeMonthPrefix) || [];
+    return buildRequestMap(monthRecords);
+  }, [recordsByMonth, activeMonthPrefix]);
+
+  // 年間集計（残年休・5日必修）は対象年が変わった時のみ再計算（月移動時は0ms）
+  const staffAnnualLeaveMap = useMemo(() => {
+    const map = new Map<string, { remLeaveText: string; mStatus: any }>();
     (filteredStaff || []).forEach(staff => {
       if (!staff) return;
-      const stats = calculateMonthlyStats(staff, activeDate, requestMap);
       const staffPos = staff.position || staff.role || '';
 
       const uKey1 = `initial_leave_days_${staff.id}`;
@@ -816,15 +835,27 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         else if (s3 !== null && !isNaN(parseFloat(s3))) initLeaveDays = parseFloat(s3);
       }
 
-      const remLeaveHours = calculateRemainingLeaveHours(initLeaveDays, allCalendarData, staff, staffPos, currentYear);
+      const remLeaveHours = calculateRemainingLeaveHours(initLeaveDays, allCalendarData, staff, staffPos, activeYear);
       const remLeaveText = formatRemainingLeave(remLeaveHours, staffPos);
-      const mStatus = calculateMandatoryLeaveStatus(staff, allCalendarData, currentYear);
+      const mStatus = calculateMandatoryLeaveStatus(staff, allCalendarData, activeYear);
 
-      map.set(String(staff.id), { stats, remLeaveText, mStatus });
+      map.set(String(staff.id), { remLeaveText, mStatus });
+    });
+    return map;
+  }, [filteredStaff, allCalendarData, activeYear]);
+
+  // 月次統計（平日・休出）のみを月変更時に再計算し、年間集計結果と合流
+  const staffCardDataMap = useMemo(() => {
+    const map = new Map<string, { stats: { workDays: number; holidayWorkDays: number; leaveHours: string }; remLeaveText: string; mStatus: any }>();
+    (filteredStaff || []).forEach(staff => {
+      if (!staff) return;
+      const stats = calculateMonthlyStats(staff, activeDate, requestMap);
+      const annual = staffAnnualLeaveMap.get(String(staff.id)) || { remLeaveText: '0日0.00時間', mStatus: null };
+      map.set(String(staff.id), { stats, remLeaveText: annual.remLeaveText, mStatus: annual.mStatus });
     });
 
     return map;
-  }, [filteredStaff, activeDate, requestMap, allCalendarData]);
+  }, [filteredStaff, activeMonthPrefix, requestMap, staffAnnualLeaveMap]);
 
   const selectedStaffLeaveStats = useMemo(() => {
     if (!selectedStaff) return { workDays: 0, holidayWorkDays: 0, leaveHours: '0.00' };
@@ -983,6 +1014,9 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         requests={requests}
         setRequests={setRequests}
         shifts={shifts}
+        setShifts={setShifts}
+        upsertLocalShifts={upsertLocalShifts}
+        removeLocalShifts={removeLocalShifts}
         fetchShifts={fetchShifts}
         isPrivileged={isPrivileged}
         isAdminAuthenticated={isAdminAuthenticated}

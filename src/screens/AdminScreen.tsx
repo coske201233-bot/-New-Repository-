@@ -100,12 +100,14 @@ interface AdminScreenProps {
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
   updateStaffList: (update: any[] | ((prev: any[]) => any[])) => Promise<any>;
   patchStaff: (id: string, updates: any) => Promise<any>;
-  fetchShifts?: () => Promise<void>;
-  fetchRequests?: () => Promise<void>;
+  fetchShifts?: (options?: any) => Promise<void>;
+  fetchRequests?: (options?: any) => Promise<void>;
   approveRequest?: (id: string, status?: string) => Promise<void>;
   onNavigateToStaff?: () => void;
   onForceCloudSync?: () => Promise<any>;
   shifts?: any[];
+  setShifts?: (shifts: any[] | ((prev: any[]) => any[])) => void;
+  removeLocalShifts?: (criteria: { id?: string; staffId?: string; staffName?: string; date?: string }[]) => void;
 }
 
 export const AdminScreen: React.FC<AdminScreenProps> = ({
@@ -115,7 +117,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   monthlyLimits, onShareApp, onLogout, currentDate = new Date(), setCurrentDate,
   onAutoAssign, onUndoAutoAssign, canUndoAutoAssign,
   requests = [], setRequests, updateStaffList, patchStaff,
-  fetchShifts, fetchRequests, approveRequest, onNavigateToStaff, onForceCloudSync, shifts = []
+  fetchShifts, fetchRequests, approveRequest, onNavigateToStaff, onForceCloudSync, shifts = [], setShifts, removeLocalShifts
 }) => {
 
   const [editStaff, setEditStaff] = useState<any>(null);
@@ -198,10 +200,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     return [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
   }, [requests, shifts]);
 
-  // スタッフごとの年休取得率集計一覧（管理者閲覧専用）
+  // スタッフごとの年休取得率集計一覧（管理者閲覧専用・対象年のみを依存にして月移動時の不要な再計算をゼロ化）
+  const targetLeaveYear = propYear;
   const staffLeaveStatsList = React.useMemo(() => {
     if (!Array.isArray(staffList)) return [];
-    const targetYear = (currentDate || new Date()).getFullYear();
+    const targetYear = targetLeaveYear;
 
     return staffList
       .filter(s => {
@@ -283,7 +286,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           displayText,
         };
       });
-  }, [staffList, allCalendarData, currentDate]);
+  }, [staffList, allCalendarData, targetLeaveYear]);
 
   // 🕒 時間フォーマット安全ガード（キャッシュ遅延・未定義対策）
   const safeFormatHours = (hours: number): string => {
@@ -417,7 +420,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     setSelectedWeekIndex(1);
   };
 
-  // 週別集計用: 週送りハンドラー
+  // 週別集計用: 週送りハンドラー（週数の算出は軽量な getWeekdayWeeksForMonth を使用）
   const handlePrevWeek = () => {
     if (selectedWeekIndex > 1) {
       setSelectedWeekIndex(prev => prev - 1);
@@ -428,13 +431,13 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         const prevM = 12;
         setSelectedWeeklyYear(prevY);
         setSelectedWeeklyMonth(prevM);
-        const prevWeeks = calculateWeeklyFloorNonWorkingHours(staffList, allCalendarData, prevY, prevM);
-        setSelectedWeekIndex(prevWeeks.length || 1);
+        const prevWeeksCount = getWeekdayWeeksForMonth(prevY, prevM).length;
+        setSelectedWeekIndex(prevWeeksCount || 1);
       } else {
         const prevM = selectedWeeklyMonth - 1;
         setSelectedWeeklyMonth(prevM);
-        const prevWeeks = calculateWeeklyFloorNonWorkingHours(staffList, allCalendarData, selectedWeeklyYear, prevM);
-        setSelectedWeekIndex(prevWeeks.length || 1);
+        const prevWeeksCount = getWeekdayWeeksForMonth(selectedWeeklyYear, prevM).length;
+        setSelectedWeekIndex(prevWeeksCount || 1);
       }
     }
   };
@@ -925,15 +928,20 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const handleApproveRequest = async (req: any) => {
     try {
       if (approveRequest) {
+        // useAppLogic の楽観的UI更新版 approveRequest を実行（即座に画面反映＋裏側同期）
         await approveRequest(req.id, 'approved');
       } else {
-        const updated = await approveShiftRequest(req, 'approved', {
+        const prevReqs = requests;
+        const now = new Date().toISOString();
+        setRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'approved', updatedAt: now } : r));
+        approveShiftRequest(req, 'approved', {
           id: profile?.id,
           name: profile?.name || '管理者',
+        }).catch((error: any) => {
+          console.error("UPDATE ERROR (rolling back):", error);
+          setRequests(prevReqs);
+          Alert.alert("保存に失敗しました", (error.message || "不明なエラー") + "\n" + (error.details || ""));
         });
-        setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
-        if (fetchShifts) await fetchShifts();
-        if (fetchRequests) await fetchRequests();
       }
 
       Alert.alert('完了', '申請を承認しました。');
@@ -944,32 +952,46 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   };
 
   const handleRejectRequest = async (id: string) => {
-    try {
-      const targetReq = requests.find(r => r.id === id);
-      // 物理削除を実行
-      await cloudStorage.deleteRequest(id);
-      setRequests(prev => prev.filter(r => r.id !== id));
+    const targetReq = requests.find(r => r.id === id);
+    const prevRequestsSnap = requests;
+    const prevShiftsSnap = shifts;
 
-      // 監査ログ記録
-      if (targetReq) {
-        await recordAuditLog({
-          operatorId: profile?.id,
-          operatorName: profile?.name || '管理者',
-          targetStaffId: targetReq.staff_id || targetReq.staffId,
-          targetStaffName: targetReq.staff_name || targetReq.staffName,
-          actionType: 'REQUEST_REJECT',
-          targetDate: targetReq.date,
-          details: `${targetReq.staff_name || targetReq.staffName || 'スタッフ'}さんの申請「${targetReq.type || '申請'}」(${targetReq.date}) を却下・削除しました`,
-          beforeData: targetReq,
-          afterData: null,
-        });
-      }
-
-      Alert.alert('完了', '申請を却下し、削除しました。');
-    } catch (e) {
-      console.error('Reject error:', e);
-      Alert.alert('エラー', '却下処理中にエラーが発生しました。');
+    // 1. 楽観的UI更新: 即座にステートから除外
+    setRequests(prev => prev.filter(r => r.id !== id));
+    if (removeLocalShifts && targetReq) {
+      removeLocalShifts([{
+        id,
+        staffId: targetReq.staff_id || targetReq.staffId,
+        staffName: targetReq.staff_name || targetReq.staffName,
+        date: targetReq.date,
+      }]);
     }
+    Alert.alert('完了', '申請を却下し、削除しました。');
+
+    // 2. バックグラウンドでDB削除＆監査ログ記録（失敗時のみロールバック）
+    (async () => {
+      try {
+        await cloudStorage.deleteRequest(id);
+        if (targetReq) {
+          await recordAuditLog({
+            operatorId: profile?.id,
+            operatorName: profile?.name || '管理者',
+            targetStaffId: targetReq.staff_id || targetReq.staffId,
+            targetStaffName: targetReq.staff_name || targetReq.staffName,
+            actionType: 'REQUEST_REJECT',
+            targetDate: targetReq.date,
+            details: `${targetReq.staff_name || targetReq.staffName || 'スタッフ'}さんの申請「${targetReq.type || '申請'}」(${targetReq.date}) を却下・削除しました`,
+            beforeData: targetReq,
+            afterData: null,
+          });
+        }
+      } catch (e) {
+        console.error('Reject background sync error (rolling back):', e);
+        setRequests(prevRequestsSnap);
+        if (setShifts) setShifts(prevShiftsSnap);
+        Alert.alert('エラー', '却下処理の保存に失敗したため元に戻しました。');
+      }
+    })();
   };
 
   const handlePrintAttendanceReport = () => {
@@ -1005,8 +1027,21 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         return true;
       });
 
-      // requests と shifts を統合した全データプール
+      // requests と shifts を統合した全データプールから対象月の日付別インデックスを事前構築（O(N)）
       const allDataPool = [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
+      const monthDataByDate = new Map<string, any[]>();
+      allDataPool.forEach((r: any) => {
+        if (!r || !r.date) return;
+        if (r.status === 'deleted' || r.status === '削除' || r.status === 'rejected' || r.status === '却下') return;
+        const dStr = normalizeDateStr(r.date);
+        if (!dStr.startsWith(currentMonthKey)) return;
+        let arr = monthDataByDate.get(dStr);
+        if (!arr) {
+          arr = [];
+          monthDataByDate.set(dStr, arr);
+        }
+        arr.push(r);
+      });
 
       listToPrint.forEach(s => {
         let row = `<tr><td style="text-align: left; padding-left: 5px; font-weight: bold;">${s.name}</td><td>${s.jobType || s.profession || ''}</td>`;
@@ -1016,12 +1051,9 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             const staffNameNormalized = normalizeName(s.name);
             const targetDateStr = normalizeDateStr(d.dateStr);
 
-            // 対象スタッフ・対象日のレコードを抽出（削除・却下は除外）
-            const matchedRecords = allDataPool.filter((r: any) => {
-              if (!r || !r.date) return false;
-              if (r.status === 'deleted' || r.status === '削除' || r.status === 'rejected' || r.status === '却下') return false;
-              if (normalizeDateStr(r.date) !== targetDateStr) return false;
-
+            // 対象日のバケットから対象スタッフのレコードのみを O(当日件数) で抽出
+            const dateBucket = monthDataByDate.get(targetDateStr) || [];
+            const matchedRecords = dateBucket.filter((r: any) => {
               // 1. UUID / staff_id / user_id による直接照合
               const rStaffId = String(r.staff_id || r.staffId || r.user_id || r.userId || '').trim();
               if (staffId && rStaffId && rStaffId === staffId) return true;
@@ -1397,7 +1429,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                           // グローバルなシフトステートを最新化
                           if (fetchShifts) {
                             console.log('[AdminScreen] 全体ステートをリフレッシュ中...');
-                            await fetchShifts();
+                            await fetchShifts({ baseYear: currentYear, force: true });
                           }
 
                           // ターゲット月の旧自動生成リクエスト（UI用）をパージ

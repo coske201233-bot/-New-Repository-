@@ -210,6 +210,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return { inactive, assistant, visit, hospital, ptCount, otCount, stCount, hokatsuCount, hainyoCount };
   }, [safeStaff]);
 
+  // 当日分の承認済みシフトを O(1) で引けるマップを事前構築（レンダリング毎の全件配列結合・走査を廃止）
+  const todayShiftByStaffName = React.useMemo(() => {
+    const map = new Map<string, any>();
+    const pushAll = (arr: any) => {
+      if (!Array.isArray(arr)) return;
+      for (let i = 0; i < arr.length; i++) {
+        const r = arr[i];
+        if (!r || r.date !== todayStr || r.status !== 'approved') continue;
+        const nameKey = (r.staffName || r.staff_name)?.trim();
+        if (nameKey && !map.has(nameKey)) {
+          map.set(nameKey, r);
+        }
+      }
+    };
+    pushAll(requests);
+    pushAll(shifts);
+    return map;
+  }, [requests, shifts, todayStr]);
+
   try {
 
     // ---------------------------------------------------------
@@ -238,15 +257,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     });
 
     // ---------------------------------------------------------
-    // 4. 出勤状況の判定
+    // 4. 出勤状況の判定（事前構築 Map による O(1) ルックアップ）
     // ---------------------------------------------------------
     const isWorkingToday = (staffName: string) => {
-      const todayStr = getDateStr(new Date());
-      const sT = staffName.trim();
-      
-      // [V71.0] requests と shifts の両方をチェック
-      const allShifts = [...(Array.isArray(requests) ? requests : []), ...(Array.isArray(shifts) ? shifts : [])];
-      const shift = allShifts.find(r => (r.staffName || r.staff_name)?.trim() === sT && r.date === todayStr && r.status === 'approved');
+      const sT = (staffName || '').trim();
+      const shift = todayShiftByStaffName.get(sT);
       
       return !!shift && (
         shift.type === '出勤' ||

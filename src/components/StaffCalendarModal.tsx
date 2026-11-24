@@ -4,7 +4,7 @@ import { ThemeText } from './ThemeText';
 import { COLORS } from '../theme/theme';
 import { ChevronLeft, ChevronRight, X, Printer } from 'lucide-react-native';
 import { getMonthInfo, getDayType, getDateStr, normalizeDateStr } from '../utils/dateUtils';
-import { cloudStorage } from '../utils/cloudStorage';
+import { cloudStorage, markLocalMutation } from '../utils/cloudStorage';
 import { supabase } from '../utils/supabase';
 import { recordAuditLog } from '../utils/auditLogger';
 import { isAccountingYearStaff } from '../utils/leaveUtils';
@@ -228,6 +228,9 @@ export interface StaffCalendarModalProps {
   requests: any[];
   setRequests: (requests: any[] | ((prev: any[]) => any[])) => void;
   shifts?: any[];
+  setShifts?: (shifts: any[] | ((prev: any[]) => any[])) => void;
+  upsertLocalShifts?: (items: any[]) => void;
+  removeLocalShifts?: (criteria: { id?: string; staffId?: string; staffName?: string; date?: string }[]) => void;
   fetchShifts?: () => Promise<void>;
   isPrivileged?: boolean;
   isAdminAuthenticated?: boolean;
@@ -246,6 +249,9 @@ export const StaffCalendarModal: React.FC<StaffCalendarModalProps> = React.memo(
   requests,
   setRequests,
   shifts,
+  setShifts,
+  upsertLocalShifts,
+  removeLocalShifts,
   fetchShifts,
   isPrivileged,
   isAdminAuthenticated,
@@ -322,58 +328,93 @@ export const StaffCalendarModal: React.FC<StaffCalendarModalProps> = React.memo(
     if (!selectedDay || !selectedStaff || isSaving) return;
     const sT = normalizeStaffKey(selectedStaff.name);
     const emailPrefix = selectedStaff.email ? selectedStaff.email.split('@')[0].toUpperCase() : null;
+    const targetDay = selectedDay;
+    const targetStaff = selectedStaff;
     const existing = requests.filter((r: any) => r && (
-      (String(r.staffId) === selectedStaff.id || normalizeStaffKey(r.staffName || r.staff_name) === sT || (emailPrefix && normalizeStaffKey(r.staffName || r.staff_name) === emailPrefix))
-      && r.date === selectedDay
+      (String(r.staffId || r.staff_id) === String(targetStaff.id) || normalizeStaffKey(r.staffName || r.staff_name) === sT || (emailPrefix && normalizeStaffKey(r.staffName || r.staff_name) === emailPrefix))
+      && normalizeDateStr(r.date) === normalizeDateStr(targetDay)
     ) && r.status !== 'deleted');
 
-    if (existing.length === 0) {
+    const hasShiftRecord = (shifts || []).some((s: any) => s && (
+      (String(s.staff_id || s.staffId) === String(targetStaff.id) || normalizeStaffKey(s.staff_name || s.staffName) === sT)
+      && normalizeDateStr(s.date) === normalizeDateStr(targetDay)
+    ));
+
+    if (existing.length === 0 && !hasShiftRecord) {
       if (showConfirm) Alert.alert('情報', '削除する予定がありません。');
       return;
     }
 
     const performDelete = async () => {
-      setIsSaving(true);
-      try {
-        for (const r of existing) {
-          if (r.id) {
-            if (onDeleteRequest) {
-              await onDeleteRequest(r.id);
-            } else {
-              setRequests((prev: any[]) => prev.filter((req: any) => req.id !== r.id));
-              await cloudStorage.upsertRequests([{ ...r, status: 'deleted', updatedAt: new Date().toISOString() }]);
+      // ロールバック用スナップショット
+      const prevRequestsSnap = requests;
+      const prevShiftsSnap = shifts || [];
+      const cleanStaffId = targetStaff?.id ? String(targetStaff.id).trim() : '';
+
+      markLocalMutation(5000);
+
+      // 1. 楽観的UI更新: requests と shifts の両方から対象日のレコードを即座に除外
+      setRequests((prev: any[]) => prev.filter((r: any) => !(r && (
+        (String(r.staffId || r.staff_id) === cleanStaffId || normalizeStaffKey(r.staffName || r.staff_name) === sT || (emailPrefix && normalizeStaffKey(r.staffName || r.staff_name) === emailPrefix))
+        && normalizeDateStr(r.date) === normalizeDateStr(targetDay)
+      ))));
+
+      if (removeLocalShifts) {
+        removeLocalShifts([{ staffId: cleanStaffId, staffName: targetStaff.name, date: targetDay }]);
+      } else if (setShifts) {
+        setShifts((prev: any[]) => prev.filter((s: any) => !(s && (
+          (String(s.staff_id || s.staffId) === cleanStaffId || normalizeStaffKey(s.staff_name || s.staffName) === sT)
+          && normalizeDateStr(s.date) === normalizeDateStr(targetDay)
+        ))));
+      }
+
+      setSelectedType('出勤');
+      setSelectedHours(1.0);
+
+      // 2. バックグラウンドでDB削除＆監査ログ記録（フルリフェッチ廃止・失敗時のみロールバック）
+      (async () => {
+        try {
+          const deleteTasks: Promise<any>[] = [];
+          for (const r of existing) {
+            if (r.id) {
+              if (onDeleteRequest) {
+                deleteTasks.push(Promise.resolve(onDeleteRequest(r.id)));
+              } else {
+                deleteTasks.push(cloudStorage.upsertRequests([{ ...r, status: 'deleted', updatedAt: new Date().toISOString() }]));
+              }
             }
           }
+
+          if (cleanStaffId) {
+            deleteTasks.push(
+              Promise.resolve(
+                supabase.from('shifts').delete()
+                  .eq('staff_id', cleanStaffId)
+                  .eq('date', targetDay)
+              )
+            );
+          }
+
+          await Promise.all(deleteTasks);
+          markLocalMutation(5000);
+
+          await recordAuditLog({
+            operatorId: profile?.id,
+            operatorName: profile?.name || '管理者',
+            targetStaffId: targetStaff.id,
+            targetStaffName: targetStaff.name,
+            actionType: 'SHIFT_UPDATE',
+            targetDate: targetDay,
+            details: `${targetStaff.name}さんの予定（${targetDay}）を削除しました`,
+            beforeData: existing
+          });
+        } catch (e) {
+          console.error('DeleteCurrentDay background sync error (rolling back):', e);
+          setRequests(prevRequestsSnap);
+          if (setShifts) setShifts(prevShiftsSnap);
+          Alert.alert('エラー', '削除の保存に失敗したため元に戻しました。');
         }
-
-        if (selectedStaff?.id) {
-          const cleanStaffId = String(selectedStaff.id).trim();
-          await supabase.from('shifts').delete()
-            .eq('staff_id', cleanStaffId)
-            .eq('date', selectedDay);
-        }
-
-        await recordAuditLog({
-          operatorId: profile?.id,
-          operatorName: profile?.name || '管理者',
-          targetStaffId: selectedStaff.id,
-          targetStaffName: selectedStaff.name,
-          actionType: 'SHIFT_UPDATE',
-          targetDate: selectedDay,
-          details: `${selectedStaff.name}さんの予定（${selectedDay}）を削除しました`,
-          beforeData: existing
-        });
-
-        if (fetchShifts) await fetchShifts();
-
-        setSelectedType('出勤');
-        setSelectedHours(1.0);
-        if (showConfirm) Alert.alert('完了', '予定を削除しました。');
-      } catch (e) {
-        Alert.alert('エラー', '削除に失敗しました。');
-      } finally {
-        setIsSaving(false);
-      }
+      })();
     };
 
     if (showConfirm) {
@@ -384,7 +425,7 @@ export const StaffCalendarModal: React.FC<StaffCalendarModalProps> = React.memo(
     } else {
       await performDelete();
     }
-  }, [selectedDay, selectedStaff, isSaving, requests, onDeleteRequest, setRequests, profile, fetchShifts]);
+  }, [selectedDay, selectedStaff, isSaving, requests, shifts, onDeleteRequest, setRequests, setShifts, removeLocalShifts, profile]);
 
   const handleConfirmShift = useCallback(async () => {
     if (!selectedDay || !selectedStaff || isSaving) return;
@@ -394,99 +435,133 @@ export const StaffCalendarModal: React.FC<StaffCalendarModalProps> = React.memo(
       return;
     }
 
-    setIsSaving(true);
-    try {
-      const type = selectedType;
-      const now = new Date().toISOString();
-      const isCustom = type === 'カスタム';
-      const customName = staffCustomTitle.trim() || 'カスタム';
-      const isTrip = type === '出張';
-      const tripTitle = staffTripTitle.trim();
-      const tripHours = (selectedHours && selectedHours > 0) ? selectedHours : maxWorkingHours;
+    const targetDay = selectedDay;
+    const targetStaff = selectedStaff;
+    const prevRequestsSnap = requests;
+    const prevShiftsSnap = shifts || [];
 
-      const newReq = {
-        id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-        staffId: selectedStaff.id,
-        staff_id: selectedStaff.id,
-        staffName: selectedStaff.name,
-        date: selectedDay,
-        type: type,
-        customType: isCustom ? customName : (isTrip ? (tripTitle || undefined) : undefined),
-        customTitle: isTrip ? (tripTitle || undefined) : undefined,
-        hours: isCustom
-          ? 0
-          : isTrip
-            ? tripHours
-            : type === '特休＋時間休'
-              ? (specialHours + hourlyHours)
-              : type === '振替＋時間休'
-                ? (4.0 + hourlyHours)
-                : type === '振替4'
-                  ? 4.0
-                  : (type === '振替3.75' || type === '振3.75')
-                    ? 3.75
-                    : (HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : null),
-        details: isCustom
-          ? { note: customName, customType: customName, isCustomWork: true, isManual: true }
-          : isTrip
-            ? { note: tripTitle || '出張', customTitle: tripTitle, customType: tripTitle, duration: tripHours, hours: tripHours, isManual: true }
-            : type === '特休＋時間休'
-              ? { note: '管理画面より更新', specialHours, hourlyHours, isManual: true }
-              : type === '振替＋時間休'
-                ? { note: '管理画面より更新', furikaeHours: 4.0, hourlyHours, isManual: true }
-                : type === '振替4'
-                  ? { note: '振替4時間', furikaeHours: 4.0, isManual: true }
-                  : (type === '振替3.75' || type === '振3.75')
-                    ? { note: '振替3.75時間', furikaeHours: 3.75, duration: 3.75, hours: 3.75, isManual: true }
-                    : { note: '管理画面より更新', isManual: true },
-        status: 'approved',
-        createdAt: now,
-        updatedAt: now,
-        isShift: true,
-        isManual: true,
-        is_manual: true
-      };
+    const type = selectedType;
+    const now = new Date().toISOString();
+    const isCustom = type === 'カスタム';
+    const customName = staffCustomTitle.trim() || 'カスタム';
+    const isTrip = type === '出張';
+    const tripTitle = staffTripTitle.trim();
+    const tripHours = (selectedHours && selectedHours > 0) ? selectedHours : maxWorkingHours;
 
-      const sT = normalizeStaffKey(selectedStaff.name);
-      const emailPrefix = selectedStaff.email ? selectedStaff.email.split('@')[0].toUpperCase() : null;
-      setRequests((prev: any[]) => {
-        const without = prev.filter((r: any) => r && !(
-          (String(r.staffId) === selectedStaff.id || normalizeStaffKey(r.staffName || r.staff_name) === sT || (emailPrefix && normalizeStaffKey(r.staffName || r.staff_name) === emailPrefix))
-          && r.date === selectedDay
+    const newReq = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      staffId: targetStaff.id,
+      staff_id: targetStaff.id,
+      staffName: targetStaff.name,
+      staff_name: targetStaff.name,
+      date: targetDay,
+      type: type,
+      customType: isCustom ? customName : (isTrip ? (tripTitle || undefined) : undefined),
+      customTitle: isTrip ? (tripTitle || undefined) : undefined,
+      hours: isCustom
+        ? 0
+        : isTrip
+          ? tripHours
+          : type === '特休＋時間休'
+            ? (specialHours + hourlyHours)
+            : type === '振替＋時間休'
+              ? (4.0 + hourlyHours)
+              : type === '振替4'
+                ? 4.0
+                : (type === '振替3.75' || type === '振3.75')
+                  ? 3.75
+                  : (HOUR_SELECTOR_TYPES.includes(type) ? selectedHours : null),
+      details: isCustom
+        ? { note: customName, customType: customName, isCustomWork: true, isManual: true }
+        : isTrip
+          ? { note: tripTitle || '出張', customTitle: tripTitle, customType: tripTitle, duration: tripHours, hours: tripHours, isManual: true }
+          : type === '特休＋時間休'
+            ? { note: '管理画面より更新', specialHours, hourlyHours, isManual: true }
+            : type === '振替＋時間休'
+              ? { note: '管理画面より更新', furikaeHours: 4.0, hourlyHours, isManual: true }
+              : type === '振替4'
+                ? { note: '振替4時間', furikaeHours: 4.0, isManual: true }
+                : (type === '振替3.75' || type === '振3.75')
+                  ? { note: '振替3.75時間', furikaeHours: 3.75, duration: 3.75, hours: 3.75, isManual: true }
+                  : { note: '管理画面より更新', isManual: true },
+      status: 'approved',
+      createdAt: now,
+      updatedAt: now,
+      isShift: true,
+      isManual: true,
+      is_manual: true
+    };
+
+    const sT = normalizeStaffKey(targetStaff.name);
+    const emailPrefix = targetStaff.email ? targetStaff.email.split('@')[0].toUpperCase() : null;
+
+    markLocalMutation(5000);
+
+    // 1. 楽観的UI更新: requests と shifts のメモリ上ステートを即座に更新（0ms即時反映）
+    setRequests((prev: any[]) => {
+      const without = prev.filter((r: any) => r && !(
+        (String(r.staffId || r.staff_id) === String(targetStaff.id) || normalizeStaffKey(r.staffName || r.staff_name) === sT || (emailPrefix && normalizeStaffKey(r.staffName || r.staff_name) === emailPrefix))
+        && normalizeDateStr(r.date) === normalizeDateStr(targetDay)
+      ));
+      return [newReq, ...without];
+    });
+
+    const newShiftRecord = {
+      id: newReq.id,
+      staff_id: targetStaff.id,
+      staff_name: targetStaff.name,
+      date: targetDay,
+      type: type,
+      status: 'approved',
+      is_manual: true,
+      hours: newReq.hours,
+      details: newReq.details,
+      created_at: now,
+      updatedAt: now,
+    };
+
+    if (upsertLocalShifts) {
+      upsertLocalShifts([newShiftRecord]);
+    } else if (setShifts) {
+      setShifts((prev: any[]) => {
+        const without = prev.filter((s: any) => s && !(
+          (String(s.staff_id || s.staffId) === String(targetStaff.id) || normalizeStaffKey(s.staff_name || s.staffName) === sT)
+          && normalizeDateStr(s.date) === normalizeDateStr(targetDay)
         ));
-        return [newReq, ...without];
+        return [...without, newShiftRecord];
       });
-
-      await cloudStorage.upsertRequestsAndShifts([newReq]);
-
-      await recordAuditLog({
-        operatorId: profile?.id,
-        operatorName: profile?.name || '管理者',
-        targetStaffId: selectedStaff.id,
-        targetStaffName: selectedStaff.name,
-        actionType: 'SHIFT_UPDATE',
-        targetDate: selectedDay,
-        details: isCustom
-          ? `${selectedStaff.name}さんの予定（${selectedDay}）を「${customName}（カスタム出勤）」に設定しました`
-          : isTrip
-            ? `${selectedStaff.name}さんの予定（${selectedDay}）を「${tripTitle || '出張'}」に設定しました${newReq.hours ? ` (${newReq.hours}h)` : ''}`
-            : `${selectedStaff.name}さんの予定（${selectedDay}）を「${type}」に設定しました${newReq.hours ? ` (${newReq.hours}h)` : ''}`,
-        afterData: newReq
-      });
-
-      setStaffTripTitle('');
-
-      if (fetchShifts) {
-        await fetchShifts();
-      }
-      Alert.alert('完了', '保存しました');
-    } catch (e) {
-      console.error('Confirm Shift Error:', e);
-      Alert.alert('エラー', '保存に失敗しました。');
-    } finally {
-      setIsSaving(false);
     }
-  }, [selectedDay, selectedStaff, isSaving, selectedType, staffCustomTitle, staffTripTitle, maxWorkingHours, selectedHours, specialHours, hourlyHours, setRequests, profile, fetchShifts, handleDeleteCurrentDay]);
+
+    setStaffTripTitle('');
+
+    // 2. バックグラウンドでDB保存＆監査ログ記録（フルリフェッチ廃止・失敗時のみロールバック）
+    (async () => {
+      try {
+        await cloudStorage.upsertRequestsAndShifts([newReq]);
+        markLocalMutation(5000);
+
+        await recordAuditLog({
+          operatorId: profile?.id,
+          operatorName: profile?.name || '管理者',
+          targetStaffId: targetStaff.id,
+          targetStaffName: targetStaff.name,
+          actionType: 'SHIFT_UPDATE',
+          targetDate: targetDay,
+          details: isCustom
+            ? `${targetStaff.name}さんの予定（${targetDay}）を「${customName}（カスタム出勤）」に設定しました`
+            : isTrip
+              ? `${targetStaff.name}さんの予定（${targetDay}）を「${tripTitle || '出張'}」に設定しました${newReq.hours ? ` (${newReq.hours}h)` : ''}`
+              : `${targetStaff.name}さんの予定（${targetDay}）を「${type}」に設定しました${newReq.hours ? ` (${newReq.hours}h)` : ''}`,
+          afterData: newReq
+        });
+      } catch (e) {
+        console.error('Confirm Shift background sync error (rolling back):', e);
+        setRequests(prevRequestsSnap);
+        if (setShifts) setShifts(prevShiftsSnap);
+        Alert.alert('エラー', '保存に失敗したため変更を元に戻しました。');
+      }
+    })();
+  }, [selectedDay, selectedStaff, isSaving, selectedType, staffCustomTitle, staffTripTitle, maxWorkingHours, selectedHours, specialHours, hourlyHours, requests, shifts, setRequests, setShifts, upsertLocalShifts, profile, handleDeleteCurrentDay]);
 
   const handlePrint = useCallback(() => {
     if (Platform.OS !== 'web' || !selectedStaff) return;

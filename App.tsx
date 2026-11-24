@@ -93,8 +93,13 @@ export default function App() {
     handleBulkApprove,
     handleReject,
     shifts,
+    setShifts,
     fetchShifts,
     fetchRequests,
+    upsertLocalShifts,
+    removeLocalShifts,
+    upsertLocalRequests,
+    removeLocalRequests,
     isLoadingShifts,
   } = logic;
 
@@ -160,8 +165,13 @@ export default function App() {
       isSyncing: logic.isSyncing,
       // [V54.0] グローバルなシフトステートを全ての画面で共有
       shifts,
+      setShifts,
       fetchShifts,
       fetchRequests,
+      upsertLocalShifts,
+      removeLocalShifts,
+      upsertLocalRequests,
+      removeLocalRequests,
       isLoadingShifts,
       onSubmitRequest,
     };

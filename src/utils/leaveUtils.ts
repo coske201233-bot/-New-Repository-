@@ -10,6 +10,77 @@ import { getDayType, normalizeDateStr } from './dateUtils';
 export const HOURS_PER_DAY = 7.75;
 export const FISCAL_YEAR_HOURS_PER_DAY = 7.5;
 
+// デバッグ用監査ログフラグ（通常時は false にしてメインスレッドのブロッキングを解消）
+const DEBUG_LEAVE_AUDIT = false;
+
+interface CalendarDataIndex {
+  rejectedIds: Set<string>;
+  // isInvalidLeaveRecord のみで除外した年別バケット（年休残数・5日必修・取得率計算用）
+  byYearRawValid: Map<number, { rec: any; dateKey: string }[]>;
+  // isInvalidLeaveRecord および rejectedIds クロスチェックで除外した日付別バケット（勤務を要しない時間用）
+  byDateStrictValid: Map<string, any[]>;
+}
+
+const calendarDataIndexCache = new WeakMap<any[], CalendarDataIndex>();
+
+const getCalendarDataIndex = (allCalendarData: any[]): CalendarDataIndex => {
+  const cached = calendarDataIndexCache.get(allCalendarData);
+  if (cached) return cached;
+
+  const rejectedIds = new Set<string>();
+  const rawValidList: { rec: any; dateKey: string; year: number }[] = [];
+
+  for (let i = 0; i < allCalendarData.length; i++) {
+    const r = allCalendarData[i];
+    if (!r) continue;
+    if (isInvalidLeaveRecord(r)) {
+      const idStr = String(r.id || '');
+      if (idStr) rejectedIds.add(idStr);
+      continue;
+    }
+    if (!r.date) continue;
+    const dateKey = normalizeDateStr(r.date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+    const year = parseInt(dateKey.slice(0, 4), 10);
+    rawValidList.push({ rec: r, dateKey, year });
+  }
+
+  const byYearRawValid = new Map<number, { rec: any; dateKey: string }[]>();
+  const byDateStrictValid = new Map<string, any[]>();
+
+  for (let i = 0; i < rawValidList.length; i++) {
+    const entry = rawValidList[i];
+    let yArr = byYearRawValid.get(entry.year);
+    if (!yArr) {
+      yArr = [];
+      byYearRawValid.set(entry.year, yArr);
+    }
+    yArr.push({ rec: entry.rec, dateKey: entry.dateKey });
+
+    const r = entry.rec;
+    const rId = String(r.id || '');
+    const reqId = String(r.requestId || r.request_id || '');
+    if ((rId && rejectedIds.has(rId)) || (reqId && rejectedIds.has(reqId))) {
+      continue;
+    }
+
+    let dArr = byDateStrictValid.get(entry.dateKey);
+    if (!dArr) {
+      dArr = [];
+      byDateStrictValid.set(entry.dateKey, dArr);
+    }
+    dArr.push(r);
+  }
+
+  const index: CalendarDataIndex = {
+    rejectedIds,
+    byYearRawValid,
+    byDateStrictValid,
+  };
+  calendarDataIndexCache.set(allCalendarData, index);
+  return index;
+};
+
 export const normalizeName = (name: string): string => {
   if (!name || typeof name !== 'string') return '';
   let n = name.replace(/[\s\u3000\t\n\r()（）/／・.\-_]/g, '');
@@ -217,12 +288,13 @@ export const calculateUsedLeaveHours = (
     return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
   };
 
-  requests.forEach(r => {
-    if (!r || !r.date || isInvalidLeaveRecord(r)) return;
-    if (!isDateInCalendarYear(r.date, targetYear)) return;
-    if (!isStaffMatchRequest(staffOrId, r)) return;
+  const yearEntries = getCalendarDataIndex(requests).byYearRawValid.get(targetYear);
+  if (!yearEntries || yearEntries.length === 0) return 0;
 
-    const dateKey = normalizeDateStr(r.date);
+  for (let idx = 0; idx < yearEntries.length; idx++) {
+    const { rec: r, dateKey } = yearEntries[idx];
+    if (!isStaffMatchRequest(staffOrId, r)) continue;
+
     const existing = dayMap.get(dateKey);
 
     let isBetter = false;
@@ -248,7 +320,7 @@ export const calculateUsedLeaveHours = (
     if (isBetter) {
       dayMap.set(dateKey, r);
     }
-  });
+  }
 
   let totalUsedHours = 0;
 
@@ -346,38 +418,39 @@ export const calculateMandatoryLeaveStatus = (
     return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
   };
 
-  (requests || []).forEach(r => {
-    if (!r || !r.date || isInvalidLeaveRecord(r)) return;
-    if (!isDateInCalendarYear(r.date, targetYear)) return;
-    if (!isStaffMatchRequest(staff, r)) return;
+  const yearEntries = Array.isArray(requests) ? getCalendarDataIndex(requests).byYearRawValid.get(targetYear) : undefined;
+  if (yearEntries && yearEntries.length > 0) {
+    for (let idx = 0; idx < yearEntries.length; idx++) {
+      const { rec: r, dateKey } = yearEntries[idx];
+      if (!isStaffMatchRequest(staff, r)) continue;
 
-    const dateKey = normalizeDateStr(r.date);
-    const existing = dayMap.get(dateKey);
+      const existing = dayMap.get(dateKey);
 
-    let isBetter = false;
-    if (!existing) {
-      isBetter = true;
-    } else {
-      const isManNew = isManualEntry(r);
-      const wasManOld = isManualEntry(existing);
-
-      if (isManNew && !wasManOld) {
+      let isBetter = false;
+      if (!existing) {
         isBetter = true;
-      } else if (!isManNew && wasManOld) {
-        isBetter = false;
-      } else if (isManNew && wasManOld) {
-        isBetter = getTime(r) > getTime(existing);
       } else {
-        const isOffNew = !isWorkShiftType(r);
-        const isOffOld = !isWorkShiftType(existing);
-        isBetter = isOffNew && !isOffOld;
+        const isManNew = isManualEntry(r);
+        const wasManOld = isManualEntry(existing);
+
+        if (isManNew && !wasManOld) {
+          isBetter = true;
+        } else if (!isManNew && wasManOld) {
+          isBetter = false;
+        } else if (isManNew && wasManOld) {
+          isBetter = getTime(r) > getTime(existing);
+        } else {
+          const isOffNew = !isWorkShiftType(r);
+          const isOffOld = !isWorkShiftType(existing);
+          isBetter = isOffNew && !isOffOld;
+        }
+      }
+
+      if (isBetter) {
+        dayMap.set(dateKey, r);
       }
     }
-
-    if (isBetter) {
-      dayMap.set(dateKey, r);
-    }
-  });
+  }
 
   let usedHours = 0;
 
@@ -505,38 +578,39 @@ export const calculateAnnualLeaveRate = (
     return typeof t === 'string' ? new Date(t).getTime() : (typeof t === 'number' ? t : 0);
   };
 
-  (requests || []).forEach(r => {
-    if (!r || !r.date || isInvalidLeaveRecord(r)) return;
-    if (!isDateInCalendarYear(r.date, targetYear)) return;
-    if (!isStaffMatchRequest(staff, r)) return;
+  const yearEntries = Array.isArray(requests) ? getCalendarDataIndex(requests).byYearRawValid.get(targetYear) : undefined;
+  if (yearEntries && yearEntries.length > 0) {
+    for (let idx = 0; idx < yearEntries.length; idx++) {
+      const { rec: r, dateKey } = yearEntries[idx];
+      if (!isStaffMatchRequest(staff, r)) continue;
 
-    const dateKey = normalizeDateStr(r.date);
-    const existing = dayMap.get(dateKey);
+      const existing = dayMap.get(dateKey);
 
-    let isBetter = false;
-    if (!existing) {
-      isBetter = true;
-    } else {
-      const isManNew = isManualEntry(r);
-      const wasManOld = isManualEntry(existing);
-
-      if (isManNew && !wasManOld) {
+      let isBetter = false;
+      if (!existing) {
         isBetter = true;
-      } else if (!isManNew && wasManOld) {
-        isBetter = false;
-      } else if (isManNew && wasManOld) {
-        isBetter = getTime(r) > getTime(existing);
       } else {
-        const isOffNew = !isWorkShiftType(r);
-        const isOffOld = !isWorkShiftType(existing);
-        isBetter = isOffNew && !isOffOld;
+        const isManNew = isManualEntry(r);
+        const wasManOld = isManualEntry(existing);
+
+        if (isManNew && !wasManOld) {
+          isBetter = true;
+        } else if (!isManNew && wasManOld) {
+          isBetter = false;
+        } else if (isManNew && wasManOld) {
+          isBetter = getTime(r) > getTime(existing);
+        } else {
+          const isOffNew = !isWorkShiftType(r);
+          const isOffOld = !isWorkShiftType(existing);
+          isBetter = isOffNew && !isOffOld;
+        }
+      }
+
+      if (isBetter) {
+        dayMap.set(dateKey, r);
       }
     }
-
-    if (isBetter) {
-      dayMap.set(dateKey, r);
-    }
-  });
+  }
 
   let usedFullDays = 0;
   let usedHourlyHours = 0;
@@ -744,28 +818,7 @@ export function calculateStaffMonthlyNonWorkingHours(
   }
 
   const daysInMonth = new Date(year, month, 0).getDate();
-
-  // 無効・却下・削除・キャンセル済みレコード判定ヘルパー
-  const isInvalidRecord = (r: any): boolean => {
-    if (!r) return true;
-    const st = String(r.status || '').trim().toLowerCase();
-    const detailSt = String(r.details?.status || '').trim().toLowerCase();
-    const invalidList = [
-      'deleted', '削除',
-      'rejected', '却下',
-      'canceled', 'cancelled', 'キャンセル', '取り消し', '申請取消'
-    ];
-    if (invalidList.includes(st) || invalidList.includes(detailSt)) return true;
-    return false;
-  };
-
-  // 真実のソースである requests テーブル等から無効化された ID を抽出
-  const rejectedOrDeletedIds = new Set(
-    allCalendarData
-      .filter(isInvalidRecord)
-      .map(r => String(r.id || ''))
-      .filter(Boolean)
-  );
+  const dataIndex = getCalendarDataIndex(allCalendarData);
 
   const isManualEntry = (rec: any): boolean => {
     if (!rec) return false;
@@ -782,29 +835,22 @@ export function calculateStaffMonthlyNonWorkingHours(
 
   let itemCount = 0;
   const staffName = staff.name || '';
-  const isTargetStaffLog = staffName.includes('TI') || staffName.includes('Ti') || staffName.includes('ti') || String(staff.id || '').includes('TI');
+  const isTargetStaffLog = DEBUG_LEAVE_AUDIT && (staffName.includes('TI') || staffName.includes('Ti') || staffName.includes('ti') || String(staff.id || '').includes('TI'));
 
   if (isTargetStaffLog) {
     console.log(`[NonWorkingHours Audit Start] Staff: ${staffName} (${year}年${month}月)`);
   }
 
   for (let d = 1; d <= daysInMonth; d++) {
-    const dStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const targetDateStr = normalizeDateStr(dStr);
+    const targetDateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const dDate = new Date(year, month - 1, d);
     const dayType = getDayType(dDate); // 'weekday' | 'sat' | 'sun' | 'holiday'
 
-    // 対象スタッフ・該当日の有効レコードを抽出（削除・却下・キャンセルは完全除外）
-    const dayRecords = allCalendarData.filter(r => {
-      if (!r || !r.date) return false;
-      if (isInvalidRecord(r)) return false;
-      const rId = String(r.id || '');
-      const reqId = String(r.requestId || r.request_id || '');
-      if (rId && rejectedOrDeletedIds.has(rId)) return false;
-      if (reqId && rejectedOrDeletedIds.has(reqId)) return false;
-      if (normalizeDateStr(r.date) !== targetDateStr) return false;
-      return isStaffMatchRequest(staff, r);
-    });
+    // 事前構築インデックスから該当日の有効レコードを O(1) で取得し、対象スタッフで絞り込む
+    const dateBucket = dataIndex.byDateStrictValid.get(targetDateStr);
+    if (!dateBucket || dateBucket.length === 0) continue;
+
+    const dayRecords = dateBucket.filter(r => isStaffMatchRequest(staff, r));
 
     if (dayRecords.length === 0) continue;
 
@@ -1147,32 +1193,21 @@ export function calculateStaffDailyNonWorkingHours(
   const dDate = new Date(y, m - 1, d);
   const dayType = getDayType(dDate);
 
-  const isInvalid = (r: any): boolean => {
-    if (!r) return true;
-    const st = String(r.status || '').trim().toLowerCase();
-    const detailSt = String(r.details?.status || '').trim().toLowerCase();
-    const invalidList = [
-      'deleted', '削除',
-      'rejected', '却下',
-      'canceled', 'cancelled', 'キャンセル', '取り消し', '申請取消'
-    ];
-    return invalidList.includes(st) || invalidList.includes(detailSt);
-  };
+  const dataIndex = getCalendarDataIndex(allCalendarData);
+  const dateBucket = dataIndex.byDateStrictValid.get(normTarget);
+  if (!dateBucket || dateBucket.length === 0) {
+    return { hours: 0, rawType: '', resolvedShift: null };
+  }
 
-  const rejectedIds = precomputedRejectedIds || new Set(
-    allCalendarData.filter(isInvalid).map(r => String(r.id || '')).filter(Boolean)
-  );
-
-  const dayRecords = allCalendarData.filter(r => {
-    if (!r || !r.date) return false;
-    if (isInvalid(r)) return false;
-    const rId = String(r.id || '');
-    const reqId = String(r.requestId || r.request_id || '');
-    if (rId && rejectedIds.has(rId)) return false;
-    if (reqId && rejectedIds.has(reqId)) return false;
-    if (normalizeDateStr(r.date) !== normTarget) return false;
-    return isStaffMatchRequest(staff, r);
-  });
+  const dayRecords = precomputedRejectedIds
+    ? dateBucket.filter(r => {
+        const rId = String(r.id || '');
+        const reqId = String(r.requestId || r.request_id || '');
+        if (rId && precomputedRejectedIds.has(rId)) return false;
+        if (reqId && precomputedRejectedIds.has(reqId)) return false;
+        return isStaffMatchRequest(staff, r);
+      })
+    : dateBucket.filter(r => isStaffMatchRequest(staff, r));
 
   if (dayRecords.length === 0) {
     return { hours: 0, rawType: '', resolvedShift: null };
@@ -1418,22 +1453,7 @@ export function calculateWeeklyFloorNonWorkingHours(
   if (!Array.isArray(staffList) || !Array.isArray(allCalendarData)) return [];
 
   const weeks = getWeekdayWeeksForMonth(year, month);
-
-  const isInvalid = (r: any): boolean => {
-    if (!r) return true;
-    const st = String(r.status || '').trim().toLowerCase();
-    const detailSt = String(r.details?.status || '').trim().toLowerCase();
-    const invalidList = [
-      'deleted', '削除',
-      'rejected', '却下',
-      'canceled', 'cancelled', 'キャンセル', '取り消し', '申請取消'
-    ];
-    return invalidList.includes(st) || invalidList.includes(detailSt);
-  };
-
-  const rejectedIds = new Set(
-    allCalendarData.filter(isInvalid).map(r => String(r.id || '')).filter(Boolean)
-  );
+  const { rejectedIds } = getCalendarDataIndex(allCalendarData);
 
   // 対象スタッフと按分情報の判定（除外基準：事務、無効、入職前などを除外）
   const eligibleStaffWithAlloc = staffList

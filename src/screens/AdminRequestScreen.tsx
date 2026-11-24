@@ -14,7 +14,7 @@ interface AdminRequestScreenProps {
   deleteRequest: (id: string) => void;
   handleReject: (id: string) => Promise<void>;
   onBack: () => void;
-  fetchRequests?: () => Promise<void>;
+  fetchRequests?: (options?: any) => Promise<void>;
 }
 
 export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({ 
@@ -23,7 +23,7 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved'>('pending');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // 画面表示時にサイレントで最新データを取得（データ鮮度保証）
+  // 画面表示時にサイレントで最新データを取得（クールダウン付きでタブ遷移を阻害しない）
   useEffect(() => {
     if (fetchRequests) {
       fetchRequests().catch(err => console.warn('[AdminRequestScreen] Auto fetchRequests error:', err));
@@ -34,7 +34,7 @@ export const AdminRequestScreen: React.FC<AdminRequestScreenProps> = ({
     if (!fetchRequests || isRefreshing) return;
     setIsRefreshing(true);
     try {
-      await fetchRequests();
+      await fetchRequests({ force: true });
     } catch (err: any) {
       console.error('[AdminRequestScreen] Manual refresh error:', err);
     } finally {
