@@ -816,7 +816,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
         else if (s3 !== null && !isNaN(parseFloat(s3))) initLeaveDays = parseFloat(s3);
       }
 
-      const remLeaveHours = calculateRemainingLeaveHours(initLeaveDays, allCalendarData, staff);
+      const remLeaveHours = calculateRemainingLeaveHours(initLeaveDays, allCalendarData, staff, staffPos, currentYear);
       const remLeaveText = formatRemainingLeave(remLeaveHours, staffPos);
       const mStatus = calculateMandatoryLeaveStatus(staff, allCalendarData, currentYear);
 
@@ -1223,7 +1223,7 @@ export const StaffScreen: React.FC<StaffScreenProps> = (props) => {
                 />
 
                 <ThemeText variant="label" style={{ marginBottom: 6, marginTop: 14 }}>
-                  {regTitle.includes('会計年度') ? '4月時点の付与年休数 (日数) (7.5h/日換算)' : '1月時点の付与年休数 (日数) (7.75h/日換算)'}
+                  {regTitle.includes('会計年度') ? '1月時点の付与年休数 (日数) (7.5h/日換算)' : '1月時点の付与年休数 (日数) (7.75h/日換算)'}
                 </ThemeText>
                 <TextInput
                   style={styles.input}

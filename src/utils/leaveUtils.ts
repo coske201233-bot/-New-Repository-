@@ -1,7 +1,8 @@
 /**
  * 年休計算ユーティリティ
- * 通常職員: 1日 = 7.75時間 (1/1起算)
- * 会計年度職員: 1日 = 7.50時間 (4/1起算)
+ * 集計対象期間: 対象年の1月1日〜12月31日（暦年）
+ * 通常職員: 1日 = 7.75時間
+ * 会計年度職員: 1日 = 7.50時間
  */
 
 import { getDayType, normalizeDateStr } from './dateUtils';
@@ -87,32 +88,53 @@ export const formatRemainingLeave = (totalHours: number, positionOrRate?: string
 };
 
 /**
- * 該当する申請の日付が起算期間内（通常職員: 1月1日〜, 会計年度職員: 4月1日〜）に含まれるか判定します
+ * 却下・削除・キャンセル済みの無効なレコードかを判定します
+ */
+const isInvalidLeaveRecord = (r: any): boolean => {
+  if (!r) return true;
+  const st = String(r.status || '').trim().toLowerCase();
+  const detailSt = String(r.details?.status || '').trim().toLowerCase();
+  const invalidList = [
+    'deleted', '削除',
+    'rejected', '却下',
+    'canceled', 'cancelled', 'キャンセル', '取り消し', '申請取消'
+  ];
+  return invalidList.includes(st) || invalidList.includes(detailSt);
+};
+
+/**
+ * 指定された日付が対象年（targetYear）の暦年（YYYY-01-01 〜 YYYY-12-31）に
+ * 厳密に含まれるか判定します。
+ * 翌年1月1日（YYYY+1-01-01）以降および前年12月31日以前のレコードは完全に除外されます。
+ */
+export const isDateInCalendarYear = (
+  dateStr?: string,
+  targetYear: number = new Date().getFullYear()
+): boolean => {
+  if (!dateStr) return false;
+  const normalized = normalizeDateStr(dateStr);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return false;
+
+  const startStr = `${targetYear}-01-01`;
+  const endStr = `${targetYear}-12-31`;
+  return normalized >= startStr && normalized <= endStr;
+};
+
+/**
+ * 該当する申請の日付が対象年（暦年: YYYY-01-01 〜 YYYY-12-31）に含まれるか判定します
+ * ※後方互換のため関数名を維持しつつ、全職員共通で暦年（1月1日〜12月31日）に厳密統一
  */
 export const isLeaveDateInFiscalPeriod = (
   dateStr?: string, 
-  isFiscalYear: boolean = false, 
-  referenceDate: Date = new Date()
+  _isFiscalYear: boolean = false, 
+  referenceDateOrYear: Date | number = new Date()
 ): boolean => {
-  if (!dateStr) return true;
-  
-  const cleanDateStr = dateStr.split('T')[0];
-  const d = new Date(cleanDateStr.replace(/-/g, '/'));
-  if (isNaN(d.getTime())) return true;
-
-  const currentYear = referenceDate.getFullYear();
-  const currentMonth = referenceDate.getMonth() + 1;
-
-  if (isFiscalYear) {
-    // 会計年度職員: 4月1日〜
-    const fiscalStartYear = currentMonth >= 4 ? currentYear : currentYear - 1;
-    const startDate = new Date(fiscalStartYear, 3, 1); // 4月1日
-    return d >= startDate;
-  } else {
-    // 通常職員: 1月1日〜
-    const startDate = new Date(currentYear, 0, 1); // 1月1日
-    return d >= startDate;
-  }
+  const targetYear = typeof referenceDateOrYear === 'number'
+    ? referenceDateOrYear
+    : (referenceDateOrYear instanceof Date && !isNaN(referenceDateOrYear.getTime())
+      ? referenceDateOrYear.getFullYear()
+      : new Date().getFullYear());
+  return isDateInCalendarYear(dateStr, targetYear);
 };
 
 /**
@@ -165,11 +187,13 @@ export const isStaffMatchRequest = (staffOrId: any, request: any): boolean => {
 
 /**
  * 承認された申請リストから消化年休時間数を計算します (カレンダー表示と完全一致する日別優先度解決エンジン)
+ * 集計対象期間: 対象年（targetYear）の YYYY-01-01 〜 YYYY-12-31（暦年）
  */
 export const calculateUsedLeaveHours = (
   requests: any[], 
   staffOrId?: any, 
-  position?: string
+  position?: string,
+  targetYear: number = new Date().getFullYear()
 ): number => {
   if (!Array.isArray(requests) || !staffOrId) return 0;
 
@@ -194,11 +218,11 @@ export const calculateUsedLeaveHours = (
   };
 
   requests.forEach(r => {
-    if (!r || !r.date || r.status === 'rejected' || r.status === 'deleted') return;
-    if (!isLeaveDateInFiscalPeriod(r.date, isFiscalYear)) return;
+    if (!r || !r.date || isInvalidLeaveRecord(r)) return;
+    if (!isDateInCalendarYear(r.date, targetYear)) return;
     if (!isStaffMatchRequest(staffOrId, r)) return;
 
-    const dateKey = String(r.date).substring(0, 10);
+    const dateKey = normalizeDateStr(r.date);
     const existing = dayMap.get(dateKey);
 
     let isBetter = false;
@@ -264,17 +288,19 @@ export const calculateUsedLeaveHours = (
 
 /**
  * ユーザーの残り年休時間数を算出します (UUID優先)
+ * 集計対象期間: 対象年（targetYear）の YYYY-01-01 〜 YYYY-12-31（暦年）
  */
 export const calculateRemainingLeaveHours = (
   initialDays: number = 20, 
   requests: any[], 
   staffOrId?: any,
-  position?: string
+  position?: string,
+  targetYear: number = new Date().getFullYear()
 ): number => {
   const pos = typeof staffOrId === 'object' ? (staffOrId?.position || staffOrId?.role || position) : position;
   const hoursPerDay = getLeaveHoursPerDay(pos);
   const initialTotalHours = (Number(initialDays) || 20) * hoursPerDay;
-  const usedHours = calculateUsedLeaveHours(requests, staffOrId, position);
+  const usedHours = calculateUsedLeaveHours(requests, staffOrId, position, targetYear);
   return initialTotalHours - usedHours;
 };
 
@@ -288,11 +314,12 @@ export interface MandatoryLeaveStatus {
 
 /**
  * 年休5日必修化のカウント＆判定メイン関数（合計時間判定・要年休〇時間表示）
+ * 集計対象期間: 対象年（targetYear）の YYYY-01-01 〜 YYYY-12-31（暦年）
  */
 export const calculateMandatoryLeaveStatus = (
   staff: { id?: string; name?: string; position?: string; role?: string; email?: string },
   requests: any[],
-  referenceYear: number = new Date().getFullYear()
+  targetYear: number = new Date().getFullYear()
 ): MandatoryLeaveStatus => {
   const pos = `${staff.position || ''} ${staff.role || ''}`;
   const isFiscalYear = pos.includes('会計年度');
@@ -320,16 +347,11 @@ export const calculateMandatoryLeaveStatus = (
   };
 
   (requests || []).forEach(r => {
-    if (!r || !r.date || r.status === 'rejected' || r.status === 'deleted') return;
-
-    const dateStr = (r.date || '').split('T')[0];
-    if (!dateStr) return false;
-    const d = new Date(dateStr.replace(/-/g, '/'));
-    if (d.getFullYear() !== referenceYear) return;
-
+    if (!r || !r.date || isInvalidLeaveRecord(r)) return;
+    if (!isDateInCalendarYear(r.date, targetYear)) return;
     if (!isStaffMatchRequest(staff, r)) return;
 
-    const dateKey = dateStr;
+    const dateKey = normalizeDateStr(r.date);
     const existing = dayMap.get(dateKey);
 
     let isBetter = false;
@@ -427,12 +449,13 @@ export interface AnnualLeaveRateResult {
 
 /**
  * 年休取得率（付与年休に対する消化率 %）および取得日数・付与日数を計算します
+ * 集計対象期間: 対象年（targetYear）の YYYY-01-01 〜 YYYY-12-31（暦年）
  * 集計対象は「年休（1.0日）」と「時間休（実時間/所定時間 換算）」のみに限定
  */
 export const calculateAnnualLeaveRate = (
   staff: { id?: string; name?: string; position?: string; role?: string; email?: string; initial_leave_days?: number; initialLeaveDays?: number } | any,
   requests: any[],
-  referenceYear: number = new Date().getFullYear(),
+  targetYear: number = new Date().getFullYear(),
   customInitialDays?: number
 ): AnnualLeaveRateResult => {
   const pos = typeof staff === 'object' ? `${staff?.position || ''} ${staff?.role || ''}` : '';
@@ -483,16 +506,11 @@ export const calculateAnnualLeaveRate = (
   };
 
   (requests || []).forEach(r => {
-    if (!r || !r.date || r.status === 'rejected' || r.status === 'deleted' || r.status === '却下' || r.status === '削除') return;
-
-    const dateStr = (r.date || '').split('T')[0];
-    if (!dateStr) return;
-    const d = new Date(dateStr.replace(/-/g, '/'));
-    if (d.getFullYear() !== referenceYear) return;
-
+    if (!r || !r.date || isInvalidLeaveRecord(r)) return;
+    if (!isDateInCalendarYear(r.date, targetYear)) return;
     if (!isStaffMatchRequest(staff, r)) return;
 
-    const dateKey = dateStr;
+    const dateKey = normalizeDateStr(r.date);
     const existing = dayMap.get(dateKey);
 
     let isBetter = false;

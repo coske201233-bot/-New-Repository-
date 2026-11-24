@@ -201,6 +201,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   // スタッフごとの年休取得率集計一覧（管理者閲覧専用）
   const staffLeaveStatsList = React.useMemo(() => {
     if (!Array.isArray(staffList)) return [];
+    const targetYear = (currentDate || new Date()).getFullYear();
 
     return staffList
       .filter(s => {
@@ -229,8 +230,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         const grantDays = getStaffInitDays();
         const hoursPerDay = getLeaveHoursPerDay(staffPos);
         
-        // 既存の残年休計算
-        const remLeaveHours = calculateRemainingLeaveHours(grantDays, allCalendarData, s, staffPos);
+        // 対象年（1月1日〜12月31日の暦年）の残年休計算
+        const remLeaveHours = calculateRemainingLeaveHours(grantDays, allCalendarData, s, staffPos, targetYear);
         const remLeaveDays = Math.round((remLeaveHours / hoursPerDay) * 10) / 10;
         const formattedRemStr = formatRemainingLeave(remLeaveHours, staffPos);
 
@@ -249,8 +250,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           rateStr = '0.0%';
         }
 
-        // 5日必修化ステータス
-        const mStatus = calculateMandatoryLeaveStatus(s, allCalendarData, (currentDate || new Date()).getFullYear());
+        // 5日必修化ステータス（対象年の1月1日〜12月31日の暦年）
+        const mStatus = calculateMandatoryLeaveStatus(s, allCalendarData, targetYear);
 
         // 消化状況に応じたカラーリング (70%以上=#34d399, 40%以上=#38bdf8, 20%以上=#f59e0b, 20%未満=#f87171)
         let statusColor = '#f87171'; // 遅れ/低進捗（ローズ）
@@ -709,7 +710,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       const html = `
         <html>
           <head>
-            <title>年休取得率・消化状況集計表（${year}年度）</title>
+            <title>年休取得率・消化状況集計表（${year}年）</title>
             <style>
               @page { size: A4 portrait; margin: 10mm; }
               body { font-family: sans-serif; padding: 10px; color: #1e293b; }
@@ -725,7 +726,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             <div class="header">
               <div>
                 <h1 style="margin:0; font-size:18px;">職員 年休取得率・消化状況集計表</h1>
-                <div style="font-size: 12px; color: #64748b; margin-top: 2px;">集計年度: ${year}年度（管理者閲覧専用）</div>
+                <div style="font-size: 12px; color: #64748b; margin-top: 2px;">集計期間: ${year}年1月1日〜${year}年12月31日（管理者閲覧専用）</div>
               </div>
               <div style="font-size: 11px;">印刷日: ${new Date().toLocaleDateString('ja-JP')}</div>
             </div>
@@ -2301,7 +2302,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   <ThemeText variant="h2">職員 年休取得率 集計表</ThemeText>
                 </View>
                 <ThemeText variant="caption" color={COLORS.textSecondary} style={{ marginTop: 2 }}>
-                  {(currentDate || new Date()).getFullYear()}年度（管理者専用・全職員一覧）
+                  {(currentDate || new Date()).getFullYear()}年 1月1日〜12月31日（管理者専用・全職員一覧）
                 </ThemeText>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
